@@ -9,8 +9,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/zyd16888/telegram-message-forward/models"
-	"github.com/zyd16888/telegram-message-forward/plugin/printmsg"
-	"github.com/zyd16888/telegram-message-forward/plugin/wechat"
 )
 
 type MessageHandler interface {
@@ -18,12 +16,14 @@ type MessageHandler interface {
 }
 
 type PluginManager struct {
-	plugins []MessageHandler
+	plugins       []MessageHandler
+	pluginFactory PluginFactory
 }
 
-func NewPluginManager() *PluginManager {
+func NewPluginManager(factory PluginFactory) *PluginManager {
 	return &PluginManager{
-		plugins: make([]MessageHandler, 0),
+		plugins:       make([]MessageHandler, 0),
+		pluginFactory: factory,
 	}
 }
 
@@ -40,8 +40,6 @@ func (pm *PluginManager) HandleMessage(message *types.Message) error {
 	return nil
 }
 
-
-
 func (pm *PluginManager) LoadPluginsFromDB(db *gorm.DB) error {
 	var pluginConfigs []models.PluginConfig
 	if err := db.Find(&pluginConfigs).Error; err != nil {
@@ -56,19 +54,12 @@ func (pm *PluginManager) LoadPluginsFromDB(db *gorm.DB) error {
 				return fmt.Errorf("failed to unmarshal plugin config: %v", err)
 			}
 
-			// 根据插件类型进行初始化
-			switch config.Name {
-			case "printmsg":
-				plugin := printmsg.NewPrintMSGPlugin(configMap)
-				pm.RegisterPlugin(plugin)
-				log.Printf("Successfully loaded plugin: %s", config.Name)
-			case "wechat":
-				plugin := wechat.NewWeChatPlugin(configMap)
-				pm.RegisterPlugin(plugin)
-				log.Printf("Successfully loaded plugin: %s", config.Name)
-			default:
-				return fmt.Errorf("unknown plugin type: %s", config.Name)
+			plugin, err := pm.pluginFactory.CreatePlugin(config.Name, configMap)
+			if err != nil {
+				return err
 			}
+			pm.RegisterPlugin(plugin)
+			log.Printf("Successfully loaded plugin: %s", config.Name)
 		}
 	}
 	return nil

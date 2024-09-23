@@ -10,6 +10,7 @@ import (
 	"github.com/celestix/gotgproto/ext"
 	"github.com/celestix/gotgproto/sessionMaker"
 	"github.com/glebarez/sqlite"
+
 	"github.com/zyd16888/telegram-message-forward/global"
 	"github.com/zyd16888/telegram-message-forward/plugin"
 	"github.com/zyd16888/telegram-message-forward/server"
@@ -20,7 +21,11 @@ func main() {
 	// 全局初始化
 	global.Init()
 
-	pluginManager := plugin.NewPluginManager()
+	// 创建插件工厂
+	pluginFactory := &plugin.DefaultPluginFactory{}
+
+	// 使用工厂创建 PluginManager
+	pluginManager := plugin.NewPluginManager(pluginFactory)
 
 	// 从数据库加载插件配置
 	if err := pluginManager.LoadPluginsFromDB(global.DB); err != nil {
@@ -57,62 +62,6 @@ func main() {
 
 	defer client.Idle()
 }
-
-/*func handleNewMessageOld(ctx *ext.Context, update *ext.Update) error {
-	message := update.EffectiveMessage
-	chat, _ := ctx.GetChat(2161625827) // 检查消息是否来自频道
-	chatJson, _ := json.Marshal(chat)
-	fmt.Println(string(chatJson))
-	fmt.Println("----------------------------------------------------")
-
-	channel, err := ctx.Raw.ChannelsGetFullChannel(
-		ctx, &tg.InputChannel{
-			ChannelID:  2161625827,
-			AccessHash: 3276307730339658348,
-		})
-	if err != nil {
-		fmt.Println("Error marshalling to JSON:", err)
-	}
-	channelJson, _ := json.Marshal(channel)
-	fmt.Println(string(channelJson))
-
-	fmt.Printf("收到消息---------------------------------\n")
-
-	// 打印消息的关键信息
-	if message != nil {
-		jsonData, err := json.MarshalIndent(message, "", "  ")
-		if err != nil {
-			fmt.Println("Error marshalling to JSON:", err)
-		}
-		// 打印 JSON 格式的消息
-		fmt.Println(string(jsonData))
-		fmt.Println("消息 ID:", message.ID)
-		fmt.Println("来自:", message.FromID)
-		fmt.Println("频道 ID:", message.PeerID.String())
-		fmt.Println("消息内容:", message.Message.Message)
-		fmt.Println("消息日期:", message.Date)
-
-		// 如果消息有实体（如加粗、链接等），也可以解析出来
-		if len(message.Entities) > 0 {
-			fmt.Println("消息包含的实体:")
-			for _, entity := range message.Entities {
-				fmt.Printf("- 实体类型: %T\n", entity)
-			}
-		}
-
-		// 如果消息带有媒体内容
-		if message.Media != nil {
-			fmt.Println("媒体内容存在")
-		}
-	} else {
-		fmt.Println("未找到有效的消息")
-	}
-
-	fmt.Println("----------------------------------------------------")
-
-	return nil
-}
-*/
 
 func handleNewMessage(_ *ext.Context, update *ext.Update, pluginManager *plugin.PluginManager) error {
 	message := update.EffectiveMessage
