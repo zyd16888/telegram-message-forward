@@ -1,0 +1,201 @@
+[{
+  "Flags": 17536,
+  "Out": false,
+  "Mentioned": false,
+  "MediaUnread": false,
+  "Silent": false,
+  "Post": true,
+  "FromScheduled": false,
+  "Legacy": false,
+  "EditHide": false,
+  "Pinned": false,
+  "Noforwards": false,
+  "InvertMedia": false,
+  "Flags2": 0,
+  "Offline": false,
+  "ID": 2005231,
+  "FromID": null,
+  "FromBoostsApplied": 0,
+  "PeerID": {
+    "ChannelID": 1375475051
+  },
+  "SavedPeerID": null,
+  "FwdFrom": {
+    "Flags": 0,
+    "Imported": false,
+    "SavedOut": false,
+    "FromID": null,
+    "FromName": "",
+    "Date": 0,
+    "ChannelPost": 0,
+    "PostAuthor": "",
+    "SavedFromPeer": null,
+    "SavedFromMsgID": 0,
+    "SavedFromID": null,
+    "SavedFromName": "",
+    "SavedDate": 0,
+    "PsaType": ""
+  },
+  "ViaBotID": 0,
+  "ViaBusinessBotID": 0,
+  "ReplyTo": null,
+  "Date": 1726737699,
+  "Message": "今晚 9 点半起金山铁路临时停运，10 点半起沪杭高铁限速运行\n@长三角铁路 微博消息，根据 14 号台风 “普拉桑” 路径最新预测情况，为确保铁路运输安全和旅客出行安全，铁路部门计划 9 月 19 日 21 点 30 分起对金山铁路采取临时停运措施，9 月 19 日 22 点 30 分起对沪杭高铁采取限速运行措施。同时，鉴于台风 “普拉桑” 登陆路径变化，对部分线路运输影响逐步减弱，铁路部门计划对 9 月 19 日途经杭深高铁、杭台高铁等线路部分旅客列车陆续恢复开行，更好满足旅客出行需要。",
+  "Media": null,
+  "ReplyMarkup": null,
+  "Entities": [
+    {
+      "Offset": 0,
+      "Length": 31
+    }
+  ],
+  "Views": 1,
+  "Forwards": 0,
+  "Replies": {
+    "Flags": 0,
+    "Comments": false,
+    "Replies": 0,
+    "RepliesPts": 0,
+    "RecentRepliers": null,
+    "ChannelID": 0,
+    "MaxID": 0,
+    "ReadMaxID": 0
+  },
+  "EditDate": 0,
+  "PostAuthor": "",
+  "GroupedID": 0,
+  "Reactions": {
+    "Flags": 0,
+    "Min": false,
+    "CanSeeList": false,
+    "ReactionsAsTags": false,
+    "Results": null,
+    "RecentReactions": null,
+    "TopReactors": null
+  },
+  "RestrictionReason": null,
+  "TTLPeriod": 0,
+  "QuickReplyShortcutID": 0,
+  "Effect": 0,
+  "Factcheck": {
+    "Flags": 0,
+    "NeedCheck": false,
+    "Country": "",
+    "Text": {
+      "Text": "",
+      "Entities": null
+    },
+    "Hash": 0
+  },
+  "ReplyToMessage": null,
+  "Text": "今晚 9 点半起金山铁路临时停运，10 点半起沪杭高铁限速运行\n@长三角铁路 微博消息，根据 14 号台风 “普拉桑” 路径最新预测情况，为确保铁路运输安全和旅客出行安全，铁路部门计划 9 月 19 日 21 点 30 分起对金山铁路采取临时停运措施，9 月 19 日 22 点 30 分起对沪杭高铁采取限速运行措施。同时，鉴于台风 “普拉桑” 登陆路径变化，对部分线路运输影响逐步减弱，铁路部门计划对 9 月 19 日途经杭深高铁、杭台高铁等线路部分旅客列车陆续恢复开行，更好满足旅客出行需要。",
+  "IsService": false,
+  "Action": null
+},
+
+{
+  "Flags": 33572482,
+  "Out": true,
+  "Mentioned": false,
+  "MediaUnread": false,
+  "Silent": false,
+  "Post": true,
+  "FromScheduled": false,
+  "Legacy": false,
+  "EditHide": false,
+  "Pinned": false,
+  "Noforwards": false,
+  "InvertMedia": false,
+  "Flags2": 0,
+  "Offline": false,
+  "ID": 620,
+  "FromID": null,
+  "FromBoostsApplied": 0,
+  "PeerID": {
+    "ChannelID": 2161625827
+  },
+  "SavedPeerID": null,
+  "FwdFrom": {
+    "Flags": 0,
+    "Imported": false,
+    "SavedOut": false,
+    "FromID": null,
+    "FromName": "",
+    "Date": 0,
+    "ChannelPost": 0,
+    "PostAuthor": "",
+    "SavedFromPeer": null,
+    "SavedFromMsgID": 0,
+    "SavedFromID": null,
+    "SavedFromName": "",
+    "SavedDate": 0,
+    "PsaType": ""
+  },
+  "ViaBotID": 0,
+  "ViaBusinessBotID": 0,
+  "ReplyTo": null,
+  "Date": 1726793053,
+  "Message": "https://github.com/go-gost/gost-ui",
+  "Media": {
+    "Flags": 16,
+    "ForceLargeMedia": false,
+    "ForceSmallMedia": false,
+    "Manual": false,
+    "Safe": true,
+    "Webpage": {
+      "Flags": 1,
+      "ID": 7364193029455244292,
+      "URL": "https://github.com/go-gost/gost-ui",
+      "Date": 1726793172
+    }
+  },
+  "ReplyMarkup": null,
+  "Entities": [
+    {
+      "Offset": 0,
+      "Length": 34
+    }
+  ],
+  "Views": 1,
+  "Forwards": 0,
+  "Replies": {
+    "Flags": 0,
+    "Comments": false,
+    "Replies": 0,
+    "RepliesPts": 0,
+    "RecentRepliers": null,
+    "ChannelID": 0,
+    "MaxID": 0,
+    "ReadMaxID": 0
+  },
+  "EditDate": 0,
+  "PostAuthor": "",
+  "GroupedID": 0,
+  "Reactions": {
+    "Flags": 0,
+    "Min": false,
+    "CanSeeList": false,
+    "ReactionsAsTags": false,
+    "Results": null,
+    "RecentReactions": null,
+    "TopReactors": null
+  },
+  "RestrictionReason": null,
+  "TTLPeriod": 86400,
+  "QuickReplyShortcutID": 0,
+  "Effect": 0,
+  "Factcheck": {
+    "Flags": 0,
+    "NeedCheck": false,
+    "Country": "",
+    "Text": {
+      "Text": "",
+      "Entities": null
+    },
+    "Hash": 0
+  },
+  "ReplyToMessage": null,
+  "Text": "https://github.com/go-gost/gost-ui",
+  "IsService": false,
+  "Action": null
+}]

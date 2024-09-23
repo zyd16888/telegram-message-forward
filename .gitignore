@@ -47,7 +47,7 @@ coverage/
 
 # 个人配置文件
 *.config.js
-*.config.json
+config.json
 
 # 其他常见忽略项
 *.bak
