@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 
@@ -11,14 +10,22 @@ import (
 	"github.com/celestix/gotgproto/ext"
 	"github.com/celestix/gotgproto/sessionMaker"
 	"github.com/glebarez/sqlite"
-	"github.com/gotd/td/tg"
 	"github.com/zyd16888/telegram-message-forward/global"
+	"github.com/zyd16888/telegram-message-forward/plugin"
+	"github.com/zyd16888/telegram-message-forward/server"
 )
 
 func main() {
 
 	// 全局初始化
 	global.Init()
+
+	pluginManager := plugin.NewPluginManager()
+
+	// 从数据库加载插件配置
+	if err := pluginManager.LoadPluginsFromDB(global.DB); err != nil {
+		log.Fatalf("Failed to load plugins from database: %v", err)
+	}
 
 	client, err := gotgproto.NewClient(
 		// Get AppID from https://my.telegram.org/apps
@@ -41,12 +48,17 @@ func main() {
 	clientDispatcher := client.Dispatcher
 
 	// 添加一个处理器来监听所有新消息
-	clientDispatcher.AddHandlerToGroup(handlers.NewMessage(filters.Message.Chat(2161625827), handleNewMessage), 1)
+	clientDispatcher.AddHandlerToGroup(
+		handlers.NewMessage(filters.Message.Chat(2161625827), func(ctx *ext.Context, update *ext.Update) error {
+			return handleNewMessage(ctx, update, pluginManager)
+		}), 1)
 
-	client.Idle()
+	go server.InitServer(pluginManager)
+
+	defer client.Idle()
 }
 
-func handleNewMessage(ctx *ext.Context, update *ext.Update) error {
+/*func handleNewMessageOld(ctx *ext.Context, update *ext.Update) error {
 	message := update.EffectiveMessage
 	chat, _ := ctx.GetChat(2161625827) // 检查消息是否来自频道
 	chatJson, _ := json.Marshal(chat)
@@ -98,5 +110,17 @@ func handleNewMessage(ctx *ext.Context, update *ext.Update) error {
 
 	fmt.Println("----------------------------------------------------")
 
+	return nil
+}
+*/
+
+func handleNewMessage(_ *ext.Context, update *ext.Update, pluginManager *plugin.PluginManager) error {
+	message := update.EffectiveMessage
+	if message != nil {
+		// 使用插件系统处理消息
+		if err := pluginManager.HandleMessage(message); err != nil {
+			log.Printf("Error handling message: %v", err)
+		}
+	}
 	return nil
 }
