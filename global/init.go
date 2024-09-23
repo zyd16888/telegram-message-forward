@@ -1,8 +1,8 @@
 package global
 
 import (
-	"telegram-message-forward/config"
-	"telegram-message-forward/database"
+	"github.com/zyd16888/telegram-message-forward/config"
+	"github.com/zyd16888/telegram-message-forward/database"
 )
 
 func Init() {

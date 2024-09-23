@@ -3,9 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/gotd/td/tg"
 	"log"
-	"telegram-message-forward/global"
 
 	"github.com/celestix/gotgproto"
 	"github.com/celestix/gotgproto/dispatcher/handlers"
@@ -13,6 +11,8 @@ import (
 	"github.com/celestix/gotgproto/ext"
 	"github.com/celestix/gotgproto/sessionMaker"
 	"github.com/glebarez/sqlite"
+	"github.com/gotd/td/tg"
+	"github.com/zyd16888/telegram-message-forward/global"
 )
 
 func main() {

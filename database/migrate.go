@@ -1,9 +1,10 @@
 package database
 
 import (
-	"gorm.io/gorm"
 	"log"
-	"telegram-message-forward/models" // 导入你的模型包
+
+	"github.com/zyd16888/telegram-message-forward/models" // 导入你的模型包
+	"gorm.io/gorm"
 )
 
 // MigrateTables 迁移数据库表结构

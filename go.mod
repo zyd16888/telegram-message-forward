@@ -1,4 +1,4 @@
-module telegram-message-forward
+module github.com/zyd16888/telegram-message-forward
 
 go 1.23.0
 
