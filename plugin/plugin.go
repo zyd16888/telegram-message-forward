@@ -41,25 +41,29 @@ func (pm *PluginManager) HandleMessage(message *types.Message) error {
 }
 
 func (pm *PluginManager) LoadPluginsFromDB(db *gorm.DB) error {
-	var pluginConfigs []models.PluginConfig
-	if err := db.Find(&pluginConfigs).Error; err != nil {
+	var chatPluginAssociations []models.ChatPluginAssociation
+	if err := db.Where("enabled = ?", true).Find(&chatPluginAssociations).Error; err != nil {
 		return err
 	}
 
-	for _, config := range pluginConfigs {
-		if config.Enabled {
-			// config.Config 是 JSON 字符串，需要反序列化为配置项目，然后传入对应的插件进行初始化
+	for _, association := range chatPluginAssociations {
+		var pluginConfig models.PluginConfig
+		if err := db.First(&pluginConfig, association.PluginConfigID).Error; err != nil {
+			return fmt.Errorf("failed to find plugin config: %v", err)
+		}
+
+		if pluginConfig.Enabled {
 			var configMap map[string]interface{}
-			if err := json.Unmarshal([]byte(config.Config), &configMap); err != nil {
+			if err := json.Unmarshal([]byte(pluginConfig.Config), &configMap); err != nil {
 				return fmt.Errorf("failed to unmarshal plugin config: %v", err)
 			}
 
-			plugin, err := pm.pluginFactory.CreatePlugin(config.Name, configMap)
+			plugin, err := pm.pluginFactory.CreatePlugin(pluginConfig.Name, configMap)
 			if err != nil {
 				return err
 			}
 			pm.RegisterPlugin(plugin)
-			log.Printf("Successfully loaded plugin: %s", config.Name)
+			log.Printf("Successfully loaded plugin: %s for chat ID: %d", pluginConfig.Name, association.ChatConfigID)
 		}
 	}
 	return nil

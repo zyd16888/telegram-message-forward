@@ -16,6 +16,17 @@ func MigrateTables(db *gorm.DB) {
 		log.Fatalf("failed to migrate tables: %v", err)
 	}
 
+	err = db.AutoMigrate(&models.ChatConfig{})
+	if err != nil {
+		log.Fatalf("failed to migrate tables: %v", err)
+	}
+
+	err = db.AutoMigrate(&models.ChatPluginAssociation{})
+	if err != nil {
+		log.Fatalf("failed to migrate tables: %v", err)
+	}
+
+
 	// 插入测试数据
 	pluginSettings := []models.PluginConfig{
 		{
