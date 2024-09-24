@@ -8,7 +8,6 @@ import (
 	"github.com/zyd16888/telegram-message-forward/global"
 	"github.com/zyd16888/telegram-message-forward/models"
 	"github.com/zyd16888/telegram-message-forward/plugin"
-
 )
 
 var pluginManager *plugin.PluginManager
@@ -154,7 +153,7 @@ func updatePlugin(c *gin.Context) {
 	// 重新加载插件配置
 	pluginFactory := &plugin.DefaultPluginFactory{}
 	pluginManager = plugin.NewPluginManager(pluginFactory)
-	if err := pluginManager.LoadPluginsFromDB(global.DB); err != nil {
+	if err := pluginManager.LoadPluginsFromDB(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

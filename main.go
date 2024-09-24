@@ -28,7 +28,7 @@ func main() {
 	pluginManager := plugin.NewPluginManager(pluginFactory)
 
 	// 从数据库加载插件配置
-	if err := pluginManager.LoadPluginsFromDB(global.DB); err != nil {
+	if err := pluginManager.LoadPluginsFromDB(); err != nil {
 		log.Fatalf("Failed to load plugins from database: %v", err)
 	}
 

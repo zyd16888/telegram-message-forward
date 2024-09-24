@@ -6,8 +6,8 @@ import (
 	"log"
 
 	"github.com/celestix/gotgproto/types"
-	"gorm.io/gorm"
 
+	"github.com/zyd16888/telegram-message-forward/global"
 	"github.com/zyd16888/telegram-message-forward/models"
 )
 
@@ -41,10 +41,10 @@ func (pm *PluginManager) HandleMessage(message *types.Message) error {
 }
 
 // LoadPluginsFromDB 从数据库加载插件配置并初始化插件
-func (pm *PluginManager) LoadPluginsFromDB(db *gorm.DB) error {
+func (pm *PluginManager) LoadPluginsFromDB() error {
 	// 查询所有聊天配置
 	var chatConfigs []models.ChatConfig
-	if err := db.Find(&chatConfigs).Error; err != nil {
+	if err := global.DB.Find(&chatConfigs).Error; err != nil {
 		return fmt.Errorf("查询Chat配置失败: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func (pm *PluginManager) LoadPluginsFromDB(db *gorm.DB) error {
 	for _, chatConfig := range chatConfigs {
 		// 查询该聊天配置下启用的插件关联
 		var associations []models.ChatPluginAssociation
-		if err := db.Where("chat_config_id = ? AND enabled = ?", chatConfig.ID, true).Find(&associations).Error; err != nil {
+		if err := global.DB.Where("chat_config_id = ? AND enabled = ?", chatConfig.ID, true).Find(&associations).Error; err != nil {
 			return fmt.Errorf("查询聊天插件关联失败 %v", err)
 		}
 
@@ -63,7 +63,7 @@ func (pm *PluginManager) LoadPluginsFromDB(db *gorm.DB) error {
 		for _, association := range associations {
 			// 查询插件配置
 			var pluginConfig models.PluginConfig
-			if err := db.First(&pluginConfig, association.PluginConfigID).Error; err != nil {
+			if err := global.DB.First(&pluginConfig, association.PluginConfigID).Error; err != nil {
 				return fmt.Errorf("查询插件配置失败: %v", err)
 			}
 
