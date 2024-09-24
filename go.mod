@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/celestix/gotgproto v1.0.0-beta18
 	github.com/glebarez/sqlite v1.11.0
-	github.com/gotd/td v0.110.1
+	github.com/gotd/td v0.110.1 // indirect
 )
 
 require (
