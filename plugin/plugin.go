@@ -46,24 +46,31 @@ func (pm *PluginManager) LoadPluginsFromDB(db *gorm.DB) error {
 		return err
 	}
 
+	// 遍历所有启用的聊天插件关联
 	for _, association := range chatPluginAssociations {
 		var pluginConfig models.PluginConfig
+		// 根据关联的插件配置ID查找插件配置
 		if err := db.First(&pluginConfig, association.PluginConfigID).Error; err != nil {
-			return fmt.Errorf("failed to find plugin config: %v", err)
+			return fmt.Errorf("查找插件配置失败: %v", err)
 		}
 
+		// 如果插件配置已启用
 		if pluginConfig.Enabled {
 			var configMap map[string]interface{}
+			// 将插件配置的JSON字符串解析为map
 			if err := json.Unmarshal([]byte(pluginConfig.Config), &configMap); err != nil {
-				return fmt.Errorf("failed to unmarshal plugin config: %v", err)
+				return fmt.Errorf("解析插件配置JSON失败: %v", err)
 			}
 
+			// 使用插件工厂创建插件实例
 			plugin, err := pm.pluginFactory.CreatePlugin(pluginConfig.Name, configMap)
 			if err != nil {
 				return err
 			}
+			// 注册插件到插件管理器
 			pm.RegisterPlugin(plugin)
-			log.Printf("Successfully loaded plugin: %s for chat ID: %d", pluginConfig.Name, association.ChatConfigID)
+			// 记录成功加载插件的日志
+			log.Printf("成功加载插件: %s，聊天ID: %d", pluginConfig.Name, association.ChatConfigID)
 		}
 	}
 	return nil
