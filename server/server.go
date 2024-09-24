@@ -41,9 +41,9 @@ func updatePlugin(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
 	// 重新加载插件配置
-	pluginManager = plugin.NewPluginManager()
+	pluginFactory := &plugin.DefaultPluginFactory{}
+	pluginManager = plugin.NewPluginManager(pluginFactory)
 	if err := pluginManager.LoadPluginsFromDB(global.DB); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
