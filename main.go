@@ -53,22 +53,27 @@ func main() {
 	clientDispatcher := client.Dispatcher
 
 	// 添加一个处理器来监听所有新消息
-	clientDispatcher.AddHandlerToGroup(
-		handlers.NewMessage(filters.Message.Chat(2161625827), func(ctx *ext.Context, update *ext.Update) error {
-			return handleNewMessage(ctx, update, pluginManager)
-		}), 1)
+	// clientDispatcher.AddHandlerToGroup(
+	// 	handlers.NewMessage(filters.Message.Chat(2161625827), func(ctx *ext.Context, update *ext.Update) error {
+	// 		return handleNewMessage(ctx, update, pluginManager)
+	// 	}), 1)
+	for chatID := range pluginManager.GetPlugins() {
+		clientDispatcher.AddHandlerToGroup(
+			handlers.NewMessage(filters.Message.Chat(chatID), func(ctx *ext.Context, update *ext.Update) error {
+				return handleNewMessage(ctx, update, pluginManager, chatID)
+			}), 1)
+	}
 
 	go server.InitServer(pluginManager)
 
 	defer client.Idle()
 }
 
-func handleNewMessage(_ *ext.Context, update *ext.Update, pluginManager *plugin.PluginManager) error {
+func handleNewMessage(_ *ext.Context, update *ext.Update, pluginManager *plugin.PluginManager, chatID int64) error {
 	message := update.EffectiveMessage
 	if message != nil {
-		// 使用插件系统处理消息
-		if err := pluginManager.HandleMessage(message); err != nil {
-			log.Printf("Error handling message: %v", err)
+		if err := pluginManager.HandleMessage(chatID, message); err != nil {
+			log.Printf("处理消息失败: %v", err)
 		}
 	}
 	return nil

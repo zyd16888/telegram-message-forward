@@ -16,23 +16,36 @@ type MessageHandler interface {
 }
 
 type PluginManager struct {
-	plugins       []MessageHandler
+	plugins       map[int64][]MessageHandler
 	pluginFactory PluginFactory
 }
 
 func NewPluginManager(factory PluginFactory) *PluginManager {
 	return &PluginManager{
-		plugins:       make([]MessageHandler, 0),
+		plugins:       make(map[int64][]MessageHandler),
 		pluginFactory: factory,
 	}
 }
 
-func (pm *PluginManager) RegisterPlugin(plugin MessageHandler) {
-	pm.plugins = append(pm.plugins, plugin)
+func (pm *PluginManager) GetPlugins() map[int64][]MessageHandler {
+	return pm.plugins
 }
 
-func (pm *PluginManager) HandleMessage(message *types.Message) error {
-	for _, plugin := range pm.plugins {
+// func (pm *PluginManager) RegisterPlugin(chatID int64, plugin MessageHandler) {
+// 	pm.plugins[chatID] = append(pm.plugins[chatID], plugin)
+// }
+
+func (pm *PluginManager) RegisterPlugin(plugins []MessageHandler, plugin MessageHandler) {
+	plugins = append(plugins, plugin)
+}
+
+func (pm *PluginManager) HandleMessage(chatID int64, message *types.Message) error {
+	plugins, ok := pm.plugins[chatID]
+	if !ok {
+		return fmt.Errorf("未找到聊天ID %d 的插件", chatID)
+	}
+
+	for _, plugin := range plugins {
 		if err := plugin.Handle(message); err != nil {
 			return err
 		}
@@ -49,7 +62,7 @@ func (pm *PluginManager) LoadPluginsFromDB() error {
 	}
 
 	// 重置插件列表
-	pm.plugins = make([]MessageHandler, 0)
+	// pm.plugins = make(map[int64][]MessageHandler)
 
 	// 遍历每个聊天配置
 	for _, chatConfig := range chatConfigs {
@@ -58,6 +71,8 @@ func (pm *PluginManager) LoadPluginsFromDB() error {
 		if err := global.DB.Where("chat_config_id = ? AND enabled = ?", chatConfig.ID, true).Find(&associations).Error; err != nil {
 			return fmt.Errorf("查询聊天插件关联失败 %v", err)
 		}
+
+		chatPlugins := make([]MessageHandler, 0)
 
 		// 遍历每个插件关联
 		for _, association := range associations {
@@ -82,11 +97,54 @@ func (pm *PluginManager) LoadPluginsFromDB() error {
 				}
 				
 				// 注册插件
-				pm.RegisterPlugin(plugin)
+				pm.RegisterPlugin(chatPlugins, plugin)
 				log.Printf("成功加载插件: %s，聊天ID: %d", pluginConfig.Name, chatConfig.ChatID)
 			}
 		}
+		pm.plugins[chatConfig.ChatID] = chatPlugins
 	}
+
+	return nil
+}
+
+
+func (pm *PluginManager) LoadPluginsForChat(chatID int64) error {
+
+	var chatConfig models.ChatConfig
+	if err := global.DB.First(&chatConfig, chatID).Error; err != nil {
+		return fmt.Errorf("查询聊天配置失败: %v", err)
+	}
+
+	var associations []models.ChatPluginAssociation
+	if err := global.DB.Where("chat_config_id = ? AND enabled = ?", chatConfig.ID, true).Find(&associations).Error; err != nil {
+		return fmt.Errorf("查询聊天插件关联失败 %v", err)
+	}
+
+	plugins := make([]MessageHandler, 0)
+
+    for _, association := range associations {
+        var pluginConfig models.PluginConfig
+        if err := global.DB.First(&pluginConfig, association.PluginConfigID).Error; err != nil {
+            return fmt.Errorf("查询插件配置失败: %v", err)
+        }
+
+        if pluginConfig.Enabled {
+            var configMap map[string]interface{}
+            if err := json.Unmarshal([]byte(pluginConfig.Config), &configMap); err != nil {
+                return fmt.Errorf("解析插件配置JSON失败: %v", err)
+            }
+
+            plugin, err := pm.pluginFactory.CreatePlugin(pluginConfig.Name, configMap)
+            if err != nil {
+                return err
+            }
+
+            plugins = append(plugins, plugin)
+            log.Printf("成功加载插件: %s，聊天ID: %d", pluginConfig.Name, chatID)
+        }
+    }
+
+    pm.plugins[chatID] = plugins
 
 	return nil
 }

@@ -2,12 +2,14 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/zyd16888/telegram-message-forward/global"
 	"github.com/zyd16888/telegram-message-forward/models"
 	"github.com/zyd16888/telegram-message-forward/plugin"
+
 )
 
 var pluginManager *plugin.PluginManager
@@ -25,6 +27,7 @@ func InitServer(pm *plugin.PluginManager) {
 	r.POST("/chat_plugins", associatePluginToChat)
 	r.DELETE("/chat_plugins/:chatId/:pluginName", disassociatePluginFromChat)
 	r.Run(":8080")
+	r.POST("/reload-plugins/:chatID", reloadPluginsForChat)
 }
 
 func getChats(c *gin.Context) {
@@ -159,4 +162,19 @@ func updatePlugin(c *gin.Context) {
 	}
 
 	c.Status(http.StatusOK)
+}
+
+func reloadPluginsForChat(c *gin.Context) {
+	chatID, err := strconv.ParseInt(c.Param("chatID"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID"})
+		return
+	}
+
+	if err := pluginManager.LoadPluginsForChat(chatID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Plugins reloaded successfully"})
 }
