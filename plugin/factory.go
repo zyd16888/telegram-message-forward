@@ -2,10 +2,8 @@ package plugin
 
 import (
 	"fmt"
-
 	"github.com/zyd16888/telegram-message-forward/plugin/printmsg"
 	"github.com/zyd16888/telegram-message-forward/plugin/wechat"
-
 )
 
 type PluginFactory interface {

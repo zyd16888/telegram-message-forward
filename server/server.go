@@ -9,7 +9,6 @@ import (
 	"github.com/zyd16888/telegram-message-forward/global"
 	"github.com/zyd16888/telegram-message-forward/models"
 	"github.com/zyd16888/telegram-message-forward/plugin"
-
 )
 
 var pluginManager *plugin.PluginManager

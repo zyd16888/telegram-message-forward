@@ -17,7 +17,6 @@ import (
 )
 
 func main() {
-
 	// 全局初始化
 	global.Init()
 
@@ -53,16 +52,7 @@ func main() {
 	clientDispatcher := client.Dispatcher
 
 	// 添加一个处理器来监听所有新消息
-	// clientDispatcher.AddHandlerToGroup(
-	// 	handlers.NewMessage(filters.Message.Chat(2161625827), func(ctx *ext.Context, update *ext.Update) error {
-	// 		return handleNewMessage(ctx, update, pluginManager)
-	// 	}), 1)
-	for chatID := range pluginManager.GetPlugins() {
-		clientDispatcher.AddHandlerToGroup(
-			handlers.NewMessage(filters.Message.Chat(chatID), func(ctx *ext.Context, update *ext.Update) error {
-				return handleNewMessage(ctx, update, pluginManager, chatID)
-			}), 1)
-	}
+	clientDispatcher.AddHandler(handlers.NewMessage(filters.Message.All, pluginManager.CentralHandler))
 
 	go server.InitServer(pluginManager)
 

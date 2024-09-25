@@ -7,6 +7,6 @@ import (
 
 // 定义全局变量
 var (
-	DB     *gorm.DB
-	Config *viper.Viper
+	DB            *gorm.DB
+	Config        *viper.Viper
 )
