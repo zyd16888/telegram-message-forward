@@ -155,7 +155,7 @@ func updatePlugin(c *gin.Context) {
 	// 重新加载插件配置
 	pluginFactory := &plugin.DefaultPluginFactory{}
 	pluginManager = plugin.NewPluginManager(pluginFactory)
-	if err := pluginManager.LoadPluginsFromDB(); err != nil {
+	if err := pluginManager.LoadPlugins(0); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -170,7 +170,7 @@ func reloadPluginsForChat(c *gin.Context) {
 		return
 	}
 
-	if err := pluginManager.LoadPluginsForChat(chatID); err != nil {
+	if err := pluginManager.LoadPlugins(chatID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
