@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"log"
 
 	"gorm.io/gorm"
@@ -26,7 +27,6 @@ func MigrateTables(db *gorm.DB) {
 		log.Fatalf("failed to migrate tables: %v", err)
 	}
 
-
 	// 插入测试数据
 	pluginSettings := []models.PluginConfig{
 		{
@@ -43,8 +43,8 @@ func MigrateTables(db *gorm.DB) {
 
 	for _, plugin := range pluginSettings {
 		var existingPlugin models.PluginConfig
-		if err := db.Where("name = ?", plugin.Name).First(&existingPlugin).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
+		if err := db.Where(models.ChatConfig{Name: plugin.Name}).First(&existingPlugin).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
 				db.Create(&plugin)
 			} else {
 				log.Fatalf("failed to query plugin: %v", err)
@@ -54,4 +54,58 @@ func MigrateTables(db *gorm.DB) {
 		}
 	}
 
+	// 定义聊天设置
+	chatSettings := []models.ChatConfig{
+		{
+			ChatID: 1,
+			Name:   "test",
+		},
+	}
+
+	// 插入或更新聊天设置
+	for _, chat := range chatSettings {
+		var existingChat models.ChatConfig
+		if err := db.Where(models.ChatConfig{
+			ChatID: chat.ChatID,
+		}).First(&existingChat).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				db.Create(&chat)
+			} else {
+				log.Fatalf("查询聊天设置失败: %v", err)
+			}
+		} else {
+			db.Model(&existingChat).Updates(chat)
+		}
+	}
+
+	// 定义聊天插件关联
+	chatAssociations := []models.ChatPluginAssociation{
+		{
+			ChatConfigID:   1,
+			PluginConfigID: 1,
+			Enabled:        true,
+		},
+		{
+			ChatConfigID:   1,
+			PluginConfigID: 2,
+			Enabled:        true,
+		},
+	}
+
+	// 插入或更新聊天插件关联
+	for _, association := range chatAssociations {
+		var existingAssociation models.ChatPluginAssociation
+		if err := db.Where(models.ChatPluginAssociation{
+			ChatConfigID:   association.ChatConfigID,
+			PluginConfigID: association.PluginConfigID,
+		}).First(&existingAssociation).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				db.Create(&association)
+			} else {
+				log.Fatalf("查询聊天插件关联失败: %v", err)
+			}
+		} else {
+			db.Model(&existingAssociation).Updates(association)
+		}
+	}
 }

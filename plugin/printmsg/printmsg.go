@@ -3,14 +3,15 @@ package printmsg
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/celestix/gotgproto/types"
-
 )
 
 type PrintMSGPlugin struct{}
 
 func NewPrintMSGPlugin(configMap map[string]interface{}) *PrintMSGPlugin {
+	log.Printf("配置：%v", configMap)
 	return &PrintMSGPlugin{}
 }
 
