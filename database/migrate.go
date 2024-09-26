@@ -57,7 +57,7 @@ func MigrateTables(db *gorm.DB) {
 	// 定义聊天设置
 	chatSettings := []models.ChatConfig{
 		{
-			ChatID: 1,
+			ChatID: 2161625827,
 			Name:   "test",
 		},
 	}
