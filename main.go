@@ -7,7 +7,6 @@ import (
 	"github.com/celestix/gotgproto"
 	"github.com/celestix/gotgproto/dispatcher/handlers"
 	"github.com/celestix/gotgproto/dispatcher/handlers/filters"
-	"github.com/celestix/gotgproto/ext"
 	"github.com/celestix/gotgproto/sessionMaker"
 	"github.com/glebarez/sqlite"
 
@@ -57,14 +56,4 @@ func main() {
 	go server.InitServer(pluginManager)
 
 	defer client.Idle()
-}
-
-func handleNewMessage(_ *ext.Context, update *ext.Update, pluginManager *plugin.PluginManager, chatID int64) error {
-	message := update.EffectiveMessage
-	if message != nil {
-		if err := pluginManager.HandleMessage(chatID, message); err != nil {
-			log.Printf("处理消息失败: %v", err)
-		}
-	}
-	return nil
 }
