@@ -11,5 +11,5 @@ func Init() {
 
 	DB = database.InitDB(Config.GetString("database"))
 
-	database.MigrateTables(DB)
+	database.MigrateTables(DB, Config)
 }

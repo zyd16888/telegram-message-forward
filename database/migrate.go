@@ -2,15 +2,17 @@ package database
 
 import (
 	"errors"
+	"fmt"
 	"log"
 
+	"github.com/spf13/viper"
 	"gorm.io/gorm"
 
 	"github.com/zyd16888/telegram-message-forward/models"
 )
 
 // MigrateTables 迁移数据库表结构
-func MigrateTables(db *gorm.DB) {
+func MigrateTables(db *gorm.DB, config *viper.Viper) {
 	// 自动迁移模型，确保表结构和模型同步
 	err := db.AutoMigrate(&models.PluginConfig{})
 	if err != nil {
@@ -27,6 +29,11 @@ func MigrateTables(db *gorm.DB) {
 		log.Fatalf("failed to migrate tables: %v", err)
 	}
 
+	wechatConfig := config.GetStringMap("wechat")
+	corpid := wechatConfig["corpid"].(string)
+	corpsecret := wechatConfig["corpsecret"].(string)
+	agentid := wechatConfig["agentid"].(string)
+
 	// 插入测试数据
 	pluginSettings := []models.PluginConfig{
 		{
@@ -37,7 +44,7 @@ func MigrateTables(db *gorm.DB) {
 		{
 			Name:    "wechat",
 			Enabled: true,
-			Config:  `{"apikey": "1234567890"}`,
+			Config:  fmt.Sprintf(`{"corpid": "%s", "corpsecret": "%s", "agentid": "%s"}`, corpid, corpsecret, agentid),
 		},
 	}
 
