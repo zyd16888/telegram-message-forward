@@ -1,4 +1,4 @@
-package wechat
+package wecom
 
 import (
 	"bytes"
@@ -110,7 +110,7 @@ func (w *WeChatPlugin) Handle(message *types.Message) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to send message, status code: %d", resp.StatusCode)
 	} else {
-		fmt.Println("send wechat message success")
+		fmt.Println("send wecom message success")
 	}
 
 	return nil

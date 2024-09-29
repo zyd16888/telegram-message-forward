@@ -2,8 +2,9 @@ package plugin
 
 import (
 	"fmt"
+
 	"github.com/zyd16888/telegram-message-forward/plugin/printmsg"
-	"github.com/zyd16888/telegram-message-forward/plugin/wechat"
+	"github.com/zyd16888/telegram-message-forward/plugin/wecom"
 )
 
 type PluginFactory interface {
@@ -16,8 +17,8 @@ func (f *DefaultPluginFactory) CreatePlugin(name string, configMap map[string]in
 	switch name {
 	case "printmsg":
 		return printmsg.NewPrintMSGPlugin(configMap), nil
-	case "wechat":
-		return wechat.NewWeChatPlugin(configMap), nil
+	case "wecom":
+		return wecom.NewWeChatPlugin(configMap), nil
 	default:
 		return nil, fmt.Errorf("unknown plugin type: %s", name)
 	}

@@ -29,7 +29,7 @@ func MigrateTables(db *gorm.DB, config *viper.Viper) {
 		log.Fatalf("failed to migrate tables: %v", err)
 	}
 
-	wechatConfig := config.GetStringMap("wechat")
+	wechatConfig := config.GetStringMap("wecom_application")
 	corpid := wechatConfig["corpid"].(string)
 	corpsecret := wechatConfig["corpsecret"].(string)
 	agentid := wechatConfig["agentid"].(string)
@@ -42,7 +42,7 @@ func MigrateTables(db *gorm.DB, config *viper.Viper) {
 			Config:  "{}",
 		},
 		{
-			Name:    "wechat",
+			Name:    "wecom",
 			Enabled: true,
 			Config:  fmt.Sprintf(`{"corpid": "%s", "corpsecret": "%s", "agentid": "%s"}`, corpid, corpsecret, agentid),
 		},
