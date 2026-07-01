@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/viper"
 	"gorm.io/gorm"
 
-	"github.com/zyd16888/telegram-message-forward/models"
+	"telegram-message-forward/models"
 )
 
 // MigrateTables 迁移数据库表结构

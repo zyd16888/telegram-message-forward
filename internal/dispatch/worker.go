@@ -5,14 +5,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/zyd16888/telegram-message-forward/internal/config"
-	domaindelivery "github.com/zyd16888/telegram-message-forward/internal/domain/delivery"
-	domainmessage "github.com/zyd16888/telegram-message-forward/internal/domain/message"
-	domainsink "github.com/zyd16888/telegram-message-forward/internal/domain/sink"
-	domaintemplate "github.com/zyd16888/telegram-message-forward/internal/domain/template"
-	pluginsink "github.com/zyd16888/telegram-message-forward/internal/plugin/sink"
-	tmpl "github.com/zyd16888/telegram-message-forward/internal/template"
-	"github.com/zyd16888/telegram-message-forward/internal/infra/clock"
+	"telegram-message-forward/internal/config"
+	domaindelivery "telegram-message-forward/internal/domain/delivery"
+	domainmessage "telegram-message-forward/internal/domain/message"
+	domainsink "telegram-message-forward/internal/domain/sink"
+	domaintemplate "telegram-message-forward/internal/domain/template"
+	pluginsink "telegram-message-forward/internal/plugin/sink"
+	tmpl "telegram-message-forward/internal/template"
+	"telegram-message-forward/internal/infra/clock"
 )
 
 // Worker 从数据库领取投递任务并执行。

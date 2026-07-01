@@ -9,14 +9,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zyd16888/telegram-message-forward/internal/api"
-	"github.com/zyd16888/telegram-message-forward/internal/config"
-	"github.com/zyd16888/telegram-message-forward/internal/infra/crypto"
-	"github.com/zyd16888/telegram-message-forward/internal/infra/logger"
-	"github.com/zyd16888/telegram-message-forward/internal/security"
-	"github.com/zyd16888/telegram-message-forward/internal/storage"
-	storagemigrate "github.com/zyd16888/telegram-message-forward/internal/storage/migrate"
-	"github.com/zyd16888/telegram-message-forward/internal/storage/repository"
+	"telegram-message-forward/internal/api"
+	"telegram-message-forward/internal/config"
+	"telegram-message-forward/internal/infra/crypto"
+	"telegram-message-forward/internal/infra/logger"
+	"telegram-message-forward/internal/security"
+	"telegram-message-forward/internal/storage"
+	storagemigrate "telegram-message-forward/internal/storage/migrate"
+	"telegram-message-forward/internal/storage/repository"
 )
 
 // App 持有已装配的运行时依赖。

@@ -10,9 +10,9 @@ import (
 	"github.com/celestix/gotgproto/sessionMaker"
 	"github.com/glebarez/sqlite"
 
-	"github.com/zyd16888/telegram-message-forward/global"
-	"github.com/zyd16888/telegram-message-forward/plugin"
-	"github.com/zyd16888/telegram-message-forward/server"
+	"telegram-message-forward/global"
+	"telegram-message-forward/plugin"
+	"telegram-message-forward/server"
 )
 
 func main() {

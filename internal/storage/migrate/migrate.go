@@ -9,7 +9,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 
-	"github.com/zyd16888/telegram-message-forward/migrations"
+	"telegram-message-forward/migrations"
 )
 
 // Run 在给定连接上执行 goose 命令（up / down / status / version 等）。

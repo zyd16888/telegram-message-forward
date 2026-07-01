@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zyd16888/telegram-message-forward/global"
-	"github.com/zyd16888/telegram-message-forward/models"
-	"github.com/zyd16888/telegram-message-forward/plugin"
+	"telegram-message-forward/global"
+	"telegram-message-forward/models"
+	"telegram-message-forward/plugin"
 )
 
 var pluginManager *plugin.PluginManager

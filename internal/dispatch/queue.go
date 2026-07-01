@@ -4,9 +4,9 @@ package dispatch
 import (
 	"context"
 
-	domaindelivery "github.com/zyd16888/telegram-message-forward/internal/domain/delivery"
-	domainmessage "github.com/zyd16888/telegram-message-forward/internal/domain/message"
-	"github.com/zyd16888/telegram-message-forward/internal/ruleengine"
+	domaindelivery "telegram-message-forward/internal/domain/delivery"
+	domainmessage "telegram-message-forward/internal/domain/message"
+	"telegram-message-forward/internal/ruleengine"
 )
 
 // Queue 根据规则引擎的匹配结果生成投递任务。

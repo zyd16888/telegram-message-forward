@@ -10,9 +10,9 @@ import (
 
 	"gorm.io/gorm"
 
-	domainaccount "github.com/zyd16888/telegram-message-forward/internal/domain/account"
-	"github.com/zyd16888/telegram-message-forward/internal/infra/crypto"
-	"github.com/zyd16888/telegram-message-forward/internal/storage/model"
+	domainaccount "telegram-message-forward/internal/domain/account"
+	"telegram-message-forward/internal/infra/crypto"
+	"telegram-message-forward/internal/storage/model"
 )
 
 // AccountRepository 是 account.Repository 的 PostgreSQL 实现。

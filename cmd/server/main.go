@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/zyd16888/telegram-message-forward/internal/bootstrap"
-	"github.com/zyd16888/telegram-message-forward/internal/config"
+	"telegram-message-forward/internal/bootstrap"
+	"telegram-message-forward/internal/config"
 )
 
 func main() {

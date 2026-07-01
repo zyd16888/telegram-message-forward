@@ -14,8 +14,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/zyd16888/telegram-message-forward/internal/config"
-	storagemigrate "github.com/zyd16888/telegram-message-forward/internal/storage/migrate"
+	"telegram-message-forward/internal/config"
+	storagemigrate "telegram-message-forward/internal/storage/migrate"
 )
 
 func main() {

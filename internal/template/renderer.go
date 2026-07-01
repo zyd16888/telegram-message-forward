@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"text/template"
 
-	domainmessage "github.com/zyd16888/telegram-message-forward/internal/domain/message"
-	domaintemplate "github.com/zyd16888/telegram-message-forward/internal/domain/template"
+	domainmessage "telegram-message-forward/internal/domain/message"
+	domaintemplate "telegram-message-forward/internal/domain/template"
 )
 
 // Renderer 渲染消息为指定模板格式。

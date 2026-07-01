@@ -9,8 +9,8 @@ import (
 	"github.com/celestix/gotgproto/types"
 	"github.com/gotd/td/tg"
 
-	"github.com/zyd16888/telegram-message-forward/global"
-	"github.com/zyd16888/telegram-message-forward/models"
+	"telegram-message-forward/global"
+	"telegram-message-forward/models"
 )
 
 type MessageHandler interface {

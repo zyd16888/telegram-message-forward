@@ -7,7 +7,7 @@ import (
 	"sort"
 	"sync"
 
-	domainsink "github.com/zyd16888/telegram-message-forward/internal/domain/sink"
+	domainsink "telegram-message-forward/internal/domain/sink"
 )
 
 // Payload 是渲染后待投递的内容。

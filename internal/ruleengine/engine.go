@@ -6,10 +6,10 @@ package ruleengine
 import (
 	"context"
 
-	domainmessage "github.com/zyd16888/telegram-message-forward/internal/domain/message"
-	domainrule "github.com/zyd16888/telegram-message-forward/internal/domain/rule"
-	"github.com/zyd16888/telegram-message-forward/internal/ruleengine/condition"
-	"github.com/zyd16888/telegram-message-forward/internal/ruleengine/processor"
+	domainmessage "telegram-message-forward/internal/domain/message"
+	domainrule "telegram-message-forward/internal/domain/rule"
+	"telegram-message-forward/internal/ruleengine/condition"
+	"telegram-message-forward/internal/ruleengine/processor"
 )
 
 // Match 是一条命中规则及其目标渠道。

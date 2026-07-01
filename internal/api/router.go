@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/zyd16888/telegram-message-forward/internal/api/handler"
-	"github.com/zyd16888/telegram-message-forward/internal/api/middleware"
+	"telegram-message-forward/internal/api/handler"
+	"telegram-message-forward/internal/api/middleware"
 )
 
 // Deps 是路由装配所需的依赖。

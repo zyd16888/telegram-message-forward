@@ -8,7 +8,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/zyd16888/telegram-message-forward/internal/config"
+	"telegram-message-forward/internal/config"
 )
 
 // Open 按配置建立 GORM PostgreSQL 连接。

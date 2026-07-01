@@ -3,8 +3,8 @@ package plugin
 import (
 	"fmt"
 
-	"github.com/zyd16888/telegram-message-forward/plugin/printmsg"
-	"github.com/zyd16888/telegram-message-forward/plugin/wecom"
+	"telegram-message-forward/plugin/printmsg"
+	"telegram-message-forward/plugin/wecom"
 )
 
 type PluginFactory interface {

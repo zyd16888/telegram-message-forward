@@ -7,9 +7,9 @@ import (
 	"sort"
 	"sync"
 
-	domainaccount "github.com/zyd16888/telegram-message-forward/internal/domain/account"
-	domainmessage "github.com/zyd16888/telegram-message-forward/internal/domain/message"
-	domainsource "github.com/zyd16888/telegram-message-forward/internal/domain/source"
+	domainaccount "telegram-message-forward/internal/domain/account"
+	domainmessage "telegram-message-forward/internal/domain/message"
+	domainsource "telegram-message-forward/internal/domain/source"
 )
 
 // Handler 接收标准化后的消息。Source 插件负责把原始消息转成 NormalizedMessage 再回调。

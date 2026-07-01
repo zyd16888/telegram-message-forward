@@ -5,7 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/zyd16888/telegram-message-forward/internal/storage/model"
+	"telegram-message-forward/internal/storage/model"
 )
 
 // APITokenRepository 提供管理 API token 的存储查询。

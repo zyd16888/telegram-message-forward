@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	domainmessage "github.com/zyd16888/telegram-message-forward/internal/domain/message"
+	domainmessage "telegram-message-forward/internal/domain/message"
 )
 
 // Condition 判断一条消息是否满足某个条件。

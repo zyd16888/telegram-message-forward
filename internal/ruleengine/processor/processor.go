@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	domainmessage "github.com/zyd16888/telegram-message-forward/internal/domain/message"
+	domainmessage "telegram-message-forward/internal/domain/message"
 )
 
 // Processor 对消息做轻量处理，可原地修改消息。
