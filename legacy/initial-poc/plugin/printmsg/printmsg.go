@@ -44,6 +44,15 @@ func (p *PrintMSGPlugin) Handle(message *types.Message) error {
 		// 如果消息带有媒体内容
 		if message.Media != nil {
 			fmt.Println("媒体内容存在")
+			s := message.Media.String()
+			fmt.Println(s)
+			// to json
+			jsonData, err := json.MarshalIndent(message.Media, "", "  ")
+			if err != nil {
+				fmt.Println("Error marshalling to JSON:", err)
+			}
+			// 打印 JSON 格式的消息
+			fmt.Println(string(jsonData))
 		}
 	} else {
 		fmt.Println("未找到有效的消息")

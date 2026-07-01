@@ -59,6 +59,13 @@ config.json
 *.sqlite
 *.sqlite3
 *.sql
+# goose migration 是 schema 唯一来源，必须入库
+!migrations/*.sql
+
+# 本地真实配置（含密钥），示例文件除外
+config.yaml
+configs/config.yaml
+config.local.yaml
 
 # 配置文件
 *.session

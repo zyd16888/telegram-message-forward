@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/celestix/gotgproto/types"
+	"github.com/gotd/td/tg"
 )
 
 type AccessTokenResponse struct {
@@ -86,6 +87,18 @@ func (w *WeChatPlugin) Handle(message *types.Message) error {
 	}
 
 	url := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=%s", w.AccessToken)
+
+	if message.Media != nil {
+		switch media := message.Media.(type) {
+		case *tg.MessageMediaPhoto:
+			_, b := media.Photo.AsNotEmpty()
+
+			if !b {
+				return fmt.Errorf("无效的图片信息")
+			}
+
+		}
+	}
 
 	sendMessageReq := SendMessageRequest{
 		AgentID: w.Agentid,

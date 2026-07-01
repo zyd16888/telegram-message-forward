@@ -1,0 +1,29 @@
+# 服务配置示例。复制为 config.yaml 后按需修改。
+# 所有敏感值使用占位符，不要提交真实凭据。
+
+server:
+  addr: ":8080"
+
+log:
+  level: "info"        # debug | info | warn | error
+  format: "text"       # text | json
+
+database:
+  # PostgreSQL DSN。生产环境从环境变量注入，不要写入仓库。
+  dsn: "postgres://forward:CHANGE_ME@127.0.0.1:5432/telegram_forward?sslmode=disable"
+  max_open_conns: 20
+  max_idle_conns: 5
+  # 开发环境可允许启动时自动迁移；生产环境建议关闭，改用 cmd/migrate。
+  auto_migrate: false
+
+security:
+  # 敏感字段加密主密钥（KEK），32 字节。生产环境从环境变量或密钥管理注入。
+  # 环境变量覆盖：TMF_SECURITY_ENCRYPTION_KEY
+  encryption_key: "CHANGE_ME_32_BYTES_LONG_KEY_0000"
+
+dispatch:
+  worker_count: 2
+  poll_interval: "2s"
+  # 领取后超过该时长仍处于 processing 的任务，由 reaper 回退到 retrying。
+  visibility_timeout: "5m"
+  max_attempts: 3

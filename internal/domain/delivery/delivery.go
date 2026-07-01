@@ -1,0 +1,76 @@
+// Package delivery 定义投递任务领域模型与仓储接口。
+package delivery
+
+import (
+	"context"
+	"time"
+)
+
+// Status 是投递任务状态。
+type Status string
+
+const (
+	StatusPending    Status = "pending"
+	StatusProcessing Status = "processing"
+	StatusSuccess    Status = "success"
+	StatusFailed     Status = "failed"
+	StatusRetrying   Status = "retrying"
+	StatusDead       Status = "dead"
+	StatusCancelled  Status = "cancelled"
+)
+
+// AttemptStatus 是单次投递尝试状态。
+type AttemptStatus string
+
+const (
+	AttemptSuccess AttemptStatus = "success"
+	AttemptFailed  AttemptStatus = "failed"
+)
+
+// Task 是一个投递任务。
+type Task struct {
+	ID           int64
+	MessageID    int64
+	RuleID       int64
+	SinkID       int64
+	TemplateID   *int64
+	Status       Status
+	AttemptCount int
+	MaxAttempts  int
+	NextRetryAt  *time.Time
+	LockedAt     *time.Time
+	LockedBy     string
+	LastError    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// Attempt 是一次投递尝试记录，只保存脱敏摘要。
+type Attempt struct {
+	ID              int64
+	DeliveryTaskID  int64
+	AttemptNo       int
+	Status          AttemptStatus
+	RequestSummary  []byte
+	ResponseSummary []byte
+	Error           string
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	CreatedAt       time.Time
+}
+
+// Repository 是投递任务仓储接口。
+type Repository interface {
+	// Create 需按 (message_id, rule_id, sink_id) 幂等。
+	Create(ctx context.Context, t *Task) error
+	// Claim 使用 FOR UPDATE SKIP LOCKED 领取一批可执行任务，置为 processing。
+	Claim(ctx context.Context, workerID string, limit int) ([]*Task, error)
+	// UpdateStatus 更新任务状态与重试信息。
+	UpdateStatus(ctx context.Context, t *Task) error
+	// RecoverStale 将超过可见性超时仍处于 processing 的任务回退到 retrying。
+	RecoverStale(ctx context.Context, olderThan time.Time) (int64, error)
+	// AddAttempt 追加一次投递尝试记录。
+	AddAttempt(ctx context.Context, a *Attempt) error
+	GetByID(ctx context.Context, id int64) (*Task, error)
+	List(ctx context.Context, status Status, limit, offset int) ([]*Task, error)
+}
