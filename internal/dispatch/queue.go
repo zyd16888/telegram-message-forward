@@ -30,12 +30,13 @@ func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessag
 	for _, m := range matches {
 		for _, target := range m.Targets {
 			task := &domaindelivery.Task{
-				MessageID:   msg.ID,
-				RuleID:      m.Rule.ID,
-				SinkID:      target.SinkID,
-				TemplateID:  target.TemplateID,
-				Status:      domaindelivery.StatusPending,
-				MaxAttempts: q.maxAttempts,
+				MessageID:       msg.ID,
+				RuleID:          m.Rule.ID,
+				SinkID:          target.SinkID,
+				TemplateID:      target.TemplateID,
+				Status:          domaindelivery.StatusPending,
+				MaxAttempts:     q.maxAttempts,
+				MessageSnapshot: m.Message,
 			}
 			if err := q.tasks.Create(ctx, task); err != nil {
 				return err

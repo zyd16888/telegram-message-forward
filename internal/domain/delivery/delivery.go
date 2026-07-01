@@ -4,6 +4,8 @@ package delivery
 import (
 	"context"
 	"time"
+
+	domainmessage "telegram-message-forward/internal/domain/message"
 )
 
 // Status 是投递任务状态。
@@ -41,8 +43,10 @@ type Task struct {
 	LockedAt     *time.Time
 	LockedBy     string
 	LastError    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// MessageSnapshot 是规则处理器执行后的消息快照；为空时按 MessageID 读取原始消息。
+	MessageSnapshot *domainmessage.NormalizedMessage
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // Attempt 是一次投递尝试记录，只保存脱敏摘要。
@@ -69,6 +73,8 @@ type Repository interface {
 	UpdateStatus(ctx context.Context, t *Task) error
 	// RecoverStale 将超过可见性超时仍处于 processing 的任务回退到 retrying。
 	RecoverStale(ctx context.Context, olderThan time.Time) (int64, error)
+	// Requeue 将一个终态（dead/failed/cancelled）任务重置为 pending 以手动重试。
+	Requeue(ctx context.Context, id int64) error
 	// AddAttempt 追加一次投递尝试记录。
 	AddAttempt(ctx context.Context, a *Attempt) error
 	GetByID(ctx context.Context, id int64) (*Task, error)

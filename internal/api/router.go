@@ -14,9 +14,17 @@ import (
 type Deps struct {
 	Logger         *slog.Logger
 	TokenValidator middleware.TokenValidator
+
+	Account  *handler.AccountHandler
+	Sink     *handler.SinkHandler
+	Source   *handler.SourceHandler
+	Template *handler.TemplateHandler
+	Rule     *handler.RuleHandler
+	Delivery *handler.DeliveryHandler
+	Token    *handler.TokenHandler
 }
 
-// NewRouter 构建 gin 引擎。
+// NewRouter 构建 gin 引擎并挂载 /api/v1 资源接口。
 func NewRouter(deps Deps) *gin.Engine {
 	r := gin.New()
 	r.Use(middleware.RequestID())
@@ -26,11 +34,71 @@ func NewRouter(deps Deps) *gin.Engine {
 	r.GET("/healthz", health.Health)
 
 	// 管理 API 需要 token 鉴权。
-	api := r.Group("/api/v1")
-	api.Use(middleware.Auth(deps.TokenValidator))
+	v1 := r.Group("/api/v1")
+	v1.Use(middleware.Auth(deps.TokenValidator))
 	{
-		// TODO: 挂载 accounts / sources / sinks / rules / deliveries handler。
-		_ = api
+		accounts := v1.Group("/accounts")
+		{
+			accounts.GET("", deps.Account.List)
+			accounts.POST("", deps.Account.Create)
+			accounts.GET("/:id", deps.Account.Get)
+			accounts.PUT("/:id", deps.Account.Update)
+			accounts.DELETE("/:id", deps.Account.Delete)
+		}
+
+		sinks := v1.Group("/sinks")
+		{
+			sinks.GET("", deps.Sink.List)
+			sinks.GET("/types", deps.Sink.Types)
+			sinks.POST("", deps.Sink.Create)
+			sinks.GET("/:id", deps.Sink.Get)
+			sinks.PUT("/:id", deps.Sink.Update)
+			sinks.DELETE("/:id", deps.Sink.Delete)
+		}
+
+		sources := v1.Group("/sources")
+		{
+			sources.GET("", deps.Source.List)
+			sources.POST("", deps.Source.Create)
+			sources.POST("/sync", deps.Source.Sync)
+			sources.GET("/:id", deps.Source.Get)
+			sources.PUT("/:id", deps.Source.Update)
+			sources.DELETE("/:id", deps.Source.Delete)
+			sources.POST("/:id/start", deps.Source.Start)
+			sources.POST("/:id/stop", deps.Source.Stop)
+		}
+
+		templates := v1.Group("/templates")
+		{
+			templates.GET("", deps.Template.List)
+			templates.POST("", deps.Template.Create)
+			templates.GET("/:id", deps.Template.Get)
+			templates.PUT("/:id", deps.Template.Update)
+			templates.DELETE("/:id", deps.Template.Delete)
+		}
+
+		rules := v1.Group("/rules")
+		{
+			rules.GET("", deps.Rule.List)
+			rules.POST("", deps.Rule.Create)
+			rules.GET("/:id", deps.Rule.Get)
+			rules.PUT("/:id", deps.Rule.Update)
+			rules.DELETE("/:id", deps.Rule.Delete)
+		}
+
+		deliveries := v1.Group("/deliveries")
+		{
+			deliveries.GET("", deps.Delivery.List)
+			deliveries.GET("/:id", deps.Delivery.Get)
+			deliveries.POST("/:id/retry", deps.Delivery.Retry)
+		}
+
+		tokens := v1.Group("/tokens")
+		{
+			tokens.GET("", deps.Token.List)
+			tokens.POST("", deps.Token.Create)
+			tokens.DELETE("/:id", deps.Token.Revoke)
+		}
 	}
 
 	return r

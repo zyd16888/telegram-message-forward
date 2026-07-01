@@ -36,6 +36,7 @@ type Repository interface {
 	Create(ctx context.Context, s *Source) error
 	Update(ctx context.Context, s *Source) error
 	GetByID(ctx context.Context, id int64) (*Source, error)
+	List(ctx context.Context) ([]*Source, error)
 	ListByAccount(ctx context.Context, accountID int64) ([]*Source, error)
 	ListEnabled(ctx context.Context) ([]*Source, error)
 	Delete(ctx context.Context, id int64) error

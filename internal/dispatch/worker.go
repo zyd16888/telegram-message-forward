@@ -10,9 +10,9 @@ import (
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domaintemplate "telegram-message-forward/internal/domain/template"
+	"telegram-message-forward/internal/infra/clock"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
 	tmpl "telegram-message-forward/internal/template"
-	"telegram-message-forward/internal/infra/clock"
 )
 
 // Worker 从数据库领取投递任务并执行。
@@ -61,6 +61,11 @@ func (w *Worker) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// Tick 执行一次僵尸回收、领取与处理，供测试或外部一次性调度触发。
+func (w *Worker) Tick(ctx context.Context) error {
+	return w.tick(ctx)
 }
 
 func (w *Worker) tick(ctx context.Context) error {
@@ -113,9 +118,13 @@ func (w *Worker) process(ctx context.Context, task *domaindelivery.Task) {
 
 // deliver 渲染并投递单个任务。
 func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*pluginsink.Result, error) {
-	msg, err := w.messages.GetByID(ctx, task.MessageID)
-	if err != nil {
-		return nil, err
+	msg := task.MessageSnapshot
+	if msg == nil {
+		var err error
+		msg, err = w.messages.GetByID(ctx, task.MessageID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s, err := w.sinks.GetByID(ctx, task.SinkID)
 	if err != nil {
@@ -134,6 +143,12 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 	if err != nil {
 		return nil, err
 	}
+	if !supportsFormat(s.Capabilities, rendered.Format) {
+		return &pluginsink.Result{
+			Success: false,
+			Error:   "模板格式 " + string(rendered.Format) + " 不被渠道 " + s.Type + " 支持",
+		}, nil
+	}
 
 	plugin, err := pluginsink.New(s.Type)
 	if err != nil {
@@ -141,6 +156,19 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 	}
 	payload := pluginsink.Payload{Format: string(rendered.Format), Text: rendered.Text}
 	return plugin.Send(ctx, s, payload, pluginsink.Options{})
+}
+
+func supportsFormat(c domainsink.Capabilities, f domaintemplate.Format) bool {
+	switch f {
+	case domaintemplate.FormatText:
+		return c.SupportsText
+	case domaintemplate.FormatMarkdown:
+		return c.SupportsMarkdown
+	case domaintemplate.FormatHTML:
+		return c.SupportsHTML
+	default:
+		return false
+	}
 }
 
 // applyRetry 根据剩余次数决定进入 retrying 还是 dead。

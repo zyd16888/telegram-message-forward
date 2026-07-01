@@ -1,0 +1,134 @@
+package repository
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
+
+	domainsink "telegram-message-forward/internal/domain/sink"
+	"telegram-message-forward/internal/infra/crypto"
+	"telegram-message-forward/internal/storage/model"
+)
+
+// SinkRepository 是 sink.Repository 的 PostgreSQL 实现。secret 加密落库。
+type SinkRepository struct {
+	db     *gorm.DB
+	cipher *crypto.Cipher
+}
+
+// NewSinkRepository 创建渠道仓储。
+func NewSinkRepository(db *gorm.DB, cipher *crypto.Cipher) *SinkRepository {
+	return &SinkRepository{db: db, cipher: cipher}
+}
+
+var _ domainsink.Repository = (*SinkRepository)(nil)
+
+// Create 插入渠道，secret 加密。
+func (r *SinkRepository) Create(ctx context.Context, s *domainsink.Sink) error {
+	m, err := r.toModel(s)
+	if err != nil {
+		return err
+	}
+	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		return err
+	}
+	s.ID = m.ID
+	return nil
+}
+
+// Update 更新渠道。
+func (r *SinkRepository) Update(ctx context.Context, s *domainsink.Sink) error {
+	m, err := r.toModel(s)
+	if err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Save(m).Error
+}
+
+// GetByID 按 id 查询渠道。
+func (r *SinkRepository) GetByID(ctx context.Context, id int64) (*domainsink.Sink, error) {
+	var m model.Sink
+	if err := r.db.WithContext(ctx).First(&m, id).Error; err != nil {
+		return nil, err
+	}
+	return r.toDomain(&m)
+}
+
+// List 返回全部渠道。
+func (r *SinkRepository) List(ctx context.Context) ([]*domainsink.Sink, error) {
+	var ms []model.Sink
+	if err := r.db.WithContext(ctx).Order("id").Find(&ms).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domainsink.Sink, 0, len(ms))
+	for i := range ms {
+		s, err := r.toDomain(&ms[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// Delete 删除渠道。
+func (r *SinkRepository) Delete(ctx context.Context, id int64) error {
+	return r.db.WithContext(ctx).Delete(&model.Sink{}, id).Error
+}
+
+func (r *SinkRepository) toModel(s *domainsink.Sink) (*model.Sink, error) {
+	cfg, err := marshalJSONMap(s.Config)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 sink config 失败: %w", err)
+	}
+	secretEnc, err := r.cipher.Encrypt(s.Secret)
+	if err != nil {
+		return nil, fmt.Errorf("加密 sink secret 失败: %w", err)
+	}
+	caps, err := json.Marshal(s.Capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 sink capabilities 失败: %w", err)
+	}
+	return &model.Sink{
+		ID:              s.ID,
+		Type:            s.Type,
+		Name:            s.Name,
+		Enabled:         s.Enabled,
+		Config:          cfg,
+		SecretEncrypted: secretEnc,
+		Capabilities:    datatypes.JSON(caps),
+		CreatedAt:       s.CreatedAt,
+		UpdatedAt:       s.UpdatedAt,
+	}, nil
+}
+
+func (r *SinkRepository) toDomain(m *model.Sink) (*domainsink.Sink, error) {
+	cfg, err := unmarshalJSONMap(m.Config)
+	if err != nil {
+		return nil, fmt.Errorf("解析 sink config 失败: %w", err)
+	}
+	secret, err := r.cipher.Decrypt(m.SecretEncrypted)
+	if err != nil {
+		return nil, fmt.Errorf("解密 sink secret 失败: %w", err)
+	}
+	var caps domainsink.Capabilities
+	if len(m.Capabilities) > 0 {
+		if err := json.Unmarshal(m.Capabilities, &caps); err != nil {
+			return nil, fmt.Errorf("解析 sink capabilities 失败: %w", err)
+		}
+	}
+	return &domainsink.Sink{
+		ID:           m.ID,
+		Type:         m.Type,
+		Name:         m.Name,
+		Enabled:      m.Enabled,
+		Config:       cfg,
+		Secret:       secret,
+		Capabilities: caps,
+		CreatedAt:    m.CreatedAt,
+		UpdatedAt:    m.UpdatedAt,
+	}, nil
+}

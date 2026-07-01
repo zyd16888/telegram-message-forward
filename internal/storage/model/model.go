@@ -12,18 +12,18 @@ import (
 
 // Account 对应 accounts 表。
 type Account struct {
-	ID                 int64 `gorm:"primaryKey"`
-	Name               string
-	PhoneNumber        string
-	AppID              int
-	AppHashEncrypted   []byte
-	SessionEncrypted   []byte
-	ProxyConfig        datatypes.JSON
-	Status             string
-	LastLoginAt        *time.Time
-	LastError          string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID               int64 `gorm:"primaryKey"`
+	Name             string
+	PhoneNumber      string
+	AppID            int
+	AppHashEncrypted []byte
+	SessionEncrypted []byte
+	ProxyConfig      datatypes.JSON
+	Status           string
+	LastLoginAt      *time.Time
+	LastError        string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // TableName 指定表名。
@@ -145,20 +145,21 @@ func (Message) TableName() string { return "messages" }
 
 // DeliveryTask 对应 delivery_tasks 表。
 type DeliveryTask struct {
-	ID           int64 `gorm:"primaryKey"`
-	MessageID    int64
-	RuleID       int64
-	SinkID       int64
-	TemplateID   *int64
-	Status       string
-	AttemptCount int
-	MaxAttempts  int
-	NextRetryAt  *time.Time
-	LockedAt     *time.Time
-	LockedBy     string
-	LastError    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID              int64 `gorm:"primaryKey"`
+	MessageID       int64
+	RuleID          int64
+	SinkID          int64
+	TemplateID      *int64
+	Status          string
+	AttemptCount    int
+	MaxAttempts     int
+	NextRetryAt     *time.Time
+	LockedAt        *time.Time
+	LockedBy        string
+	LastError       string
+	MessageSnapshot datatypes.JSON
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (DeliveryTask) TableName() string { return "delivery_tasks" }
