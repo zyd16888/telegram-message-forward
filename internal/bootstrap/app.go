@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"gorm.io/gorm"
-
 	"github.com/zyd16888/telegram-message-forward/internal/api"
 	"github.com/zyd16888/telegram-message-forward/internal/config"
 	"github.com/zyd16888/telegram-message-forward/internal/infra/crypto"
@@ -18,14 +16,13 @@ import (
 	"github.com/zyd16888/telegram-message-forward/internal/security"
 	"github.com/zyd16888/telegram-message-forward/internal/storage"
 	storagemigrate "github.com/zyd16888/telegram-message-forward/internal/storage/migrate"
-	"github.com/zyd16888/telegram-message-forward/internal/storage/model"
+	"github.com/zyd16888/telegram-message-forward/internal/storage/repository"
 )
 
 // App 持有已装配的运行时依赖。
 type App struct {
 	cfg    *config.Config
 	log    *slog.Logger
-	db     *gorm.DB
 	server *http.Server
 }
 
@@ -54,13 +51,10 @@ func Build(cfg *config.Config) (*App, error) {
 		log.Info("数据库自动迁移完成")
 	}
 
+	apiTokens := repository.NewAPITokenRepository(db)
 	validator := security.TokenValidator{
 		Lookup: func(hash string) (bool, error) {
-			var count int64
-			err := db.Model(&model.APIToken{}).
-				Where("token_hash = ? AND revoked_at IS NULL", hash).
-				Count(&count).Error
-			return count > 0, err
+			return apiTokens.ExistsActiveHash(context.Background(), hash)
 		},
 	}
 
@@ -75,7 +69,7 @@ func Build(cfg *config.Config) (*App, error) {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	return &App{cfg: cfg, log: log, db: db, server: server}, nil
+	return &App{cfg: cfg, log: log, server: server}, nil
 }
 
 // Run 启动 HTTP 服务，阻塞直到 ctx 取消后优雅关闭。
