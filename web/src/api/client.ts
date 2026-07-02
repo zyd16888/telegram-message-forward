@@ -98,6 +98,23 @@ export const accountsApi = {
       http.get<ApiItem<LoginFlow | null>>(`/accounts/${id}/login/status`).then((r) => r.data.data),
     cancel: (id: number, flowId: string) =>
       http.post(`/accounts/${id}/login/cancel`, { flow_id: flowId }),
+    // 扫码登录。
+    qr: {
+      start: (id: number) =>
+        http.post<ApiItem<LoginFlow>>(`/accounts/${id}/login/qr/start`).then((r) => r.data.data),
+      status: (id: number, flowId: string) =>
+        http
+          .get<ApiItem<LoginFlow | null>>(`/accounts/${id}/login/qr/status`, {
+            params: { flow_id: flowId },
+          })
+          .then((r) => r.data.data),
+      refresh: (id: number, flowId: string) =>
+        http
+          .post<ApiItem<LoginFlow>>(`/accounts/${id}/login/qr/refresh`, { flow_id: flowId })
+          .then((r) => r.data.data),
+      cancel: (id: number, flowId: string) =>
+        http.post(`/accounts/${id}/login/qr/cancel`, { flow_id: flowId }),
+    },
   },
 }
 

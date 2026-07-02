@@ -419,6 +419,9 @@ type TokenCreatedDTO struct {
 // --- Telegram 登录 flow ---
 
 // LoginFlowDTO 是登录 flow 状态响应；不包含 phone_code_hash、qr_token 等敏感字段。
+//
+// QRURL 仅在扫码等待时即时构造用于渲染二维码，不落库、不建议前端持久化；
+// 原始 qr_token 不出现在响应中。
 type LoginFlowDTO struct {
 	FlowID      string     `json:"flow_id"`
 	AccountID   int64      `json:"account_id"`
@@ -426,22 +429,30 @@ type LoginFlowDTO struct {
 	Status      string     `json:"status"`
 	CurrentStep string     `json:"current_step"`
 	ExpiresAt   time.Time  `json:"expires_at"`
+	QRURL       string     `json:"qr_url,omitempty"`
+	QRExpiresAt *time.Time `json:"qr_expires_at,omitempty"`
 	LastError   string     `json:"last_error,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 // NewLoginFlowDTO 从 domain flow 构造 DTO（脱敏）。
 func NewLoginFlowDTO(f *domainloginflow.Flow) LoginFlowDTO {
-	return LoginFlowDTO{
+	d := LoginFlowDTO{
 		FlowID:      f.FlowID,
 		AccountID:   f.AccountID,
 		Method:      string(f.Method),
 		Status:      string(f.Status),
 		CurrentStep: f.CurrentStep,
 		ExpiresAt:   f.ExpiresAt,
+		QRURL:       f.QRURL,
 		LastError:   f.LastError,
 		CompletedAt: f.CompletedAt,
 	}
+	if !f.QRTokenExpiresAt.IsZero() {
+		exp := f.QRTokenExpiresAt
+		d.QRExpiresAt = &exp
+	}
+	return d
 }
 
 // LoginCodeRequest 是提交验证码请求。

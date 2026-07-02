@@ -172,7 +172,8 @@ func Build(cfg *config.Config) (*App, error) {
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)
 	tokenSvc := apptoken.NewService(apiTokens)
 	authSvc := appauth.NewService(apiTokens, tokenSvc, cfg.Security.AuthEnabled)
-	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, infratelegram.LoginFlowService{}, clk, log)
+	tgLoginRunner := infratelegram.LoginFlowService{}
+	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, tgLoginRunner, tgLoginRunner, clk, log)
 
 	router := api.NewRouter(api.Deps{
 		Logger:         log,

@@ -147,6 +147,8 @@ export interface LoginFlow {
   status: string
   current_step: string
   expires_at: string
+  qr_url?: string
+  qr_expires_at?: string
   last_error?: string
   completed_at?: string
 }

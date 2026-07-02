@@ -69,6 +69,15 @@ func NewRouter(deps Deps) *gin.Engine {
 				login.POST("/password", deps.AccountLogin.Password)
 				login.GET("/status", deps.AccountLogin.Status)
 				login.POST("/cancel", deps.AccountLogin.Cancel)
+
+				// 扫码登录。
+				qr := login.Group("/qr")
+				{
+					qr.POST("/start", deps.AccountLogin.QRStart)
+					qr.GET("/status", deps.AccountLogin.QRStatus)
+					qr.POST("/refresh", deps.AccountLogin.QRRefresh)
+					qr.POST("/cancel", deps.AccountLogin.QRCancel)
+				}
 			}
 		}
 

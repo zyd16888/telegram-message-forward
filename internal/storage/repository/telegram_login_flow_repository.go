@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -12,6 +13,12 @@ import (
 	"telegram-message-forward/internal/infra/crypto"
 	"telegram-message-forward/internal/storage/model"
 )
+
+// qrTokenBlob 是 qr_token_encrypted 加密前的结构，把 token 与其短过期时间一并保存。
+type qrTokenBlob struct {
+	Token       []byte `json:"token"`
+	ExpiresUnix int64  `json:"expires_unix"`
+}
 
 // TelegramLoginFlowRepository 是 loginflow.Repository 的 PostgreSQL 实现。
 //
@@ -106,9 +113,17 @@ func (r *TelegramLoginFlowRepository) toModel(f *domainloginflow.Flow) (*model.T
 		}
 		hashEnc = enc
 	}
-	qrEnc, err := r.cipher.Encrypt(f.QRToken)
-	if err != nil {
-		return nil, fmt.Errorf("加密 qr_token 失败: %w", err)
+	var qrEnc []byte
+	if len(f.QRToken) > 0 {
+		blob, err := json.Marshal(qrTokenBlob{Token: f.QRToken, ExpiresUnix: f.QRTokenExpiresAt.Unix()})
+		if err != nil {
+			return nil, fmt.Errorf("序列化 qr_token 失败: %w", err)
+		}
+		enc, err := r.cipher.Encrypt(blob)
+		if err != nil {
+			return nil, fmt.Errorf("加密 qr_token 失败: %w", err)
+		}
+		qrEnc = enc
 	}
 	return &model.TelegramLoginFlow{
 		ID:                     f.ID,
@@ -137,28 +152,37 @@ func (r *TelegramLoginFlowRepository) toDomain(m *model.TelegramLoginFlow) (*dom
 		}
 		hash = string(dec)
 	}
-	var qr []byte
+	var qrToken []byte
+	var qrExpires time.Time
 	if len(m.QRTokenEncrypted) > 0 {
 		dec, err := r.cipher.Decrypt(m.QRTokenEncrypted)
 		if err != nil {
 			return nil, fmt.Errorf("解密 qr_token 失败: %w", err)
 		}
-		qr = dec
+		var blob qrTokenBlob
+		if err := json.Unmarshal(dec, &blob); err != nil {
+			return nil, fmt.Errorf("解析 qr_token 失败: %w", err)
+		}
+		qrToken = blob.Token
+		if blob.ExpiresUnix > 0 {
+			qrExpires = time.Unix(blob.ExpiresUnix, 0)
+		}
 	}
 	return &domainloginflow.Flow{
-		ID:            m.ID,
-		FlowID:        m.FlowID,
-		AccountID:     m.AccountID,
-		Method:        domainloginflow.Method(m.Method),
-		Status:        domainloginflow.Status(m.Status),
-		CurrentStep:   m.CurrentStep,
-		PhoneCodeHash: hash,
-		QRToken:       qr,
-		DCID:          m.DCID,
-		ExpiresAt:     m.ExpiresAt,
-		LastError:     m.LastError,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
-		CompletedAt:   m.CompletedAt,
+		ID:               m.ID,
+		FlowID:           m.FlowID,
+		AccountID:        m.AccountID,
+		Method:           domainloginflow.Method(m.Method),
+		Status:           domainloginflow.Status(m.Status),
+		CurrentStep:      m.CurrentStep,
+		PhoneCodeHash:    hash,
+		QRToken:          qrToken,
+		QRTokenExpiresAt: qrExpires,
+		DCID:             m.DCID,
+		ExpiresAt:        m.ExpiresAt,
+		LastError:        m.LastError,
+		CreatedAt:        m.CreatedAt,
+		UpdatedAt:        m.UpdatedAt,
+		CompletedAt:      m.CompletedAt,
 	}, nil
 }

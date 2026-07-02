@@ -57,13 +57,18 @@ type Flow struct {
 	Status        Status
 	CurrentStep   string
 	PhoneCodeHash string
-	QRToken       []byte
-	DCID          int
-	ExpiresAt     time.Time
-	LastError     string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	CompletedAt   *time.Time
+	// QRToken 是 QR 登录 token 明文（敏感），存储层加密。
+	QRToken []byte
+	// QRTokenExpiresAt 是 QR token 的短过期时间，与 token 一并加密存储。
+	QRTokenExpiresAt time.Time
+	// QRURL 是由 QRToken 派生的 tg://login URL；仅在响应中即时构造，不落库、不持久化。
+	QRURL     string
+	DCID      int
+	ExpiresAt time.Time
+	LastError string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	CompletedAt *time.Time
 }
 
 // Repository 是登录 flow 仓储接口。

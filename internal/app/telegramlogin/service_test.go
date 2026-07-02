@@ -146,7 +146,7 @@ func setup(t *testing.T, runner *fakeRunner) (*Service, *fakeAccountRepo, *fakeF
 	clk := &fakeClock{t: time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)}
 	acc := &domainaccount.Account{Name: "a", PhoneNumber: "+8613800000000", AppID: 1, AppHash: "h", Status: domainaccount.StatusInactive}
 	_ = accounts.Create(context.Background(), acc)
-	svc := NewService(accounts, flows, runner, clk, nil)
+	svc := NewService(accounts, flows, runner, nil, clk, nil)
 	return svc, accounts, flows, clk, acc.ID
 }
 
