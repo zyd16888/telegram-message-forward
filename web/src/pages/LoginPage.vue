@@ -97,7 +97,7 @@ async function doBootstrap() {
 
         <!-- 首次初始化 -->
         <div v-else-if="mode === 'bootstrap'">
-          <n-alert type="info" title="首次使用：创建管理凭证">
+          <n-alert type="info" title="首次使用：创建管理员">
             系统尚无管理员。创建后即可用用户名和密码登录后台。
           </n-alert>
           <n-space vertical class="mt">

@@ -24,7 +24,7 @@ func NewAuthHandler(svc *appauth.Service) *AuthHandler {
 	return &AuthHandler{svc: svc}
 }
 
-// BootstrapStatus GET /auth/bootstrap — 返回是否可初始化首个管理凭证。
+// BootstrapStatus GET /auth/bootstrap — 返回是否可初始化首个管理员。
 func (h *AuthHandler) BootstrapStatus(c *gin.Context) {
 	status, err := h.svc.BootstrapStatus(c.Request.Context())
 	if err != nil {
@@ -37,7 +37,7 @@ func (h *AuthHandler) BootstrapStatus(c *gin.Context) {
 	}})
 }
 
-// Bootstrap POST /auth/bootstrap — 创建首个管理凭证，明文仅此一次返回。
+// Bootstrap POST /auth/bootstrap — 创建首个管理员并返回浏览器会话。
 func (h *AuthHandler) Bootstrap(c *gin.Context) {
 	var req dto.BootstrapRequest
 	if !bindJSON(c, &req) {

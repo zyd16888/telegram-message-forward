@@ -46,7 +46,7 @@ export const useAuthStore = defineStore('auth', {
       this.saveToken(res.token)
       await this.fetchMe()
     },
-    // 创建首个管理凭证，成功后保存明文并刷新身份。
+    // 创建首个管理员，成功后保存会话 token 并刷新身份。
     async bootstrap(username: string, password: string) {
       const created = await authApi.bootstrapAdmin(username, password)
       this.saveToken(created.token)

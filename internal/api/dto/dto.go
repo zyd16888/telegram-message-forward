@@ -556,7 +556,7 @@ type BootstrapStatusDTO struct {
 	CanBootstrap bool `json:"can_bootstrap"`
 }
 
-// BootstrapRequest 是创建首个管理凭证请求。
+// BootstrapRequest 是创建首个管理员请求。
 type BootstrapRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password" binding:"required"`
