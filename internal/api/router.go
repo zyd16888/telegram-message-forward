@@ -16,16 +16,18 @@ type Deps struct {
 	TokenValidator middleware.TokenValidator
 	// AuthEnabled 为 false 时 /api/v1 不挂 Auth 中间件（开发免鉴权）。
 	AuthEnabled bool
+	// WebDir 为前端构建产物目录；为空时不托管前端静态文件。
+	WebDir string
 
 	Auth         *handler.AuthHandler
 	Account      *handler.AccountHandler
 	AccountLogin *handler.AccountLoginHandler
 	Sink         *handler.SinkHandler
-	Source   *handler.SourceHandler
-	Template *handler.TemplateHandler
-	Rule     *handler.RuleHandler
-	Delivery *handler.DeliveryHandler
-	Token    *handler.TokenHandler
+	Source       *handler.SourceHandler
+	Template     *handler.TemplateHandler
+	Rule         *handler.RuleHandler
+	Delivery     *handler.DeliveryHandler
+	Token        *handler.TokenHandler
 }
 
 // NewRouter 构建 gin 引擎并挂载 /api/v1 资源接口。
@@ -135,6 +137,8 @@ func NewRouter(deps Deps) *gin.Engine {
 			tokens.DELETE("/:id", deps.Token.Revoke)
 		}
 	}
+
+	mountWebStatic(r, deps.WebDir, deps.Logger)
 
 	return r
 }

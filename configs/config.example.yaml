@@ -3,6 +3,9 @@
 
 server:
   addr: ":8080"
+  # 前端构建产物目录。运行 npm run build 后，后端会在同一端口托管该目录。
+  # 为空或目录不存在时，仅启动后端 API。
+  web_dir: "web/dist"
 
 log:
   level: "info"        # debug | info | warn | error

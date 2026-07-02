@@ -44,6 +44,7 @@ func Load(path string) (*Config, error) {
 
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.addr", ":8080")
+	v.SetDefault("server.web_dir", "web/dist")
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "text")
 	v.SetDefault("database.max_open_conns", 20)

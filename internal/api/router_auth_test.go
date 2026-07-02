@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -103,8 +106,8 @@ func (r *fakeTokenRepo) CreateIfNoneActive(_ context.Context, name, hash string)
 // fakeSinkRepo 是内存版 sink 仓储，List 返回空即可满足 200 校验。
 type fakeSinkRepo struct{}
 
-func (fakeSinkRepo) Create(context.Context, *domainsink.Sink) error         { return nil }
-func (fakeSinkRepo) Update(context.Context, *domainsink.Sink) error         { return nil }
+func (fakeSinkRepo) Create(context.Context, *domainsink.Sink) error           { return nil }
+func (fakeSinkRepo) Update(context.Context, *domainsink.Sink) error           { return nil }
 func (fakeSinkRepo) GetByID(context.Context, int64) (*domainsink.Sink, error) { return nil, nil }
 func (fakeSinkRepo) List(context.Context) ([]*domainsink.Sink, error) {
 	return []*domainsink.Sink{}, nil
@@ -112,6 +115,10 @@ func (fakeSinkRepo) List(context.Context) ([]*domainsink.Sink, error) {
 func (fakeSinkRepo) Delete(context.Context, int64) error { return nil }
 
 func buildRouter(t *testing.T, authEnabled bool, repo *fakeTokenRepo) *gin.Engine {
+	return buildRouterWithWebDir(t, authEnabled, repo, "")
+}
+
+func buildRouterWithWebDir(t *testing.T, authEnabled bool, repo *fakeTokenRepo, webDir string) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	tokenSvc := apptoken.NewService(repo)
@@ -124,6 +131,7 @@ func buildRouter(t *testing.T, authEnabled bool, repo *fakeTokenRepo) *gin.Engin
 		Logger:         nil,
 		TokenValidator: validator,
 		AuthEnabled:    authEnabled,
+		WebDir:         webDir,
 		Auth:           handler.NewAuthHandler(authSvc),
 		Sink:           handler.NewSinkHandler(sinkSvc),
 	})
@@ -197,6 +205,48 @@ func TestAuthDisabledMe(t *testing.T) {
 	}
 	if resp.Data.AuthEnabled || !resp.Data.Authenticated {
 		t.Fatalf("免鉴权模式应 auth_enabled=false 且 authenticated=true，实际 %+v", resp.Data)
+	}
+}
+
+// TestWebStaticServesBuiltFrontend 验证后端可在同一端口托管前端构建产物：
+// 静态资源直接返回，Vue history 路由回退到 index.html，API 路径仍保持后端 404。
+func TestWebStaticServesBuiltFrontend(t *testing.T) {
+	webDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(webDir, "assets"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webDir, "index.html"), []byte("<html>tmf app</html>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webDir, "assets", "app.js"), []byte("console.log('tmf')"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := newFakeTokenRepo()
+	r := buildRouterWithWebDir(t, false, repo, webDir)
+
+	tests := []struct {
+		name string
+		path string
+		want int
+		body string
+	}{
+		{name: "root", path: "/", want: http.StatusOK, body: "tmf app"},
+		{name: "asset", path: "/assets/app.js", want: http.StatusOK, body: "console.log('tmf')"},
+		{name: "history fallback", path: "/dashboard", want: http.StatusOK, body: "tmf app"},
+		{name: "api miss", path: "/api/not-found", want: http.StatusNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, body := do(t, r, http.MethodGet, tt.path, "", nil)
+			if code != tt.want {
+				t.Fatalf("状态码应为 %d，实际 %d: %s", tt.want, code, body)
+			}
+			if tt.body != "" && !strings.Contains(body, tt.body) {
+				t.Fatalf("响应应包含 %q，实际 %s", tt.body, body)
+			}
+		})
 	}
 }
 

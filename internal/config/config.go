@@ -14,7 +14,8 @@ type Config struct {
 
 // ServerConfig 是 HTTP 服务配置。
 type ServerConfig struct {
-	Addr string `mapstructure:"addr"`
+	Addr   string `mapstructure:"addr"`
+	WebDir string `mapstructure:"web_dir"`
 }
 
 // LogConfig 是日志配置。

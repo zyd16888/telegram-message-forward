@@ -180,6 +180,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Logger:         log,
 		TokenValidator: validator,
 		AuthEnabled:    cfg.Security.AuthEnabled,
+		WebDir:         cfg.Server.WebDir,
 		Auth:           handler.NewAuthHandler(authSvc),
 		Account:        handler.NewAccountHandler(accountSvc),
 		AccountLogin:   handler.NewAccountLoginHandler(tgLoginSvc),
