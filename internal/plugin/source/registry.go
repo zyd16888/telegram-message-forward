@@ -30,6 +30,9 @@ type SyncedPeer struct {
 	Username string
 }
 
+// SyncPeerHandler 接收同步过程中的单个 peer。
+type SyncPeerHandler func(peer SyncedPeer) error
+
 // Plugin 是消息来源插件。gotd/td 等原始依赖只允许出现在其实现内部。
 type Plugin interface {
 	Name() string

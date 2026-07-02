@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -8,6 +10,7 @@ import (
 
 	"telegram-message-forward/internal/api/dto"
 	appsource "telegram-message-forward/internal/app/source"
+	pluginsource "telegram-message-forward/internal/plugin/source"
 )
 
 // SourceHandler 处理监听源相关请求。
@@ -128,6 +131,48 @@ func (h *SourceHandler) Sync(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+// SyncStream GET /sources/sync/stream?account_id=N — 流式拉取账号可见 peer 列表。
+func (h *SourceHandler) SyncStream(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Query("account_id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少或非法 account_id"})
+		return
+	}
+
+	w := c.Writer
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	w.Flush()
+
+	writeEvent := func(event string, payload any) error {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b); err != nil {
+			return err
+		}
+		w.Flush()
+		return nil
+	}
+
+	count := 0
+	err = h.svc.SyncStream(c.Request.Context(), accountID, func(p pluginsource.SyncedPeer) error {
+		count++
+		return writeEvent("peer", dto.SyncedPeerDTO{
+			PeerType: string(p.PeerType), PeerID: p.PeerID, Name: p.Name, Username: p.Username,
+		})
+	})
+	if err != nil {
+		_ = writeEvent("error", gin.H{"error": err.Error()})
+		return
+	}
+	_ = writeEvent("done", gin.H{"count": count})
 }
 
 // Start POST /sources/:id/start

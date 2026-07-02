@@ -147,6 +147,73 @@ export const sourcesApi = {
     http
       .post<ApiList<SyncedPeer>>(`/sources/sync?account_id=${accountId}`, undefined, { timeout: 120000 })
       .then((r) => r.data.data),
+  syncStream: async (accountId: number, onPeer: (peer: SyncedPeer) => void, signal?: AbortSignal) => {
+    const headers = new Headers()
+    const token = getToken()
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
+    const resp = await fetch(`/api/v1/sources/sync/stream?account_id=${accountId}`, {
+      method: 'GET',
+      headers,
+      signal,
+    })
+    if (!resp.ok) {
+      throw new Error(await resp.text())
+    }
+    if (!resp.body) {
+      throw new Error('浏览器不支持流式响应')
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let doneEvent = false
+
+    const handleEvent = (raw: string) => {
+      let event = 'message'
+      const data: string[] = []
+      for (const line of raw.split(/\r?\n/)) {
+        if (line.startsWith('event:')) {
+          event = line.slice(6).trim()
+          continue
+        }
+        if (line.startsWith('data:')) {
+          data.push(line.slice(5).trimStart())
+        }
+      }
+      if (data.length === 0) return
+      const payload = JSON.parse(data.join('\n')) as SyncedPeer | { error?: string }
+      if (event === 'peer') {
+        onPeer(payload as SyncedPeer)
+        return
+      }
+      if (event === 'error') {
+        throw new Error((payload as { error?: string }).error ?? '同步失败')
+      }
+      if (event === 'done') {
+        doneEvent = true
+      }
+    }
+
+    while (!doneEvent) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split(/\r?\n\r?\n/)
+      buffer = events.pop() ?? ''
+      for (const event of events) {
+        handleEvent(event)
+        if (doneEvent) {
+          await reader.cancel()
+          break
+        }
+      }
+    }
+    if (buffer.trim()) {
+      handleEvent(buffer)
+    }
+  },
   start: (id: number) => http.post(`/sources/${id}/start`),
   stop: (id: number) => http.post(`/sources/${id}/stop`),
 }

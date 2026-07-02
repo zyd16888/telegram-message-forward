@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, shallowRef } from 'vue'
 import { NButton, NSpace, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import { accountsApi, sourcesApi } from '@/api/client'
 import type { Account, Source, SyncedPeer } from '@/types'
@@ -15,6 +15,7 @@ const syncAccountId = ref<number | null>(null)
 const syncedPeers = ref<SyncedPeer[]>([])
 const syncing = ref(false)
 const peerTypeFilter = ref<string | null>(null)
+const syncController = shallowRef<AbortController | null>(null)
 
 const visiblePeers = computed(() => {
   if (!peerTypeFilter.value) return syncedPeers.value
@@ -38,15 +39,36 @@ async function doSync() {
     message.warning('请选择账号')
     return
   }
+  syncController.value?.abort()
+  const controller = new AbortController()
+  syncController.value = controller
+  syncedPeers.value = []
   syncing.value = true
   try {
-    syncedPeers.value = await sourcesApi.sync(syncAccountId.value)
-    message.success(`同步到 ${syncedPeers.value.length} 个可选 peer`)
+    await sourcesApi.syncStream(
+      syncAccountId.value,
+      (peer) => {
+        syncedPeers.value.push(peer)
+      },
+      controller.signal,
+    )
+    message.success(`同步完成，共 ${syncedPeers.value.length} 个可选 peer`)
   } catch (e) {
-    message.error('同步失败：' + errText(e))
+    if (controller.signal.aborted) {
+      message.warning('已停止同步')
+    } else {
+      message.error('同步失败：' + errText(e))
+    }
   } finally {
-    syncing.value = false
+    if (syncController.value === controller) {
+      syncController.value = null
+      syncing.value = false
+    }
   }
+}
+
+function stopSync() {
+  syncController.value?.abort()
 }
 
 async function addPeer(peer: SyncedPeer) {
@@ -150,6 +172,7 @@ onMounted(load)
           :options="accounts.map((a) => ({ label: `${a.name} (${a.status})`, value: a.id }))"
         />
         <n-button type="primary" :loading="syncing" @click="doSync">同步</n-button>
+        <n-button v-if="syncing" @click="stopSync">停止</n-button>
         <n-select
           v-model:value="peerTypeFilter"
           clearable
@@ -161,6 +184,7 @@ onMounted(load)
             { label: '频道/超级群', value: 'channel' },
           ]"
         />
+        <n-text v-if="syncing || syncedPeers.length" depth="3">已加载 {{ syncedPeers.length }} 个</n-text>
       </n-space>
       <n-data-table
         v-if="syncedPeers.length"

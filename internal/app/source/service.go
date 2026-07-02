@@ -113,14 +113,40 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 
 // Sync 拉取某账号可见的 chats/channels/users（用于 UI 选择监听源）。
 func (s *Service) Sync(ctx context.Context, accountID int64) ([]pluginsource.SyncedPeer, error) {
-	acc, err := s.accounts.GetByID(ctx, accountID)
-	if err != nil {
+	var peers []pluginsource.SyncedPeer
+	if err := s.SyncStream(ctx, accountID, func(peer pluginsource.SyncedPeer) error {
+		peers = append(peers, peer)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	if acc.Status != domainaccount.StatusActive {
-		return nil, fmt.Errorf("账号未登录，无法同步（当前状态 %s）", acc.Status)
+	return peers, nil
+}
+
+// SyncStream 流式拉取某账号可见的 chats/channels/users（用于 UI 增量展示）。
+func (s *Service) SyncStream(ctx context.Context, accountID int64, emit pluginsource.SyncPeerHandler) error {
+	acc, err := s.accounts.GetByID(ctx, accountID)
+	if err != nil {
+		return err
 	}
-	return s.plugin.SyncSources(ctx, acc)
+	if acc.Status != domainaccount.StatusActive {
+		return fmt.Errorf("账号未登录，无法同步（当前状态 %s）", acc.Status)
+	}
+	if streaming, ok := s.plugin.(interface {
+		SyncSourcesStream(context.Context, *domainaccount.Account, pluginsource.SyncPeerHandler) error
+	}); ok {
+		return streaming.SyncSourcesStream(ctx, acc, emit)
+	}
+	peers, err := s.plugin.SyncSources(ctx, acc)
+	if err != nil {
+		return err
+	}
+	for _, peer := range peers {
+		if err := emit(peer); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Start 启动某监听源。

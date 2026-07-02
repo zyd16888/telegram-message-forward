@@ -77,14 +77,28 @@ func (p *Plugin) buildClient(acc *domainaccount.Account, update telegram.UpdateH
 	})
 }
 
-// SyncSources 拉取账号可见的 chats/channels/users，缓存 access_hash 并返回同步结果。
+// SyncSources 拉取账号可见的 chats/channels/users 并返回同步结果。
 func (p *Plugin) SyncSources(ctx context.Context, acc *domainaccount.Account) ([]pluginsource.SyncedPeer, error) {
-	client, err := p.buildClient(acc, nil)
-	if err != nil {
+	var peers []pluginsource.SyncedPeer
+	if err := p.SyncSourcesStream(ctx, acc, func(peer pluginsource.SyncedPeer) error {
+		peers = append(peers, peer)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
+	return peers, nil
+}
 
-	var peers []pluginsource.SyncedPeer
+// SyncSourcesStream 轻量拉取账号会话列表，并把 peer 增量返回给调用方。
+//
+// 这里只同步 Telegram 客户端左侧会话列表里的 user/chat/channel，不拉群成员、不拉历史消息。
+// messages.getDialogs 响应会附带顶部消息用于分页 offset，但不会展开加载每个会话内部消息。
+func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Account, emit pluginsource.SyncPeerHandler) error {
+	client, err := p.buildClient(acc, nil)
+	if err != nil {
+		return err
+	}
+
 	runErr := client.Run(ctx, func(ctx context.Context) error {
 		if err := p.ensureAuthorized(ctx, client); err != nil {
 			return err
@@ -108,10 +122,8 @@ func (p *Plugin) SyncSources(ctx context.Context, acc *domainaccount.Account) ([
 			if err != nil {
 				return err
 			}
-			pagePeers, cachePeers := p.collectPeers(acc.ID, chats, users, seen)
-			peers = append(peers, pagePeers...)
-			if err := p.cachePeers(ctx, cachePeers); err != nil {
-				p.deps.Log.Warn("批量缓存 peer access_hash 失败", "account", acc.ID, "err", err)
+			if err := p.emitDialogPeers(dialogs, chats, users, seen, emit); err != nil {
+				return err
 			}
 			if !hasMore || len(dialogs) == 0 {
 				break
@@ -125,9 +137,9 @@ func (p *Plugin) SyncSources(ctx context.Context, acc *domainaccount.Account) ([
 		return nil
 	})
 	if runErr != nil {
-		return nil, runErr
+		return runErr
 	}
-	return peers, nil
+	return nil
 }
 
 func unpackDialogs(res tg.MessagesDialogsClass) ([]tg.DialogClass, []tg.MessageClass, []tg.ChatClass, []tg.UserClass, bool, error) {
@@ -141,45 +153,46 @@ func unpackDialogs(res tg.MessagesDialogsClass) ([]tg.DialogClass, []tg.MessageC
 	}
 }
 
-// collectPeers 组装同步结果与待缓存 peer，调用方负责批量落库。
-func (p *Plugin) collectPeers(accountID int64, chats []tg.ChatClass, users []tg.UserClass, seen map[string]struct{}) ([]pluginsource.SyncedPeer, []*domainpeer.Peer) {
-	var peers []pluginsource.SyncedPeer
-	var cache []*domainpeer.Peer
-	for _, c := range chats {
-		switch ch := c.(type) {
-		case *tg.Channel:
-			if !markSeen(seen, domainpeer.TypeChannel, ch.ID) {
+// emitDialogPeers 只返回 dialogs 中真实存在的会话 peer。
+//
+// messages.getDialogs 响应里的 users 可能包含顶部消息相关用户；不能直接全量返回 users，
+// 否则会把非私聊会话的人混进“可监听 peer”列表。
+func (p *Plugin) emitDialogPeers(dialogs []tg.DialogClass, chats []tg.ChatClass, users []tg.UserClass, seen map[string]struct{}, emit pluginsource.SyncPeerHandler) error {
+	for _, d := range dialogs {
+		switch peer := d.GetPeer().(type) {
+		case *tg.PeerChannel:
+			ch := findChannel(chats, peer.ChannelID)
+			if ch == nil || !markSeen(seen, domainpeer.TypeChannel, ch.ID) {
 				continue
 			}
-			cache = append(cache, newPeer(accountID, domainpeer.TypeChannel, ch.ID, ch.AccessHash, ch.Username, ch.Title))
-			peers = append(peers, pluginsource.SyncedPeer{
+			if err := emit(pluginsource.SyncedPeer{
 				PeerType: domainsource.PeerChannel, PeerID: ch.ID, Name: ch.Title, Username: ch.Username,
-			})
-		case *tg.Chat:
-			// 基础群组无 access_hash。
-			if !markSeen(seen, domainpeer.TypeChat, ch.ID) {
+			}); err != nil {
+				return err
+			}
+		case *tg.PeerChat:
+			ch := findChat(chats, peer.ChatID)
+			if ch == nil || !markSeen(seen, domainpeer.TypeChat, ch.ID) {
 				continue
 			}
-			cache = append(cache, newPeer(accountID, domainpeer.TypeChat, ch.ID, 0, "", ch.Title))
-			peers = append(peers, pluginsource.SyncedPeer{
+			if err := emit(pluginsource.SyncedPeer{
 				PeerType: domainsource.PeerChat, PeerID: ch.ID, Name: ch.Title,
-			})
+			}); err != nil {
+				return err
+			}
+		case *tg.PeerUser:
+			user := findUser(users, peer.UserID)
+			if user == nil || !markSeen(seen, domainpeer.TypeUser, user.ID) {
+				continue
+			}
+			if err := emit(pluginsource.SyncedPeer{
+				PeerType: domainsource.PeerUser, PeerID: user.ID, Name: userDisplayName(user), Username: user.Username,
+			}); err != nil {
+				return err
+			}
 		}
 	}
-	for _, u := range users {
-		user, ok := u.(*tg.User)
-		if !ok {
-			continue
-		}
-		if !markSeen(seen, domainpeer.TypeUser, user.ID) {
-			continue
-		}
-		cache = append(cache, newPeer(accountID, domainpeer.TypeUser, user.ID, user.AccessHash, user.Username, userDisplayName(user)))
-		peers = append(peers, pluginsource.SyncedPeer{
-			PeerType: domainsource.PeerUser, PeerID: user.ID, Name: userDisplayName(user), Username: user.Username,
-		})
-	}
-	return peers, cache
+	return nil
 }
 
 func markSeen(seen map[string]struct{}, t domainpeer.Type, id int64) bool {
@@ -189,19 +202,6 @@ func markSeen(seen map[string]struct{}, t domainpeer.Type, id int64) bool {
 	}
 	seen[key] = struct{}{}
 	return true
-}
-
-func newPeer(accountID int64, t domainpeer.Type, id, accessHash int64, username, title string) *domainpeer.Peer {
-	return &domainpeer.Peer{
-		AccountID: accountID, PeerType: t, PeerID: id, AccessHash: accessHash, Username: username, Title: title,
-	}
-}
-
-func (p *Plugin) cachePeers(ctx context.Context, peers []*domainpeer.Peer) error {
-	if p.deps.Peers == nil {
-		return nil
-	}
-	return p.deps.Peers.BulkUpsert(ctx, peers)
 }
 
 func nextDialogOffset(dialogs []tg.DialogClass, messages []tg.MessageClass, chats []tg.ChatClass, users []tg.UserClass) (tg.InputPeerClass, int, int) {
@@ -234,6 +234,15 @@ func inputPeerFromPeer(peer tg.PeerClass, chats []tg.ChatClass, users []tg.UserC
 func findChannel(chats []tg.ChatClass, id int64) *tg.Channel {
 	for _, c := range chats {
 		if ch, ok := c.(*tg.Channel); ok && ch.ID == id {
+			return ch
+		}
+	}
+	return nil
+}
+
+func findChat(chats []tg.ChatClass, id int64) *tg.Chat {
+	for _, c := range chats {
+		if ch, ok := c.(*tg.Chat); ok && ch.ID == id {
 			return ch
 		}
 	}

@@ -99,6 +99,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			sources.GET("", deps.Source.List)
 			sources.POST("", deps.Source.Create)
 			sources.POST("/sync", deps.Source.Sync)
+			sources.GET("/sync/stream", deps.Source.SyncStream)
 			sources.GET("/:id", deps.Source.Get)
 			sources.PUT("/:id", deps.Source.Update)
 			sources.DELETE("/:id", deps.Source.Delete)
