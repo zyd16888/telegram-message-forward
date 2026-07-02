@@ -150,6 +150,25 @@ function validate(): boolean {
     message.warning('请至少添加一个目标渠道')
     return false
   }
+  const seenSinks = new Set<number>()
+  for (const target of form.targets) {
+    if (!target.sink_id) {
+      message.warning('规则目标中存在未选择渠道的项')
+      return false
+    }
+    if (seenSinks.has(target.sink_id)) {
+      message.warning('同一条规则不能重复选择同一个渠道')
+      return false
+    }
+    seenSinks.add(target.sink_id)
+    if (!target.template_id) continue
+    const sink = props.sinks.find((item) => item.id === target.sink_id)
+    const template = props.templates.find((item) => item.id === target.template_id)
+    if (sink && template && !sinkSupportsFormat(sink, template.format)) {
+      message.warning(`渠道「${sink.name}」不支持 ${template.format} 模板`)
+      return false
+    }
+  }
   return true
 }
 
@@ -217,6 +236,9 @@ async function submit() {
           v-model="condition.config"
           :fields="conditionDescriptor(condition.type)?.fields ?? []"
         />
+        <NText v-if="conditionDescriptor(condition.type)?.description" depth="3">
+          {{ conditionDescriptor(condition.type)?.description }}
+        </NText>
       </div>
       <NButton size="small" dashed @click="addCondition">添加条件</NButton>
 
@@ -236,6 +258,9 @@ async function submit() {
           v-model="processor.config"
           :fields="processorDescriptor(processor.type)?.fields ?? []"
         />
+        <NText v-if="processorDescriptor(processor.type)?.description" depth="3">
+          {{ processorDescriptor(processor.type)?.description }}
+        </NText>
       </div>
       <NButton size="small" dashed @click="addProcessor">添加处理器</NButton>
 

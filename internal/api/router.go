@@ -89,10 +89,12 @@ func NewRouter(deps Deps) *gin.Engine {
 			sinks.GET("", deps.Sink.List)
 			sinks.GET("/types", deps.Sink.Types)
 			sinks.GET("/meta", deps.Sink.Meta)
+			sinks.POST("/test", deps.Sink.Test)
 			sinks.POST("", deps.Sink.Create)
 			sinks.GET("/:id", deps.Sink.Get)
 			sinks.PUT("/:id", deps.Sink.Update)
 			sinks.DELETE("/:id", deps.Sink.Delete)
+			sinks.POST("/:id/test", deps.Sink.TestExisting)
 		}
 
 		sources := v1.Group("/sources")

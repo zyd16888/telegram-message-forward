@@ -26,6 +26,12 @@ const form = reactive({
   config: {} as Record<string, unknown>,
   secret: '',
 })
+const testing = reactive({
+  loading: false,
+  success: null as boolean | null,
+  message: '',
+  summary: '',
+})
 
 const editing = computed(() => Boolean(props.sink))
 const descriptor = computed(() => props.descriptors.find((item) => item.type === form.type) ?? props.descriptors[0])
@@ -64,6 +70,7 @@ function resetForm() {
   form.enabled = true
   form.config = defaultsFor(first)
   form.secret = ''
+  resetTestResult()
 }
 
 function defaultsFor(desc?: SinkDescriptor): Record<string, unknown> {
@@ -89,6 +96,43 @@ function validate(): boolean {
     return false
   }
   return true
+}
+
+function resetTestResult() {
+  testing.loading = false
+  testing.success = null
+  testing.message = ''
+  testing.summary = ''
+}
+
+function testPayload(): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    type: form.type,
+    config: form.config,
+  }
+  if (form.secret) body.secret = form.secret
+  return body
+}
+
+async function testConfig() {
+  if (!validate()) return
+  testing.loading = true
+  testing.success = null
+  testing.message = ''
+  testing.summary = ''
+  try {
+    const result = props.sink
+      ? await sinksApi.testExisting(props.sink.id, testPayload())
+      : await sinksApi.test(testPayload())
+    testing.success = result.success
+    testing.message = result.success ? '测试消息已发送成功' : result.error || '测试失败'
+    testing.summary = result.response_summary ? JSON.stringify(result.response_summary, null, 2) : ''
+  } catch (e) {
+    testing.success = false
+    testing.message = errText(e)
+  } finally {
+    testing.loading = false
+  }
 }
 
 async function submit() {
@@ -145,9 +189,21 @@ async function submit() {
           :placeholder="editing ? '留空则保留原密钥' : descriptor.secret_field.placeholder"
         />
       </NFormItem>
+      <NAlert
+        v-if="testing.success !== null"
+        class="test-result"
+        :type="testing.success ? 'success' : 'error'"
+        :title="testing.success ? '测试成功' : '测试失败'"
+      >
+        <NSpace vertical size="small">
+          <NText>{{ testing.message }}</NText>
+          <NCode v-if="testing.summary" :code="testing.summary" language="json" />
+        </NSpace>
+      </NAlert>
     </NForm>
     <template #footer>
       <NSpace justify="end">
+        <NButton :loading="testing.loading" @click="testConfig">测试配置</NButton>
         <NButton @click="show = false">取消</NButton>
         <NButton type="primary" @click="submit">保存</NButton>
       </NSpace>
@@ -162,5 +218,9 @@ async function submit() {
 
 .sink-desc {
   margin-bottom: 14px;
+}
+
+.test-result {
+  margin-top: 12px;
 }
 </style>

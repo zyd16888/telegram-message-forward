@@ -74,12 +74,19 @@ function validate(): boolean {
 }
 
 async function preview() {
+  await previewContent(true)
+}
+
+async function previewContent(showSuccess: boolean): Promise<boolean> {
   previewing.value = true
   try {
     const result = await templatesApi.preview({ format: form.format, content: form.content })
     previewText.value = result.text
+    if (showSuccess) message.success('预览已生成')
+    return true
   } catch (e) {
     message.error('预览失败：' + errText(e))
+    return false
   } finally {
     previewing.value = false
   }
@@ -87,6 +94,7 @@ async function preview() {
 
 async function submit() {
   if (!validate()) return
+  if (!(await previewContent(false))) return
   try {
     if (props.template) {
       await templatesApi.update(props.template.id, { ...form })

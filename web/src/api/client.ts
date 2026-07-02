@@ -13,6 +13,7 @@ import type {
   SharedProxy,
   Sink,
   SinkDescriptor,
+  SinkTestResult,
   Source,
   SyncedPeer,
   Template,
@@ -136,6 +137,10 @@ export const sinksApi = {
   update: (id: number, body: Record<string, unknown>) =>
     http.put<ApiItem<Sink>>(`/sinks/${id}`, body).then((r) => r.data.data),
   remove: (id: number) => http.delete(`/sinks/${id}`),
+  test: (body: Record<string, unknown>) =>
+    http.post<ApiItem<SinkTestResult>>('/sinks/test', body, { timeout: 120000 }).then((r) => r.data.data),
+  testExisting: (id: number, body: Record<string, unknown>) =>
+    http.post<ApiItem<SinkTestResult>>(`/sinks/${id}/test`, body, { timeout: 120000 }).then((r) => r.data.data),
 }
 
 // --- Sources ---

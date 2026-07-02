@@ -105,6 +105,55 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return s.repo.Delete(ctx, id)
 }
 
+// TestInput 是渠道连通性测试输入。
+type TestInput struct {
+	ID     int64
+	Type   string
+	Config map[string]any
+	Secret *string
+}
+
+// Test 用当前配置向渠道发送一条测试消息。
+func (s *Service) Test(ctx context.Context, in TestInput) (*pluginsink.Result, error) {
+	var sk *domainsink.Sink
+	if in.ID > 0 {
+		existing, err := s.repo.GetByID(ctx, in.ID)
+		if err != nil {
+			return nil, err
+		}
+		sk = existing
+		if in.Config != nil {
+			sk.Config = in.Config
+		}
+		if in.Secret != nil {
+			sk.Secret = []byte(*in.Secret)
+		}
+	} else {
+		secret := ""
+		if in.Secret != nil {
+			secret = *in.Secret
+		}
+		sk = &domainsink.Sink{
+			Type:    in.Type,
+			Name:    "test",
+			Enabled: true,
+			Config:  in.Config,
+			Secret:  []byte(secret),
+		}
+	}
+	plugin, err := pluginsink.New(sk.Type)
+	if err != nil {
+		return nil, err
+	}
+	if err := plugin.ValidateConfig(sk.Config); err != nil {
+		return nil, fmt.Errorf("渠道配置校验失败: %w", err)
+	}
+	return plugin.Send(ctx, sk, pluginsink.Payload{
+		Format: "text",
+		Text:   "这是一条来自 Telegram Message Forward 的渠道测试消息。",
+	}, pluginsink.Options{})
+}
+
 // Types 返回已注册的 Sink 类型。
 func (s *Service) Types() []string {
 	return pluginsink.Names()

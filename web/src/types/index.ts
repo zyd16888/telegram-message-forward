@@ -79,6 +79,12 @@ export interface SinkDescriptor {
   capabilities: Capabilities
 }
 
+export interface SinkTestResult {
+  success: boolean
+  error?: string
+  response_summary?: unknown
+}
+
 export interface Sink {
   id: number
   type: string

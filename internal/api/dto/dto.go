@@ -5,6 +5,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"time"
 
 	domainaccount "telegram-message-forward/internal/domain/account"
@@ -244,6 +245,20 @@ type SinkUpdateRequest struct {
 	Enabled *bool          `json:"enabled,omitempty"`
 	Config  map[string]any `json:"config,omitempty"`
 	Secret  *string        `json:"secret,omitempty"`
+}
+
+// SinkTestRequest 是渠道连通性测试请求。
+type SinkTestRequest struct {
+	Type   string         `json:"type,omitempty"`
+	Config map[string]any `json:"config"`
+	Secret *string        `json:"secret,omitempty"`
+}
+
+// SinkTestDTO 是渠道连通性测试响应。
+type SinkTestDTO struct {
+	Success         bool            `json:"success"`
+	Error           string          `json:"error,omitempty"`
+	ResponseSummary json.RawMessage `json:"response_summary,omitempty"`
 }
 
 // --- Source ---
