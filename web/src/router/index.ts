@@ -11,6 +11,7 @@ const routes: RouteRecordRaw[] = [
   },
   { path: '/dashboard', name: 'dashboard', component: () => import('@/pages/DashboardPage.vue'), meta: { title: '仪表盘' } },
   { path: '/accounts', name: 'accounts', component: () => import('@/pages/AccountsPage.vue'), meta: { title: '账号' } },
+  { path: '/telegram-config', name: 'telegram-config', component: () => import('@/pages/TelegramConfigPage.vue'), meta: { title: 'Telegram 配置' } },
   { path: '/sources', name: 'sources', component: () => import('@/pages/SourcesPage.vue'), meta: { title: '监听源' } },
   { path: '/sinks', name: 'sinks', component: () => import('@/pages/SinksPage.vue'), meta: { title: '目标渠道' } },
   { path: '/rules', name: 'rules', component: () => import('@/pages/RulesPage.vue'), meta: { title: '规则' } },

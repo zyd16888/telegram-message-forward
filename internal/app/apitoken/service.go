@@ -3,8 +3,6 @@ package apitoken
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 
 	domainapitoken "telegram-message-forward/internal/domain/apitoken"
 	"telegram-message-forward/internal/security"
@@ -29,11 +27,10 @@ type Created struct {
 
 // Create 生成一个新 token，存哈希，返回明文（仅此一次）。
 func (s *Service) Create(ctx context.Context, name string) (*Created, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	token, err := security.GenerateToken()
+	if err != nil {
 		return nil, err
 	}
-	token := hex.EncodeToString(buf)
 	id, err := s.repo.Create(ctx, name, security.HashToken(token))
 	if err != nil {
 		return nil, err
@@ -45,11 +42,10 @@ func (s *Service) Create(ctx context.Context, name string) (*Created, error) {
 // 用于 bootstrap 场景防止并发请求都通过前置检查而创建出多个“首个管理凭证”。
 // created=false 表示已存在 active token，未创建（此时返回值中的 *Created 为 nil）。
 func (s *Service) CreateIfNoneActive(ctx context.Context, name string) (*Created, bool, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	token, err := security.GenerateToken()
+	if err != nil {
 		return nil, false, err
 	}
-	token := hex.EncodeToString(buf)
 	id, created, err := s.repo.CreateIfNoneActive(ctx, name, security.HashToken(token))
 	if err != nil {
 		return nil, false, err

@@ -98,6 +98,8 @@ func (r *AccountRepository) toModel(a *domainaccount.Account) (*model.Account, e
 		ID:               a.ID,
 		Name:             a.Name,
 		PhoneNumber:      a.PhoneNumber,
+		TelegramAppID:    a.TelegramAppID,
+		ProxyID:          a.ProxyID,
 		AppID:            a.AppID,
 		AppHashEncrypted: appHashEnc,
 		SessionEncrypted: sessionEnc,
@@ -111,7 +113,7 @@ func (r *AccountRepository) toModel(a *domainaccount.Account) (*model.Account, e
 }
 
 func (r *AccountRepository) toDomain(m *model.Account) (*domainaccount.Account, error) {
-	appHash, err := r.cipher.Decrypt(m.AppHashEncrypted)
+	accountAppHash, err := r.cipher.Decrypt(m.AppHashEncrypted)
 	if err != nil {
 		return nil, fmt.Errorf("解密 app_hash 失败: %w", err)
 	}
@@ -125,18 +127,48 @@ func (r *AccountRepository) toDomain(m *model.Account) (*domainaccount.Account, 
 			return nil, fmt.Errorf("解析代理配置失败: %w", err)
 		}
 	}
+	appID := m.AppID
+	appHash := string(accountAppHash)
+	if m.TelegramAppID != nil {
+		var app model.TelegramApp
+		if err := r.db.First(&app, *m.TelegramAppID).Error; err == nil {
+			hash, err := r.cipher.Decrypt(app.AppHashEncrypted)
+			if err != nil {
+				return nil, fmt.Errorf("解密共享 app_hash 失败: %w", err)
+			}
+			appID = app.AppID
+			appHash = string(hash)
+		}
+	}
+	if m.ProxyID != nil {
+		var pm model.ProxyConfig
+		if err := r.db.First(&pm, *m.ProxyID).Error; err == nil {
+			pass, err := r.cipher.Decrypt(pm.PasswordEncrypted)
+			if err != nil {
+				return nil, fmt.Errorf("解密共享代理密码失败: %w", err)
+			}
+			proxy = domainaccount.ProxyConfig{
+				Type:     pm.Type,
+				Addr:     pm.Addr,
+				Username: pm.Username,
+				Password: string(pass),
+			}
+		}
+	}
 	return &domainaccount.Account{
-		ID:          m.ID,
-		Name:        m.Name,
-		PhoneNumber: m.PhoneNumber,
-		AppID:       m.AppID,
-		AppHash:     string(appHash),
-		Session:     session,
-		Proxy:       proxy,
-		Status:      domainaccount.Status(m.Status),
-		LastLoginAt: m.LastLoginAt,
-		LastError:   m.LastError,
-		CreatedAt:   m.CreatedAt,
-		UpdatedAt:   m.UpdatedAt,
+		ID:            m.ID,
+		Name:          m.Name,
+		PhoneNumber:   m.PhoneNumber,
+		TelegramAppID: m.TelegramAppID,
+		ProxyID:       m.ProxyID,
+		AppID:         appID,
+		AppHash:       appHash,
+		Session:       session,
+		Proxy:         proxy,
+		Status:        domainaccount.Status(m.Status),
+		LastLoginAt:   m.LastLoginAt,
+		LastError:     m.LastError,
+		CreatedAt:     m.CreatedAt,
+		UpdatedAt:     m.UpdatedAt,
 	}, nil
 }

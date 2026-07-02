@@ -20,6 +20,7 @@ import (
 	apptoken "telegram-message-forward/internal/app/apitoken"
 	appauth "telegram-message-forward/internal/app/auth"
 	appsink "telegram-message-forward/internal/app/sink"
+	domainadmin "telegram-message-forward/internal/domain/admin"
 	domainapitoken "telegram-message-forward/internal/domain/apitoken"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	"telegram-message-forward/internal/security"
@@ -30,6 +31,126 @@ type fakeTokenRepo struct {
 	mu     sync.Mutex
 	nextID int64
 	items  map[int64]*domainapitoken.Token
+}
+
+// fakeAdminRepo 是内存版管理后台用户/会话仓储。
+type fakeAdminRepo struct {
+	mu       sync.Mutex
+	nextUser int64
+	nextSess int64
+	users    map[int64]*domainadmin.User
+	sessions map[int64]*domainadmin.Session
+}
+
+func newFakeAdminRepo() *fakeAdminRepo {
+	return &fakeAdminRepo{users: map[int64]*domainadmin.User{}, sessions: map[int64]*domainadmin.Session{}}
+}
+
+func (r *fakeAdminRepo) CountActiveUsers(context.Context) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var n int64
+	for _, u := range r.users {
+		if u.Active {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r *fakeAdminRepo) CreateUserIfNoneActive(_ context.Context, u *domainadmin.User) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.users {
+		if existing.Active {
+			return false, nil
+		}
+	}
+	r.nextUser++
+	now := time.Now()
+	cp := *u
+	cp.ID = r.nextUser
+	cp.Active = true
+	cp.CreatedAt = now
+	cp.UpdatedAt = now
+	r.users[cp.ID] = &cp
+	u.ID = cp.ID
+	u.CreatedAt = cp.CreatedAt
+	u.UpdatedAt = cp.UpdatedAt
+	return true, nil
+}
+
+func (r *fakeAdminRepo) GetUserByUsername(_ context.Context, username string) (*domainadmin.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, u := range r.users {
+		if u.Username == username && u.Active {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeAdminRepo) MarkUserLogin(_ context.Context, userID int64, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if u, ok := r.users[userID]; ok {
+		u.LastLoginAt = &at
+	}
+	return nil
+}
+
+func (r *fakeAdminRepo) CreateSession(_ context.Context, s *domainadmin.Session) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextSess++
+	cp := *s
+	cp.ID = r.nextSess
+	cp.CreatedAt = time.Now()
+	r.sessions[cp.ID] = &cp
+	s.ID = cp.ID
+	s.CreatedAt = cp.CreatedAt
+	return nil
+}
+
+func (r *fakeAdminRepo) GetActiveSessionByHash(_ context.Context, hash string, now time.Time) (*domainadmin.Session, *domainadmin.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.TokenHash != hash || s.RevokedAt != nil || !s.ExpiresAt.After(now) {
+			continue
+		}
+		u := r.users[s.UserID]
+		if u == nil || !u.Active {
+			return nil, nil, nil
+		}
+		scp := *s
+		ucp := *u
+		return &scp, &ucp, nil
+	}
+	return nil, nil, nil
+}
+
+func (r *fakeAdminRepo) TouchSession(_ context.Context, id int64, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.sessions[id]; ok {
+		s.LastUsedAt = &at
+	}
+	return nil
+}
+
+func (r *fakeAdminRepo) RevokeSessionByHash(_ context.Context, hash string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	for _, s := range r.sessions {
+		if s.TokenHash == hash && s.RevokedAt == nil {
+			s.RevokedAt = &now
+		}
+	}
+	return nil
 }
 
 func newFakeTokenRepo() *fakeTokenRepo {
@@ -121,11 +242,21 @@ func buildRouter(t *testing.T, authEnabled bool, repo *fakeTokenRepo) *gin.Engin
 func buildRouterWithWebDir(t *testing.T, authEnabled bool, repo *fakeTokenRepo, webDir string) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
+	adminRepo := newFakeAdminRepo()
 	tokenSvc := apptoken.NewService(repo)
-	authSvc := appauth.NewService(repo, tokenSvc, authEnabled)
+	authSvc := appauth.NewService(adminRepo, repo, tokenSvc, authEnabled)
 	sinkSvc := appsink.NewService(fakeSinkRepo{})
 	validator := security.TokenValidator{
-		Lookup: func(hash string) (bool, error) { return repo.ExistsActiveHash(context.Background(), hash) },
+		Lookup: func(hash string) (bool, error) {
+			sess, user, err := adminRepo.GetActiveSessionByHash(context.Background(), hash, time.Now())
+			if err != nil {
+				return false, err
+			}
+			if sess != nil && user != nil {
+				return true, nil
+			}
+			return repo.ExistsActiveHash(context.Background(), hash)
+		},
 	}
 	return api.NewRouter(api.Deps{
 		Logger:         nil,
@@ -250,9 +381,8 @@ func TestWebStaticServesBuiltFrontend(t *testing.T) {
 	}
 }
 
-// TestBootstrapOnlyWhenNoActiveToken 验证 bootstrap 只在无 active token 时可用：
-// 初始可创建首个凭证，创建后再次 bootstrap 返回不可初始化且 POST 冲突。
-func TestBootstrapOnlyWhenNoActiveToken(t *testing.T) {
+// TestBootstrapOnlyWhenNoActiveAdmin 验证 bootstrap 只在无 active 管理员时可用。
+func TestBootstrapOnlyWhenNoActiveAdmin(t *testing.T) {
 	repo := newFakeTokenRepo()
 	r := buildRouter(t, true, repo)
 
@@ -271,19 +401,23 @@ func TestBootstrapOnlyWhenNoActiveToken(t *testing.T) {
 		t.Fatal("初始应可 bootstrap")
 	}
 
-	// 创建首个凭证。
-	code, body = do(t, r, http.MethodPost, "/api/v1/auth/bootstrap", "", map[string]any{"name": "admin"})
+	// 创建首个管理员并返回浏览器会话 token。
+	code, body = do(t, r, http.MethodPost, "/api/v1/auth/bootstrap", "", map[string]any{"username": "admin", "password": "secret123"})
 	if code != http.StatusCreated {
-		t.Fatalf("首个凭证应 201，实际 %d: %s", code, body)
+		t.Fatalf("首个管理员应 201，实际 %d: %s", code, body)
 	}
 	var created struct {
 		Data struct {
-			Token string `json:"token"`
+			Token    string `json:"token"`
+			Username string `json:"username"`
 		} `json:"data"`
 	}
 	json.Unmarshal([]byte(body), &created)
 	if created.Data.Token == "" {
-		t.Fatal("应返回明文 token")
+		t.Fatal("应返回会话 token")
+	}
+	if created.Data.Username != "admin" {
+		t.Fatalf("应返回用户名 admin，实际 %q", created.Data.Username)
 	}
 
 	// 再次查询：不可 bootstrap。
@@ -294,17 +428,17 @@ func TestBootstrapOnlyWhenNoActiveToken(t *testing.T) {
 	}
 
 	// 再次创建：409 冲突。
-	if code, _ := do(t, r, http.MethodPost, "/api/v1/auth/bootstrap", "", map[string]any{"name": "x"}); code != http.StatusConflict {
+	if code, _ := do(t, r, http.MethodPost, "/api/v1/auth/bootstrap", "", map[string]any{"username": "x", "password": "secret123"}); code != http.StatusConflict {
 		t.Fatalf("重复 bootstrap 应 409，实际 %d", code)
 	}
 
-	// 用新建凭证登录成功。
-	if code, _ := do(t, r, http.MethodPost, "/api/v1/auth/login", "", map[string]any{"token": created.Data.Token}); code != http.StatusOK {
-		t.Fatalf("有效 token 登录应 200，实际 %d", code)
+	// 用用户名密码登录成功。
+	if code, _ := do(t, r, http.MethodPost, "/api/v1/auth/login", "", map[string]any{"username": "admin", "password": "secret123"}); code != http.StatusOK {
+		t.Fatalf("有效用户名密码登录应 200，实际 %d", code)
 	}
-	// 错误凭证登录失败。
-	if code, _ := do(t, r, http.MethodPost, "/api/v1/auth/login", "", map[string]any{"token": "nope"}); code != http.StatusUnauthorized {
-		t.Fatalf("错误 token 登录应 401，实际 %d", code)
+	// 错误密码登录失败。
+	if code, _ := do(t, r, http.MethodPost, "/api/v1/auth/login", "", map[string]any{"username": "admin", "password": "nope"}); code != http.StatusUnauthorized {
+		t.Fatalf("错误密码登录应 401，实际 %d", code)
 	}
 }
 
@@ -322,7 +456,7 @@ func TestBootstrapConcurrent(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			code, _ := do(t, r, http.MethodPost, "/api/v1/auth/bootstrap", "", map[string]any{"name": "admin"})
+			code, _ := do(t, r, http.MethodPost, "/api/v1/auth/bootstrap", "", map[string]any{"username": "admin", "password": "secret123"})
 			codes[idx] = code
 		}(i)
 	}
@@ -344,8 +478,5 @@ func TestBootstrapConcurrent(t *testing.T) {
 	}
 	if conflict != n-1 {
 		t.Fatalf("其余请求应返回 409，实际 409 次数 %d", conflict)
-	}
-	if active, _ := repo.CountActive(context.Background()); active != 1 {
-		t.Fatalf("最终应恰好有 1 个 active token，实际 %d", active)
 	}
 }

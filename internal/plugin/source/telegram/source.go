@@ -17,6 +17,8 @@ import (
 	pluginsource "telegram-message-forward/internal/plugin/source"
 )
 
+const syncDialogsPageSize = 100
+
 // Deps 是 Telegram Source 插件的依赖，由 bootstrap 注入（避免 plugin 直连存储层）。
 type Deps struct {
 	Peers domainpeer.Repository
@@ -87,24 +89,39 @@ func (p *Plugin) SyncSources(ctx context.Context, acc *domainaccount.Account) ([
 		if err := p.ensureAuthorized(ctx, client); err != nil {
 			return err
 		}
-		res, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-			Limit:      100,
-			OffsetPeer: &tg.InputPeerEmpty{},
-		})
-		if err != nil {
-			return fmt.Errorf("拉取会话列表失败: %w", err)
+		offsetPeer := tg.InputPeerClass(&tg.InputPeerEmpty{})
+		offsetID := 0
+		offsetDate := 0
+		seen := map[string]struct{}{}
+
+		for {
+			res, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
+				Limit:      syncDialogsPageSize,
+				OffsetPeer: offsetPeer,
+				OffsetID:   offsetID,
+				OffsetDate: offsetDate,
+			})
+			if err != nil {
+				return fmt.Errorf("拉取会话列表失败: %w", err)
+			}
+			dialogs, messages, chats, users, hasMore, err := unpackDialogs(res)
+			if err != nil {
+				return err
+			}
+			pagePeers, cachePeers := p.collectPeers(acc.ID, chats, users, seen)
+			peers = append(peers, pagePeers...)
+			if err := p.cachePeers(ctx, cachePeers); err != nil {
+				p.deps.Log.Warn("批量缓存 peer access_hash 失败", "account", acc.ID, "err", err)
+			}
+			if !hasMore || len(dialogs) == 0 {
+				break
+			}
+			nextPeer, nextID, nextDate := nextDialogOffset(dialogs, messages, chats, users)
+			if nextPeer == nil || nextID == 0 {
+				break
+			}
+			offsetPeer, offsetID, offsetDate = nextPeer, nextID, nextDate
 		}
-		var chats []tg.ChatClass
-		var users []tg.UserClass
-		switch v := res.(type) {
-		case *tg.MessagesDialogs:
-			chats, users = v.Chats, v.Users
-		case *tg.MessagesDialogsSlice:
-			chats, users = v.Chats, v.Users
-		default:
-			return fmt.Errorf("未预期的会话列表类型: %T", res)
-		}
-		peers = p.collectPeers(ctx, acc.ID, chats, users)
 		return nil
 	})
 	if runErr != nil {
@@ -113,19 +130,37 @@ func (p *Plugin) SyncSources(ctx context.Context, acc *domainaccount.Account) ([
 	return peers, nil
 }
 
-// collectPeers 缓存 access_hash 并组装 SyncedPeer；单条缓存失败不阻断整体同步。
-func (p *Plugin) collectPeers(ctx context.Context, accountID int64, chats []tg.ChatClass, users []tg.UserClass) []pluginsource.SyncedPeer {
+func unpackDialogs(res tg.MessagesDialogsClass) ([]tg.DialogClass, []tg.MessageClass, []tg.ChatClass, []tg.UserClass, bool, error) {
+	switch v := res.(type) {
+	case *tg.MessagesDialogs:
+		return v.Dialogs, v.Messages, v.Chats, v.Users, false, nil
+	case *tg.MessagesDialogsSlice:
+		return v.Dialogs, v.Messages, v.Chats, v.Users, len(v.Dialogs) >= syncDialogsPageSize && len(v.Dialogs) < v.Count, nil
+	default:
+		return nil, nil, nil, nil, false, fmt.Errorf("未预期的会话列表类型: %T", res)
+	}
+}
+
+// collectPeers 组装同步结果与待缓存 peer，调用方负责批量落库。
+func (p *Plugin) collectPeers(accountID int64, chats []tg.ChatClass, users []tg.UserClass, seen map[string]struct{}) ([]pluginsource.SyncedPeer, []*domainpeer.Peer) {
 	var peers []pluginsource.SyncedPeer
+	var cache []*domainpeer.Peer
 	for _, c := range chats {
 		switch ch := c.(type) {
 		case *tg.Channel:
-			p.cachePeer(ctx, accountID, domainpeer.TypeChannel, ch.ID, ch.AccessHash, ch.Username, ch.Title)
+			if !markSeen(seen, domainpeer.TypeChannel, ch.ID) {
+				continue
+			}
+			cache = append(cache, newPeer(accountID, domainpeer.TypeChannel, ch.ID, ch.AccessHash, ch.Username, ch.Title))
 			peers = append(peers, pluginsource.SyncedPeer{
 				PeerType: domainsource.PeerChannel, PeerID: ch.ID, Name: ch.Title, Username: ch.Username,
 			})
 		case *tg.Chat:
 			// 基础群组无 access_hash。
-			p.cachePeer(ctx, accountID, domainpeer.TypeChat, ch.ID, 0, "", ch.Title)
+			if !markSeen(seen, domainpeer.TypeChat, ch.ID) {
+				continue
+			}
+			cache = append(cache, newPeer(accountID, domainpeer.TypeChat, ch.ID, 0, "", ch.Title))
 			peers = append(peers, pluginsource.SyncedPeer{
 				PeerType: domainsource.PeerChat, PeerID: ch.ID, Name: ch.Title,
 			})
@@ -136,24 +171,91 @@ func (p *Plugin) collectPeers(ctx context.Context, accountID int64, chats []tg.C
 		if !ok {
 			continue
 		}
-		p.cachePeer(ctx, accountID, domainpeer.TypeUser, user.ID, user.AccessHash, user.Username, userDisplayName(user))
+		if !markSeen(seen, domainpeer.TypeUser, user.ID) {
+			continue
+		}
+		cache = append(cache, newPeer(accountID, domainpeer.TypeUser, user.ID, user.AccessHash, user.Username, userDisplayName(user)))
 		peers = append(peers, pluginsource.SyncedPeer{
 			PeerType: domainsource.PeerUser, PeerID: user.ID, Name: userDisplayName(user), Username: user.Username,
 		})
 	}
-	return peers
+	return peers, cache
 }
 
-func (p *Plugin) cachePeer(ctx context.Context, accountID int64, t domainpeer.Type, id, accessHash int64, username, title string) {
-	if p.deps.Peers == nil {
-		return
+func markSeen(seen map[string]struct{}, t domainpeer.Type, id int64) bool {
+	key := fmt.Sprintf("%s:%d", t, id)
+	if _, ok := seen[key]; ok {
+		return false
 	}
-	err := p.deps.Peers.Upsert(ctx, &domainpeer.Peer{
+	seen[key] = struct{}{}
+	return true
+}
+
+func newPeer(accountID int64, t domainpeer.Type, id, accessHash int64, username, title string) *domainpeer.Peer {
+	return &domainpeer.Peer{
 		AccountID: accountID, PeerType: t, PeerID: id, AccessHash: accessHash, Username: username, Title: title,
-	})
-	if err != nil {
-		p.deps.Log.Warn("缓存 peer access_hash 失败", "account", accountID, "peer", id, "err", err)
 	}
+}
+
+func (p *Plugin) cachePeers(ctx context.Context, peers []*domainpeer.Peer) error {
+	if p.deps.Peers == nil {
+		return nil
+	}
+	return p.deps.Peers.BulkUpsert(ctx, peers)
+}
+
+func nextDialogOffset(dialogs []tg.DialogClass, messages []tg.MessageClass, chats []tg.ChatClass, users []tg.UserClass) (tg.InputPeerClass, int, int) {
+	if len(dialogs) == 0 {
+		return nil, 0, 0
+	}
+	last := dialogs[len(dialogs)-1]
+	topID := last.GetTopMessage()
+	input := inputPeerFromPeer(last.GetPeer(), chats, users)
+	date := messageDate(messages, topID)
+	return input, topID, date
+}
+
+func inputPeerFromPeer(peer tg.PeerClass, chats []tg.ChatClass, users []tg.UserClass) tg.InputPeerClass {
+	switch p := peer.(type) {
+	case *tg.PeerChannel:
+		if ch := findChannel(chats, p.ChannelID); ch != nil {
+			return &tg.InputPeerChannel{ChannelID: ch.ID, AccessHash: ch.AccessHash}
+		}
+	case *tg.PeerChat:
+		return &tg.InputPeerChat{ChatID: p.ChatID}
+	case *tg.PeerUser:
+		if u := findUser(users, p.UserID); u != nil {
+			return &tg.InputPeerUser{UserID: u.ID, AccessHash: u.AccessHash}
+		}
+	}
+	return nil
+}
+
+func findChannel(chats []tg.ChatClass, id int64) *tg.Channel {
+	for _, c := range chats {
+		if ch, ok := c.(*tg.Channel); ok && ch.ID == id {
+			return ch
+		}
+	}
+	return nil
+}
+
+func findUser(users []tg.UserClass, id int64) *tg.User {
+	for _, u := range users {
+		if user, ok := u.(*tg.User); ok && user.ID == id {
+			return user
+		}
+	}
+	return nil
+}
+
+func messageDate(messages []tg.MessageClass, id int) int {
+	for _, m := range messages {
+		if msg, ok := m.(*tg.Message); ok && msg.ID == id {
+			return msg.Date
+		}
+	}
+	return 0
 }
 
 // Start 为一个 source 启动监听：连接账号客户端，过滤该 source 的消息并回调 handler。

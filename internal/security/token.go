@@ -2,9 +2,19 @@
 package security
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 )
+
+// GenerateToken 生成随机明文 token。调用方只应在响应中显示一次，存储层保存哈希。
+func GenerateToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
 
 // HashToken 返回 token 的十六进制 SHA-256 哈希。数据库只存哈希，不存明文。
 func HashToken(token string) string {

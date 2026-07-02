@@ -41,14 +41,14 @@ export const useAuthStore = defineStore('auth', {
       }
     },
     // 校验并登录，成功后保存凭证并刷新身份。
-    async login(token: string) {
-      await authApi.login(token)
-      this.saveToken(token)
+    async login(username: string, password: string) {
+      const res = await authApi.login(username, password)
+      this.saveToken(res.token)
       await this.fetchMe()
     },
     // 创建首个管理凭证，成功后保存明文并刷新身份。
-    async bootstrap(name: string) {
-      const created = await authApi.bootstrap(name)
+    async bootstrap(username: string, password: string) {
+      const created = await authApi.bootstrapAdmin(username, password)
       this.saveToken(created.token)
       await this.fetchMe()
       return created

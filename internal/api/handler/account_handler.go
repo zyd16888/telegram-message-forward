@@ -54,11 +54,10 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		return
 	}
 	acc, err := h.svc.Create(c.Request.Context(), appaccount.CreateInput{
-		Name:        req.Name,
-		PhoneNumber: req.PhoneNumber,
-		AppID:       req.AppID,
-		AppHash:     req.AppHash,
-		Proxy:       req.Proxy.ToDomain(),
+		Name:          req.Name,
+		PhoneNumber:   req.PhoneNumber,
+		TelegramAppID: req.TelegramAppID,
+		ProxyID:       req.ProxyID,
 	})
 	if err != nil {
 		respondError(c, err)
@@ -77,11 +76,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	in := appaccount.UpdateInput{Name: req.Name, AppID: req.AppID, AppHash: req.AppHash}
-	if req.Proxy != nil {
-		p := req.Proxy.ToDomain()
-		in.Proxy = &p
-	}
+	in := appaccount.UpdateInput{Name: req.Name, TelegramAppID: req.TelegramAppID, ProxyID: req.ProxyID, ClearProxy: req.ClearProxy}
 	acc, err := h.svc.Update(c.Request.Context(), id, in)
 	if err != nil {
 		respondError(c, err)

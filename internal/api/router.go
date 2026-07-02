@@ -19,15 +19,16 @@ type Deps struct {
 	// WebDir 为前端构建产物目录；为空时不托管前端静态文件。
 	WebDir string
 
-	Auth         *handler.AuthHandler
-	Account      *handler.AccountHandler
-	AccountLogin *handler.AccountLoginHandler
-	Sink         *handler.SinkHandler
-	Source       *handler.SourceHandler
-	Template     *handler.TemplateHandler
-	Rule         *handler.RuleHandler
-	Delivery     *handler.DeliveryHandler
-	Token        *handler.TokenHandler
+	Auth           *handler.AuthHandler
+	Account        *handler.AccountHandler
+	AccountLogin   *handler.AccountLoginHandler
+	Sink           *handler.SinkHandler
+	Source         *handler.SourceHandler
+	Template       *handler.TemplateHandler
+	Rule           *handler.RuleHandler
+	Delivery       *handler.DeliveryHandler
+	Token          *handler.TokenHandler
+	TelegramConfig *handler.TelegramConfigHandler
 }
 
 // NewRouter 构建 gin 引擎并挂载 /api/v1 资源接口。
@@ -135,6 +136,22 @@ func NewRouter(deps Deps) *gin.Engine {
 			tokens.GET("", deps.Token.List)
 			tokens.POST("", deps.Token.Create)
 			tokens.DELETE("/:id", deps.Token.Revoke)
+		}
+
+		tgApps := v1.Group("/telegram-apps")
+		{
+			tgApps.GET("", deps.TelegramConfig.ListApps)
+			tgApps.POST("", deps.TelegramConfig.CreateApp)
+			tgApps.PUT("/:id", deps.TelegramConfig.UpdateApp)
+			tgApps.DELETE("/:id", deps.TelegramConfig.DeleteApp)
+		}
+
+		proxies := v1.Group("/proxies")
+		{
+			proxies.GET("", deps.TelegramConfig.ListProxies)
+			proxies.POST("", deps.TelegramConfig.CreateProxy)
+			proxies.PUT("/:id", deps.TelegramConfig.UpdateProxy)
+			proxies.DELETE("/:id", deps.TelegramConfig.DeleteProxy)
 		}
 	}
 

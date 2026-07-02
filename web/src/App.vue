@@ -18,6 +18,7 @@ const isLoginRoute = computed(() => route.name === 'login')
 const menuOptions: MenuOption[] = [
   { label: '仪表盘', key: 'dashboard' },
   { label: '账号', key: 'accounts' },
+  { label: 'Telegram 配置', key: 'telegram-config' },
   { label: '监听源', key: 'sources' },
   { label: '目标渠道', key: 'sinks' },
   { label: '规则', key: 'rules' },

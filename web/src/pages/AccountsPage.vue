@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NSpace, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
-import { accountsApi } from '@/api/client'
-import type { Account } from '@/types'
+import { accountsApi, telegramConfigApi } from '@/api/client'
+import type { Account, SharedProxy, TelegramApp } from '@/types'
 import { errText } from '@/utils/error'
 import AccountLoginModal from '@/components/AccountLoginModal.vue'
 
@@ -12,6 +12,8 @@ const dialog = useDialog()
 const router = useRouter()
 
 const accounts = ref<Account[]>([])
+const apps = ref<TelegramApp[]>([])
+const proxies = ref<SharedProxy[]>([])
 const loading = ref(false)
 const showCreate = ref(false)
 const showLogin = ref(false)
@@ -20,10 +22,22 @@ const loginAccount = ref<Account | null>(null)
 const form = ref({
   name: '',
   phone_number: '',
-  app_id: 0,
-  app_hash: '',
-  proxy: { type: '', addr: '', username: '', password: '' },
+  telegram_app_id: null as number | null,
+  proxy_id: null as number | null,
 })
+
+const appOptions = computed(() =>
+  apps.value
+    .filter((app) => app.enabled)
+    .map((app) => ({ label: `${app.name} (${app.app_id})`, value: app.id })),
+)
+
+const proxyOptions = computed(() => [
+  { label: '不使用代理', value: 0 },
+  ...proxies.value
+    .filter((proxy) => proxy.enabled)
+    .map((proxy) => ({ label: `${proxy.name} (${proxy.type} ${proxy.addr})`, value: proxy.id })),
+])
 
 const statusType: Record<string, 'success' | 'warning' | 'error' | 'default'> = {
   active: 'success',
@@ -37,6 +51,8 @@ async function load() {
   loading.value = true
   try {
     accounts.value = await accountsApi.list()
+    apps.value = await telegramConfigApi.apps.list()
+    proxies.value = await telegramConfigApi.proxies.list()
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
@@ -45,20 +61,23 @@ async function load() {
 }
 
 async function create() {
+  if (!form.value.telegram_app_id) {
+    message.warning('请先选择 Telegram App')
+    return
+  }
   try {
     const body: Record<string, unknown> = {
       name: form.value.name,
       phone_number: form.value.phone_number,
-      app_id: Number(form.value.app_id),
-      app_hash: form.value.app_hash,
+      telegram_app_id: form.value.telegram_app_id,
     }
-    if (form.value.proxy.addr) body.proxy = form.value.proxy
+    if (form.value.proxy_id) body.proxy_id = form.value.proxy_id
     const created = await accountsApi.create(body)
     message.success('账号已创建，点击「登录」完成 Telegram 登录')
     showCreate.value = false
     // 新建后自动打开登录弹窗。
     openLogin(created)
-    form.value = { name: '', phone_number: '', app_id: 0, app_hash: '', proxy: { type: '', addr: '', username: '', password: '' } }
+    form.value = { name: '', phone_number: '', telegram_app_id: null, proxy_id: null }
     await load()
   } catch (e) {
     message.error('创建失败：' + errText(e))
@@ -107,6 +126,14 @@ const columns: DataTableColumns<Account> = [
   { title: '手机号', key: 'phone_number' },
   { title: 'App ID', key: 'app_id' },
   {
+    title: '代理',
+    key: 'proxy_id',
+    render: (r) => {
+      const proxy = proxies.value.find((p) => p.id === r.proxy_id)
+      return proxy ? proxy.name : '直连'
+    },
+  },
+  {
     title: '状态',
     key: 'status',
     render: (r) => h(NTag, { type: statusType[r.status] ?? 'default', size: 'small' }, { default: () => r.status }),
@@ -151,18 +178,20 @@ onMounted(load)
       <n-form label-placement="left" label-width="90">
         <n-form-item label="名称"><n-input v-model:value="form.name" /></n-form-item>
         <n-form-item label="手机号"><n-input v-model:value="form.phone_number" placeholder="+8613800000000" /></n-form-item>
-        <n-form-item label="App ID"><n-input-number v-model:value="form.app_id" :show-button="false" style="width: 100%" /></n-form-item>
-        <n-form-item label="App Hash"><n-input v-model:value="form.app_hash" type="password" show-password-on="click" /></n-form-item>
-        <n-divider>代理（可选）</n-divider>
-        <n-form-item label="类型">
+        <n-form-item label="Telegram App">
           <n-select
-            v-model:value="form.proxy.type"
-            :options="[{ label: '无', value: '' }, { label: 'socks5', value: 'socks5' }]"
+            v-model:value="form.telegram_app_id"
+            :options="appOptions"
+            placeholder="选择平台 App 配置"
           />
         </n-form-item>
-        <n-form-item label="地址"><n-input v-model:value="form.proxy.addr" placeholder="host:port" /></n-form-item>
-        <n-form-item label="用户名"><n-input v-model:value="form.proxy.username" /></n-form-item>
-        <n-form-item label="密码"><n-input v-model:value="form.proxy.password" type="password" show-password-on="click" /></n-form-item>
+        <n-form-item label="代理">
+          <n-select
+            v-model:value="form.proxy_id"
+            :options="proxyOptions"
+            placeholder="选择代理"
+          />
+        </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">

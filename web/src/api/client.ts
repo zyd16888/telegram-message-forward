@@ -9,10 +9,12 @@ import type {
   LoginFlow,
   Me,
   Rule,
+  SharedProxy,
   Sink,
   Source,
   SyncedPeer,
   Template,
+  TelegramApp,
   TokenCreated,
 } from '@/types'
 
@@ -32,7 +34,7 @@ export function setToken(token: string): void {
 
 const http: AxiosInstance = axios.create({
   baseURL: '/api/v1',
-  timeout: 20000,
+  timeout: 60000,
 })
 
 http.interceptors.request.use((config) => {
@@ -65,10 +67,12 @@ http.interceptors.response.use(
 export const authApi = {
   bootstrapStatus: () =>
     http.get<ApiItem<BootstrapStatus>>('/auth/bootstrap').then((r) => r.data.data),
-  bootstrap: (name: string) =>
-    http.post<ApiItem<TokenCreated>>('/auth/bootstrap', { name }).then((r) => r.data.data),
-  login: (token: string) =>
-    http.post<ApiItem<{ authenticated: boolean }>>('/auth/login', { token }).then((r) => r.data.data),
+  bootstrapAdmin: (username: string, password: string) =>
+    http.post<ApiItem<{ token: string }>>('/auth/bootstrap', { username, password }).then((r) => r.data.data),
+  login: (username: string, password: string) =>
+    http
+      .post<ApiItem<{ authenticated: boolean; token: string }>>('/auth/login', { username, password })
+      .then((r) => r.data.data),
   me: () => http.get<ApiItem<Me>>('/auth/me').then((r) => r.data.data),
   logout: () => http.post('/auth/logout'),
 }
@@ -141,7 +145,7 @@ export const sourcesApi = {
   remove: (id: number) => http.delete(`/sources/${id}`),
   sync: (accountId: number) =>
     http
-      .post<ApiList<SyncedPeer>>(`/sources/sync?account_id=${accountId}`)
+      .post<ApiList<SyncedPeer>>(`/sources/sync?account_id=${accountId}`, undefined, { timeout: 120000 })
       .then((r) => r.data.data),
   start: (id: number) => http.post(`/sources/${id}/start`),
   stop: (id: number) => http.post(`/sources/${id}/stop`),
@@ -183,4 +187,24 @@ export const tokensApi = {
   create: (name: string) =>
     http.post<ApiItem<TokenCreated>>('/tokens', { name }).then((r) => r.data.data),
   revoke: (id: number) => http.delete(`/tokens/${id}`),
+}
+
+// --- Telegram Config ---
+export const telegramConfigApi = {
+  apps: {
+    list: () => http.get<ApiList<TelegramApp>>('/telegram-apps').then((r) => r.data.data),
+    create: (body: Record<string, unknown>) =>
+      http.post<ApiItem<TelegramApp>>('/telegram-apps', body).then((r) => r.data.data),
+    update: (id: number, body: Record<string, unknown>) =>
+      http.put<ApiItem<TelegramApp>>(`/telegram-apps/${id}`, body).then((r) => r.data.data),
+    remove: (id: number) => http.delete(`/telegram-apps/${id}`),
+  },
+  proxies: {
+    list: () => http.get<ApiList<SharedProxy>>('/proxies').then((r) => r.data.data),
+    create: (body: Record<string, unknown>) =>
+      http.post<ApiItem<SharedProxy>>('/proxies', body).then((r) => r.data.data),
+    update: (id: number, body: Record<string, unknown>) =>
+      http.put<ApiItem<SharedProxy>>(`/proxies/${id}`, body).then((r) => r.data.data),
+    remove: (id: number) => http.delete(`/proxies/${id}`),
+  },
 }

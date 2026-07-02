@@ -46,6 +46,30 @@ func (r *TelegramPeerRepository) Upsert(ctx context.Context, p *domainpeer.Peer)
 	return nil
 }
 
+// BulkUpsert 批量插入或更新 peer 缓存，避免海外数据库逐条往返。
+func (r *TelegramPeerRepository) BulkUpsert(ctx context.Context, peers []*domainpeer.Peer) error {
+	if len(peers) == 0 {
+		return nil
+	}
+	now := time.Now()
+	ms := make([]model.TelegramPeer, 0, len(peers))
+	for _, p := range peers {
+		ms = append(ms, model.TelegramPeer{
+			AccountID:  p.AccountID,
+			PeerType:   string(p.PeerType),
+			PeerID:     p.PeerID,
+			AccessHash: p.AccessHash,
+			Username:   p.Username,
+			Title:      p.Title,
+			UpdatedAt:  now,
+		})
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "account_id"}, {Name: "peer_type"}, {Name: "peer_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"access_hash", "username", "title", "updated_at"}),
+	}).Create(&ms).Error
+}
+
 // Get 按唯一键查询单个 peer；不存在返回 (nil, nil)。
 func (r *TelegramPeerRepository) Get(ctx context.Context, accountID int64, peerType domainpeer.Type, peerID int64) (*domainpeer.Peer, error) {
 	var m model.TelegramPeer

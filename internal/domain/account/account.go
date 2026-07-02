@@ -29,18 +29,20 @@ type ProxyConfig struct {
 //
 // AppHash 与 Session 属于敏感字段，领域层持有明文，存储层负责加解密。
 type Account struct {
-	ID          int64
-	Name        string
-	PhoneNumber string
-	AppID       int
-	AppHash     string
-	Session     []byte
-	Proxy       ProxyConfig
-	Status      Status
-	LastLoginAt *time.Time
-	LastError   string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            int64
+	Name          string
+	PhoneNumber   string
+	TelegramAppID *int64
+	ProxyID       *int64
+	AppID         int
+	AppHash       string
+	Session       []byte
+	Proxy         ProxyConfig
+	Status        Status
+	LastLoginAt   *time.Time
+	LastError     string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Repository 是账号仓储接口。

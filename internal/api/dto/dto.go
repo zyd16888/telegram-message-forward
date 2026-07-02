@@ -14,6 +14,7 @@ import (
 	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domainsource "telegram-message-forward/internal/domain/source"
+	domainconfig "telegram-message-forward/internal/domain/telegramconfig"
 	domaintemplate "telegram-message-forward/internal/domain/template"
 )
 
@@ -40,26 +41,30 @@ type ProxyDTO struct {
 
 // AccountDTO 是脱敏后的账号响应。
 type AccountDTO struct {
-	ID          int64      `json:"id"`
-	Name        string     `json:"name"`
-	PhoneNumber string     `json:"phone_number"` // 脱敏
-	AppID       int        `json:"app_id"`
-	Status      string     `json:"status"`
-	Proxy       ProxyDTO   `json:"proxy"`
-	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
-	LastError   string     `json:"last_error,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID            int64      `json:"id"`
+	Name          string     `json:"name"`
+	PhoneNumber   string     `json:"phone_number"` // 脱敏
+	TelegramAppID *int64     `json:"telegram_app_id,omitempty"`
+	ProxyID       *int64     `json:"proxy_id,omitempty"`
+	AppID         int        `json:"app_id"`
+	Status        string     `json:"status"`
+	Proxy         ProxyDTO   `json:"proxy"`
+	LastLoginAt   *time.Time `json:"last_login_at,omitempty"`
+	LastError     string     `json:"last_error,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // NewAccountDTO 从 domain 账号构造脱敏 DTO。
 func NewAccountDTO(a *domainaccount.Account) AccountDTO {
 	return AccountDTO{
-		ID:          a.ID,
-		Name:        a.Name,
-		PhoneNumber: maskPhone(a.PhoneNumber),
-		AppID:       a.AppID,
-		Status:      string(a.Status),
+		ID:            a.ID,
+		Name:          a.Name,
+		PhoneNumber:   maskPhone(a.PhoneNumber),
+		TelegramAppID: a.TelegramAppID,
+		ProxyID:       a.ProxyID,
+		AppID:         a.AppID,
+		Status:        string(a.Status),
 		Proxy: ProxyDTO{
 			Type:     a.Proxy.Type,
 			Addr:     a.Proxy.Addr,
@@ -75,11 +80,10 @@ func NewAccountDTO(a *domainaccount.Account) AccountDTO {
 
 // AccountCreateRequest 是创建账号请求。
 type AccountCreateRequest struct {
-	Name        string        `json:"name" binding:"required"`
-	PhoneNumber string        `json:"phone_number" binding:"required"`
-	AppID       int           `json:"app_id" binding:"required"`
-	AppHash     string        `json:"app_hash" binding:"required"`
-	Proxy       *ProxyRequest `json:"proxy,omitempty"`
+	Name          string `json:"name" binding:"required"`
+	PhoneNumber   string `json:"phone_number" binding:"required"`
+	TelegramAppID int64  `json:"telegram_app_id" binding:"required"`
+	ProxyID       *int64 `json:"proxy_id,omitempty"`
 }
 
 // ProxyRequest 是代理配置请求（含明文密码，仅写入）。
@@ -88,6 +92,78 @@ type ProxyRequest struct {
 	Addr     string `json:"addr"`
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+// --- Telegram Shared Config ---
+
+// TelegramAppDTO 是脱敏后的 Telegram App 响应。
+type TelegramAppDTO struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	AppID     int       `json:"app_id"`
+	Enabled   bool      `json:"enabled"`
+	HasHash   bool      `json:"has_hash"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// NewTelegramAppDTO 构造 Telegram App DTO。
+func NewTelegramAppDTO(app *domainconfig.TelegramApp) TelegramAppDTO {
+	return TelegramAppDTO{
+		ID:        app.ID,
+		Name:      app.Name,
+		AppID:     app.AppID,
+		Enabled:   app.Enabled,
+		HasHash:   app.AppHash != "",
+		CreatedAt: app.CreatedAt,
+		UpdatedAt: app.UpdatedAt,
+	}
+}
+
+// TelegramAppRequest 是 Telegram App 创建/更新请求。更新时 app_hash 为空表示保留原值。
+type TelegramAppRequest struct {
+	Name    string  `json:"name" binding:"required"`
+	AppID   int     `json:"app_id" binding:"required"`
+	AppHash *string `json:"app_hash,omitempty"`
+	Enabled bool    `json:"enabled"`
+}
+
+// SharedProxyDTO 是脱敏后的代理配置响应。
+type SharedProxyDTO struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Addr        string    `json:"addr"`
+	Username    string    `json:"username,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	HasPassword bool      `json:"has_password"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// NewSharedProxyDTO 构造代理 DTO。
+func NewSharedProxyDTO(p *domainconfig.Proxy) SharedProxyDTO {
+	return SharedProxyDTO{
+		ID:          p.ID,
+		Name:        p.Name,
+		Type:        p.Type,
+		Addr:        p.Addr,
+		Username:    p.Username,
+		Enabled:     p.Enabled,
+		HasPassword: p.Password != "",
+		CreatedAt:   p.CreatedAt,
+		UpdatedAt:   p.UpdatedAt,
+	}
+}
+
+// SharedProxyRequest 是代理配置创建/更新请求。更新时 password 为空表示保留原值。
+type SharedProxyRequest struct {
+	Name     string  `json:"name" binding:"required"`
+	Type     string  `json:"type" binding:"required"`
+	Addr     string  `json:"addr" binding:"required"`
+	Username string  `json:"username"`
+	Password *string `json:"password,omitempty"`
+	Enabled  bool    `json:"enabled"`
 }
 
 // ToDomain 转为 domain 代理配置。
@@ -100,10 +176,10 @@ func (p *ProxyRequest) ToDomain() domainaccount.ProxyConfig {
 
 // AccountUpdateRequest 是更新账号请求。
 type AccountUpdateRequest struct {
-	Name    *string       `json:"name,omitempty"`
-	AppID   *int          `json:"app_id,omitempty"`
-	AppHash *string       `json:"app_hash,omitempty"`
-	Proxy   *ProxyRequest `json:"proxy,omitempty"`
+	Name          *string `json:"name,omitempty"`
+	TelegramAppID *int64  `json:"telegram_app_id,omitempty"`
+	ProxyID       *int64  `json:"proxy_id,omitempty"`
+	ClearProxy    bool    `json:"clear_proxy,omitempty"`
 }
 
 // --- Sink ---
@@ -482,22 +558,29 @@ type BootstrapStatusDTO struct {
 
 // BootstrapRequest 是创建首个管理凭证请求。
 type BootstrapRequest struct {
-	Name string `json:"name"`
+	Username string `json:"username"`
+	Password string `json:"password" binding:"required"`
 }
 
-// LoginRequest 是登录请求，仅校验 token 有效性。
+// LoginRequest 是管理后台用户名密码登录请求。
 type LoginRequest struct {
-	Token string `json:"token" binding:"required"`
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
 }
 
 // LoginResultDTO 是登录结果。
 type LoginResultDTO struct {
-	Authenticated bool `json:"authenticated"`
+	Authenticated bool      `json:"authenticated"`
+	Token         string    `json:"token"`
+	Username      string    `json:"username,omitempty"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }
 
 // MeDTO 是当前登录身份状态。
 type MeDTO struct {
-	AuthEnabled   bool `json:"auth_enabled"`
-	Authenticated bool `json:"authenticated"`
-	CanBootstrap  bool `json:"can_bootstrap"`
+	AuthEnabled    bool   `json:"auth_enabled"`
+	Authenticated  bool   `json:"authenticated"`
+	CanBootstrap   bool   `json:"can_bootstrap"`
+	Username       string `json:"username,omitempty"`
+	CredentialType string `json:"credential_type,omitempty"`
 }

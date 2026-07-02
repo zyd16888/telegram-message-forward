@@ -15,6 +15,8 @@ type Account struct {
 	ID               int64 `gorm:"primaryKey"`
 	Name             string
 	PhoneNumber      string
+	TelegramAppID    *int64
+	ProxyID          *int64
 	AppID            int
 	AppHashEncrypted []byte
 	SessionEncrypted []byte
@@ -28,6 +30,60 @@ type Account struct {
 
 // TableName 指定表名。
 func (Account) TableName() string { return "accounts" }
+
+// AdminUser 对应 admin_users 表。
+type AdminUser struct {
+	ID           int64 `gorm:"primaryKey"`
+	Username     string
+	PasswordHash string
+	Active       bool
+	LastLoginAt  *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+func (AdminUser) TableName() string { return "admin_users" }
+
+// AdminSession 对应 admin_sessions 表。
+type AdminSession struct {
+	ID         int64 `gorm:"primaryKey"`
+	UserID     int64
+	TokenHash  string
+	ExpiresAt  time.Time
+	LastUsedAt *time.Time
+	RevokedAt  *time.Time
+	CreatedAt  time.Time
+}
+
+func (AdminSession) TableName() string { return "admin_sessions" }
+
+// TelegramApp 对应 telegram_apps 表。
+type TelegramApp struct {
+	ID               int64 `gorm:"primaryKey"`
+	Name             string
+	AppID            int
+	AppHashEncrypted []byte
+	Enabled          bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+func (TelegramApp) TableName() string { return "telegram_apps" }
+
+// ProxyConfig 对应 proxy_configs 表。
+type ProxyConfig struct {
+	ID                int64 `gorm:"primaryKey"`
+	Name              string
+	Type              string
+	Addr              string
+	Username          string
+	PasswordEncrypted []byte
+	Enabled           bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+func (ProxyConfig) TableName() string { return "proxy_configs" }
 
 // TelegramPeer 对应 telegram_peers 表，缓存 access_hash。
 type TelegramPeer struct {

@@ -19,6 +19,8 @@ export interface Account {
   id: number
   name: string
   phone_number: string
+  telegram_app_id?: number
+  proxy_id?: number
   app_id: number
   status: string
   proxy: Proxy
@@ -162,4 +164,28 @@ export interface Me {
   auth_enabled: boolean
   authenticated: boolean
   can_bootstrap: boolean
+  username?: string
+  credential_type?: string
+}
+
+export interface TelegramApp {
+  id: number
+  name: string
+  app_id: number
+  enabled: boolean
+  has_hash: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface SharedProxy {
+  id: number
+  name: string
+  type: string
+  addr: string
+  username?: string
+  enabled: boolean
+  has_password: boolean
+  created_at: string
+  updated_at: string
 }

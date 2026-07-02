@@ -13,9 +13,10 @@ const loading = ref(false)
 const ready = ref(false)
 
 // 表单输入。
-const tokenInput = ref('')
-const bootstrapName = ref('admin')
-const createdToken = ref('')
+const username = ref('admin')
+const password = ref('')
+const bootstrapUsername = ref('admin')
+const bootstrapPassword = ref('')
 
 // 展示模式：dev（免鉴权） / bootstrap（首次初始化） / login（输入 token）。
 const mode = computed<'dev' | 'bootstrap' | 'login'>(() => {
@@ -43,13 +44,13 @@ function enter() {
 }
 
 async function doLogin() {
-  if (!tokenInput.value.trim()) {
-    message.warning('请输入管理 Token')
+  if (!username.value.trim() || !password.value) {
+    message.warning('请输入用户名和密码')
     return
   }
   loading.value = true
   try {
-    await auth.login(tokenInput.value.trim())
+    await auth.login(username.value.trim(), password.value)
     message.success('登录成功')
     enter()
   } catch (e) {
@@ -60,11 +61,15 @@ async function doLogin() {
 }
 
 async function doBootstrap() {
+  if (!bootstrapUsername.value.trim() || !bootstrapPassword.value) {
+    message.warning('请输入管理员用户名和密码')
+    return
+  }
   loading.value = true
   try {
-    const created = await auth.bootstrap(bootstrapName.value.trim() || 'admin')
-    createdToken.value = created.token
-    message.success('已创建首个管理凭证，请立即妥善保存明文 Token')
+    await auth.bootstrap(bootstrapUsername.value.trim() || 'admin', bootstrapPassword.value)
+    message.success('管理员已创建')
+    enter()
   } catch (e) {
     message.error('初始化失败：' + errText(e))
   } finally {
@@ -93,42 +98,42 @@ async function doBootstrap() {
         <!-- 首次初始化 -->
         <div v-else-if="mode === 'bootstrap'">
           <n-alert type="info" title="首次使用：创建管理凭证">
-            系统尚无任何管理凭证。创建后将生成一个明文 Token，仅显示一次，请妥善保存。
+            系统尚无管理员。创建后即可用用户名和密码登录后台。
           </n-alert>
           <n-space vertical class="mt">
-            <n-input v-model:value="bootstrapName" placeholder="凭证名称，如 admin" />
+            <n-input v-model:value="bootstrapUsername" placeholder="用户名，如 admin" />
+            <n-input
+              v-model:value="bootstrapPassword"
+              type="password"
+              show-password-on="click"
+              placeholder="登录密码"
+              @keyup.enter="doBootstrap"
+            />
             <n-button type="primary" block :loading="loading" @click="doBootstrap">
-              创建首个管理凭证
+              创建管理员
             </n-button>
           </n-space>
-
-          <n-alert
-            v-if="createdToken"
-            class="mt"
-            type="success"
-            title="明文 Token（仅显示一次）"
-          >
-            <n-space vertical>
-              <n-text code>{{ createdToken }}</n-text>
-              <n-button type="primary" size="small" @click="enter">已保存，进入后台</n-button>
-            </n-space>
-          </n-alert>
         </div>
 
         <!-- 登录 -->
         <div v-else>
           <n-space vertical>
-            <n-text depth="3">输入管理 Token 登录后台。</n-text>
+            <n-text depth="3">输入管理员用户名和密码登录后台。</n-text>
             <n-input
-              v-model:value="tokenInput"
+              v-model:value="username"
+              placeholder="用户名"
+              @keyup.enter="doLogin"
+            />
+            <n-input
+              v-model:value="password"
               type="password"
               show-password-on="click"
-              placeholder="管理 Token"
+              placeholder="密码"
               @keyup.enter="doLogin"
             />
             <n-button type="primary" block :loading="loading" @click="doLogin">登录</n-button>
             <n-text depth="3" style="font-size: 12px">
-              提示：Token 也可用 <n-text code>go run ./cmd/token create</n-text> 从命令行生成（运维兜底）。
+              API Token 仍可在设置页维护，供脚本或运维调用使用。
             </n-text>
           </n-space>
         </div>

@@ -20,6 +20,7 @@ import (
 	apprule "telegram-message-forward/internal/app/rule"
 	appsink "telegram-message-forward/internal/app/sink"
 	appsource "telegram-message-forward/internal/app/source"
+	apptelegramconfig "telegram-message-forward/internal/app/telegramconfig"
 	apptelegramlogin "telegram-message-forward/internal/app/telegramlogin"
 	apptemplate "telegram-message-forward/internal/app/template"
 	"telegram-message-forward/internal/config"
@@ -59,14 +60,17 @@ type Deps struct {
 	Cipher *crypto.Cipher
 	Clock  clock.Clock
 
-	Accounts   *repository.AccountRepository
-	Sources    *repository.SourceRepository
-	Sinks      *repository.SinkRepository
-	Templates  *repository.TemplateRepository
-	Rules      *repository.RuleRepository
-	Messages   *repository.MessageRepository
-	Deliveries *repository.DeliveryRepository
-	APITokens  *repository.APITokenRepository
+	Accounts     *repository.AccountRepository
+	Sources      *repository.SourceRepository
+	Sinks        *repository.SinkRepository
+	Templates    *repository.TemplateRepository
+	Rules        *repository.RuleRepository
+	Messages     *repository.MessageRepository
+	Deliveries   *repository.DeliveryRepository
+	APITokens    *repository.APITokenRepository
+	Admins       *repository.AdminRepository
+	TelegramApps *repository.TelegramAppRepository
+	Proxies      *repository.ProxyConfigRepository
 
 	Engine   *ruleengine.Engine
 	Renderer *tmpl.Renderer
@@ -112,6 +116,9 @@ func Build(cfg *config.Config) (*App, error) {
 	deliveries := repository.NewDeliveryRepository(db)
 	peers := repository.NewTelegramPeerRepository(db)
 	apiTokens := repository.NewAPITokenRepository(db)
+	admins := repository.NewAdminRepository(db)
+	telegramApps := repository.NewTelegramAppRepository(db, cipher)
+	proxies := repository.NewProxyConfigRepository(db, cipher)
 	loginFlows := repository.NewTelegramLoginFlowRepository(db, cipher)
 
 	// 规则引擎、渲染器、投递队列。
@@ -160,18 +167,28 @@ func Build(cfg *config.Config) (*App, error) {
 
 	validator := security.TokenValidator{
 		Lookup: func(hash string) (bool, error) {
+			now := time.Now()
+			sess, user, err := admins.GetActiveSessionByHash(context.Background(), hash, now)
+			if err != nil {
+				return false, err
+			}
+			if sess != nil && user != nil {
+				_ = admins.TouchSession(context.Background(), sess.ID, now)
+				return true, nil
+			}
 			return apiTokens.ExistsActiveHash(context.Background(), hash)
 		},
 	}
 
 	// 应用服务装配。
-	accountSvc := appaccount.NewService(accounts)
+	accountSvc := appaccount.NewService(accounts, telegramApps, proxies)
 	sinkSvc := appsink.NewService(sinks)
 	templateSvc := apptemplate.NewService(templates)
 	ruleSvc := apprule.NewService(rules, apprule.ValidatorDeps{Sinks: sinks, Templates: templates})
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)
 	tokenSvc := apptoken.NewService(apiTokens)
-	authSvc := appauth.NewService(apiTokens, tokenSvc, cfg.Security.AuthEnabled)
+	authSvc := appauth.NewService(admins, apiTokens, tokenSvc, cfg.Security.AuthEnabled)
+	tgConfigSvc := apptelegramconfig.NewService(telegramApps, proxies)
 	tgLoginRunner := infratelegram.LoginFlowService{}
 	tgQRRunner := infratelegram.NewQRSessionManager()
 	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, tgLoginRunner, tgQRRunner, clk, log)
@@ -190,6 +207,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Rule:           handler.NewRuleHandler(ruleSvc),
 		Delivery:       handler.NewDeliveryHandler(deliverySvc),
 		Token:          handler.NewTokenHandler(tokenSvc),
+		TelegramConfig: handler.NewTelegramConfigHandler(tgConfigSvc),
 	})
 
 	server := &http.Server{
@@ -199,21 +217,24 @@ func Build(cfg *config.Config) (*App, error) {
 	}
 
 	deps := &Deps{
-		Cipher:     cipher,
-		Clock:      clk,
-		Accounts:   accounts,
-		Sources:    sources,
-		Sinks:      sinks,
-		Templates:  templates,
-		Rules:      rules,
-		Messages:   messages,
-		Deliveries: deliveries,
-		APITokens:  apiTokens,
-		Engine:     engine,
-		Renderer:   renderer,
-		Queue:      queue,
-		Ingest:     ingestSvc,
-		Delivery:   deliverySvc,
+		Cipher:       cipher,
+		Clock:        clk,
+		Accounts:     accounts,
+		Sources:      sources,
+		Sinks:        sinks,
+		Templates:    templates,
+		Rules:        rules,
+		Messages:     messages,
+		Deliveries:   deliveries,
+		APITokens:    apiTokens,
+		Admins:       admins,
+		TelegramApps: telegramApps,
+		Proxies:      proxies,
+		Engine:       engine,
+		Renderer:     renderer,
+		Queue:        queue,
+		Ingest:       ingestSvc,
+		Delivery:     deliverySvc,
 	}
 
 	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, tgLogin: tgLoginSvc, deps: deps}, nil

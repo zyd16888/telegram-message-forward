@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { NButton, NSpace, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import { accountsApi, sourcesApi } from '@/api/client'
 import type { Account, Source, SyncedPeer } from '@/types'
@@ -14,6 +14,12 @@ const loading = ref(false)
 const syncAccountId = ref<number | null>(null)
 const syncedPeers = ref<SyncedPeer[]>([])
 const syncing = ref(false)
+const peerTypeFilter = ref<string | null>(null)
+
+const visiblePeers = computed(() => {
+  if (!peerTypeFilter.value) return syncedPeers.value
+  return syncedPeers.value.filter((peer) => peer.peer_type === peerTypeFilter.value)
+})
 
 async function load() {
   loading.value = true
@@ -144,12 +150,23 @@ onMounted(load)
           :options="accounts.map((a) => ({ label: `${a.name} (${a.status})`, value: a.id }))"
         />
         <n-button type="primary" :loading="syncing" @click="doSync">同步</n-button>
+        <n-select
+          v-model:value="peerTypeFilter"
+          clearable
+          style="width: 160px"
+          placeholder="全部类型"
+          :options="[
+            { label: '用户', value: 'user' },
+            { label: '普通群', value: 'chat' },
+            { label: '频道/超级群', value: 'channel' },
+          ]"
+        />
       </n-space>
       <n-data-table
         v-if="syncedPeers.length"
         style="margin-top: 12px"
         :columns="peerColumns"
-        :data="syncedPeers"
+        :data="visiblePeers"
         :bordered="false"
         :max-height="260"
       />

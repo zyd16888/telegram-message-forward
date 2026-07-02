@@ -40,9 +40,10 @@ func (h *AuthHandler) BootstrapStatus(c *gin.Context) {
 // Bootstrap POST /auth/bootstrap — 创建首个管理凭证，明文仅此一次返回。
 func (h *AuthHandler) Bootstrap(c *gin.Context) {
 	var req dto.BootstrapRequest
-	// name 可空，绑定失败仅在 body 非法时报错。
-	_ = c.ShouldBindJSON(&req)
-	created, err := h.svc.Bootstrap(c.Request.Context(), strings.TrimSpace(req.Name))
+	if !bindJSON(c, &req) {
+		return
+	}
+	res, err := h.svc.Bootstrap(c.Request.Context(), strings.TrimSpace(req.Username), req.Password)
 	if err != nil {
 		var closed appauth.ErrBootstrapClosed
 		if errors.As(err, &closed) {
@@ -52,27 +53,35 @@ func (h *AuthHandler) Bootstrap(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": dto.TokenCreatedDTO{
-		ID: created.ID, Name: created.Name, Token: created.Token,
+	c.JSON(http.StatusCreated, gin.H{"data": dto.LoginResultDTO{
+		Authenticated: res.Authenticated,
+		Token:         res.Token,
+		Username:      res.Username,
+		ExpiresAt:     res.ExpiresAt,
 	}})
 }
 
-// Login POST /auth/login — 校验管理 token 是否有效。
+// Login POST /auth/login — 校验用户名密码并签发浏览器会话。
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req dto.LoginRequest
 	if !bindJSON(c, &req) {
 		return
 	}
-	ok, err := h.svc.Login(c.Request.Context(), strings.TrimSpace(req.Token))
+	res, err := h.svc.Login(c.Request.Context(), strings.TrimSpace(req.Username), req.Password)
 	if err != nil {
+		if errors.Is(err, appauth.ErrInvalidCredential) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			return
+		}
 		respondError(c, err)
 		return
 	}
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "token 无效"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": dto.LoginResultDTO{Authenticated: true}})
+	c.JSON(http.StatusOK, gin.H{"data": dto.LoginResultDTO{
+		Authenticated: res.Authenticated,
+		Token:         res.Token,
+		Username:      res.Username,
+		ExpiresAt:     res.ExpiresAt,
+	}})
 }
 
 // Me GET /auth/me — 返回当前登录身份状态。
@@ -84,14 +93,21 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": dto.MeDTO{
-		AuthEnabled:   id.AuthEnabled,
-		Authenticated: id.Authenticated,
-		CanBootstrap:  id.CanBootstrap,
+		AuthEnabled:    id.AuthEnabled,
+		Authenticated:  id.Authenticated,
+		CanBootstrap:   id.CanBootstrap,
+		Username:       id.Username,
+		CredentialType: id.CredentialType,
 	}})
 }
 
 // Logout POST /auth/logout — 前端清理本地凭证；服务端当前无会话状态。
 func (h *AuthHandler) Logout(c *gin.Context) {
+	token := bearerToken(c.GetHeader("Authorization"))
+	if err := h.svc.Logout(c.Request.Context(), token); err != nil {
+		respondError(c, err)
+		return
+	}
 	c.Status(http.StatusNoContent)
 }
 
