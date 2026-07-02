@@ -24,10 +24,17 @@ type Capabilities struct {
 
 // SyncedPeer 是同步到的一个 chat/channel/user。
 type SyncedPeer struct {
-	PeerType domainsource.PeerType
-	PeerID   int64
-	Name     string
-	Username string
+	PeerType     domainsource.PeerType
+	PeerKind     string
+	PeerID       int64
+	Name         string
+	Username     string
+	DisplayType  string
+	IsBot        bool
+	IsChannel    bool
+	IsSupergroup bool
+	IsForum      bool
+	Flags        []string
 }
 
 // SyncPeerHandler 接收同步过程中的单个 peer。

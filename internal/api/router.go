@@ -88,6 +88,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		{
 			sinks.GET("", deps.Sink.List)
 			sinks.GET("/types", deps.Sink.Types)
+			sinks.GET("/meta", deps.Sink.Meta)
 			sinks.POST("", deps.Sink.Create)
 			sinks.GET("/:id", deps.Sink.Get)
 			sinks.PUT("/:id", deps.Sink.Update)
@@ -110,6 +111,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		templates := v1.Group("/templates")
 		{
 			templates.GET("", deps.Template.List)
+			templates.POST("/preview", deps.Template.Preview)
 			templates.POST("", deps.Template.Create)
 			templates.GET("/:id", deps.Template.Get)
 			templates.PUT("/:id", deps.Template.Update)
@@ -119,6 +121,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		rules := v1.Group("/rules")
 		{
 			rules.GET("", deps.Rule.List)
+			rules.GET("/meta", deps.Rule.Meta)
 			rules.POST("", deps.Rule.Create)
 			rules.GET("/:id", deps.Rule.Get)
 			rules.PUT("/:id", deps.Rule.Update)

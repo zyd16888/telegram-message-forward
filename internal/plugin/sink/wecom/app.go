@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"telegram-message-forward/internal/domain/formschema"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	"telegram-message-forward/internal/infra/httpclient"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
@@ -46,6 +47,48 @@ var _ pluginsink.Plugin = (*AppSink)(nil)
 
 // Name 返回插件名。
 func (s *AppSink) Name() string { return "wecom_app" }
+
+// Descriptor 返回后台表单元数据。
+func (s *AppSink) Descriptor() pluginsink.Descriptor {
+	return pluginsink.Descriptor{
+		Type:        s.Name(),
+		Label:       "企业微信应用消息",
+		Description: "通过企业微信自建应用发送消息，适合固定成员或部门通知。",
+		ConfigFields: []formschema.FieldSpec{
+			{
+				Key:         "corpid",
+				Label:       "企业 ID",
+				Type:        formschema.FieldText,
+				Required:    true,
+				Placeholder: "wwxxxxxxxx",
+			},
+			{
+				Key:         "agentid",
+				Label:       "Agent ID",
+				Type:        formschema.FieldText,
+				Required:    true,
+				Placeholder: "1000002",
+			},
+			{
+				Key:         "touser",
+				Label:       "接收成员",
+				Type:        formschema.FieldText,
+				Default:     "@all",
+				Placeholder: "@all 或 user1|user2",
+				Help:        "留空时默认 @all；多个成员用 | 分隔。",
+			},
+		},
+		SecretField: &formschema.FieldSpec{
+			Key:         "secret",
+			Label:       "CorpSecret",
+			Type:        formschema.FieldPassword,
+			Secret:      true,
+			Required:    true,
+			Placeholder: "应用 Secret",
+		},
+		Capabilities: s.Capabilities(),
+	}
+}
 
 // Capabilities 声明能力。
 func (s *AppSink) Capabilities() domainsink.Capabilities {

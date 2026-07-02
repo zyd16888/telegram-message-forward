@@ -40,6 +40,45 @@ export interface Capabilities {
   max_file_size_mb?: number
 }
 
+export type FieldType =
+  | 'text'
+  | 'password'
+  | 'textarea'
+  | 'number'
+  | 'boolean'
+  | 'select'
+  | 'multi_select'
+  | 'string_list'
+  | 'key_value'
+
+export interface FieldOption {
+  label: string
+  value: string
+}
+
+export interface FieldSpec {
+  key: string
+  label: string
+  type: FieldType
+  required?: boolean
+  secret?: boolean
+  default?: unknown
+  placeholder?: string
+  help?: string
+  options?: FieldOption[]
+  min?: number
+  max?: number
+}
+
+export interface SinkDescriptor {
+  type: string
+  label: string
+  description?: string
+  config_fields: FieldSpec[]
+  secret_field?: FieldSpec
+  capabilities: Capabilities
+}
+
 export interface Sink {
   id: number
   type: string
@@ -69,9 +108,16 @@ export interface Source {
 
 export interface SyncedPeer {
   peer_type: string
+  peer_kind: string
   peer_id: number
   name: string
   username?: string
+  display_type: string
+  is_bot: boolean
+  is_channel: boolean
+  is_supergroup: boolean
+  is_forum: boolean
+  flags?: string[]
 }
 
 export interface Template {
@@ -83,14 +129,31 @@ export interface Template {
   updated_at: string
 }
 
+export interface TemplatePreview {
+  format: string
+  text: string
+}
+
 export interface ConditionConfig {
   type: string
-  config?: Record<string, unknown>
+  config: Record<string, unknown>
 }
 
 export interface ProcessorConfig {
   type: string
-  config?: Record<string, unknown>
+  config: Record<string, unknown>
+}
+
+export interface RuleItemDescriptor {
+  type: string
+  label: string
+  description?: string
+  fields: FieldSpec[]
+}
+
+export interface RuleMeta {
+  conditions: RuleItemDescriptor[]
+  processors: RuleItemDescriptor[]
 }
 
 export interface RuleTarget {

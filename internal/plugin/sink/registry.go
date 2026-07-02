@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 
+	"telegram-message-forward/internal/domain/formschema"
 	domainsink "telegram-message-forward/internal/domain/sink"
 )
 
@@ -34,6 +35,21 @@ type Plugin interface {
 	ValidateConfig(config map[string]any) error
 	Capabilities() domainsink.Capabilities
 	Send(ctx context.Context, s *domainsink.Sink, payload Payload, opts Options) (*Result, error)
+}
+
+// Descriptor describes a registered Sink type for admin UI forms.
+type Descriptor struct {
+	Type         string                  `json:"type"`
+	Label        string                  `json:"label"`
+	Description  string                  `json:"description,omitempty"`
+	ConfigFields []formschema.FieldSpec  `json:"config_fields"`
+	SecretField  *formschema.FieldSpec   `json:"secret_field,omitempty"`
+	Capabilities domainsink.Capabilities `json:"capabilities"`
+}
+
+// Describer is implemented by Sink plugins that expose UI metadata.
+type Describer interface {
+	Descriptor() Descriptor
 }
 
 // Factory 根据配置创建 Plugin 实例。
@@ -75,4 +91,34 @@ func Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Descriptors returns registered Sink descriptors sorted by type.
+func Descriptors() []Descriptor {
+	names := Names()
+	out := make([]Descriptor, 0, len(names))
+	for _, name := range names {
+		plugin, err := New(name)
+		if err != nil {
+			continue
+		}
+		if d, ok := plugin.(Describer); ok {
+			desc := d.Descriptor()
+			if desc.Type == "" {
+				desc.Type = name
+			}
+			if desc.Label == "" {
+				desc.Label = name
+			}
+			out = append(out, desc)
+			continue
+		}
+		out = append(out, Descriptor{
+			Type:         name,
+			Label:        name,
+			ConfigFields: nil,
+			Capabilities: plugin.Capabilities(),
+		})
+	}
+	return out
 }

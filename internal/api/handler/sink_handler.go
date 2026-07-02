@@ -38,6 +38,11 @@ func (h *SinkHandler) Types(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": h.svc.Types()})
 }
 
+// Meta GET /sinks/meta
+func (h *SinkHandler) Meta(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": h.svc.Descriptors()})
+}
+
 // Get GET /sinks/:id
 func (h *SinkHandler) Get(c *gin.Context) {
 	id, ok := parseID(c)

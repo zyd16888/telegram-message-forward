@@ -109,3 +109,8 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 func (s *Service) Types() []string {
 	return pluginsink.Names()
 }
+
+// Descriptors 返回已注册 Sink 的后台配置元数据。
+func (s *Service) Descriptors() []pluginsink.Descriptor {
+	return pluginsink.Descriptors()
+}

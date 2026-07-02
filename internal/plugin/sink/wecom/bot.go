@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"telegram-message-forward/internal/domain/formschema"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	"telegram-message-forward/internal/infra/httpclient"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
@@ -31,6 +32,32 @@ var _ pluginsink.Plugin = (*BotSink)(nil)
 
 // Name 返回插件名。
 func (s *BotSink) Name() string { return "wecom_bot" }
+
+// Descriptor 返回后台表单元数据。
+func (s *BotSink) Descriptor() pluginsink.Descriptor {
+	return pluginsink.Descriptor{
+		Type:        s.Name(),
+		Label:       "企业微信群机器人",
+		Description: "通过企业微信群机器人 webhook 推送文本或 Markdown。",
+		ConfigFields: []formschema.FieldSpec{
+			{
+				Key:         "webhook_url",
+				Label:       "完整 Webhook URL",
+				Type:        formschema.FieldText,
+				Placeholder: "可选；填写后优先使用完整 URL",
+				Help:        "通常只需要填写下方机器人 Key；如果网关地址特殊，可直接填写完整 webhook_url。",
+			},
+		},
+		SecretField: &formschema.FieldSpec{
+			Key:         "secret",
+			Label:       "机器人 Key",
+			Type:        formschema.FieldPassword,
+			Secret:      true,
+			Placeholder: "企业微信群机器人 key",
+		},
+		Capabilities: s.Capabilities(),
+	}
+}
 
 // Capabilities 声明能力。
 func (s *BotSink) Capabilities() domainsink.Capabilities {

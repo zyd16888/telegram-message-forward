@@ -33,6 +33,14 @@ func (h *RuleHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
+// Meta GET /rules/meta
+func (h *RuleHandler) Meta(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"conditions": h.svc.ConditionDescriptors(),
+		"processors": h.svc.ProcessorDescriptors(),
+	}})
+}
+
 // Get GET /rules/:id
 func (h *RuleHandler) Get(c *gin.Context) {
 	id, ok := parseID(c)

@@ -1,25 +1,26 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, shallowRef } from 'vue'
 import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
+import SinkFormModal from '@/components/sinks/SinkFormModal.vue'
 import { sinksApi } from '@/api/client'
-import type { Sink } from '@/types'
+import type { Sink, SinkDescriptor } from '@/types'
 import { errText } from '@/utils/error'
 
 const message = useMessage()
 const dialog = useDialog()
 
-const sinks = ref<Sink[]>([])
-const types = ref<string[]>([])
-const loading = ref(false)
-const showCreate = ref(false)
+const sinks = shallowRef<Sink[]>([])
+const descriptors = shallowRef<SinkDescriptor[]>([])
+const loading = shallowRef(false)
+const showForm = shallowRef(false)
+const editingSink = shallowRef<Sink | null>(null)
 
-const form = ref({ type: 'webhook', name: '', config: '{\n  "url": "https://example.com/webhook"\n}', secret: '' })
+const descriptorMap = computed(() => new Map(descriptors.value.map((item) => [item.type, item])))
 
 async function load() {
   loading.value = true
   try {
-    sinks.value = await sinksApi.list()
-    types.value = await sinksApi.types()
+    ;[sinks.value, descriptors.value] = await Promise.all([sinksApi.list(), sinksApi.meta()])
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
@@ -27,23 +28,18 @@ async function load() {
   }
 }
 
-async function create() {
-  let config: Record<string, unknown> = {}
-  try {
-    config = form.value.config.trim() ? JSON.parse(form.value.config) : {}
-  } catch {
-    message.error('config 不是合法 JSON')
-    return
-  }
-  try {
-    await sinksApi.create({ type: form.value.type, name: form.value.name, config, secret: form.value.secret })
-    message.success('已创建')
-    showCreate.value = false
-    form.value = { type: 'webhook', name: '', config: '{}', secret: '' }
-    await load()
-  } catch (e) {
-    message.error('创建失败：' + errText(e))
-  }
+function openCreate() {
+  editingSink.value = null
+  showForm.value = true
+}
+
+function openEdit(row: Sink) {
+  editingSink.value = row
+  showForm.value = true
+}
+
+function sinkLabel(type: string): string {
+  return descriptorMap.value.get(type)?.label ?? type
 }
 
 async function toggle(row: Sink, value: boolean) {
@@ -75,21 +71,29 @@ function confirmDelete(row: Sink) {
 
 const columns: DataTableColumns<Sink> = [
   { title: 'ID', key: 'id', width: 70 },
-  { title: '类型', key: 'type', render: (r) => h(NTag, { size: 'small' }, { default: () => r.type }) },
-  { title: '名称', key: 'name' },
-  { title: '含密钥', key: 'has_secret', render: (r) => (r.has_secret ? '是' : '否') },
+  {
+    title: '类型',
+    key: 'type',
+    width: 160,
+    render: (row) => h(NTag, { size: 'small' }, { default: () => sinkLabel(row.type) }),
+  },
+  { title: '名称', key: 'name', ellipsis: { tooltip: true } },
+  { title: '含密钥', key: 'has_secret', width: 90, render: (row) => (row.has_secret ? '是' : '否') },
   {
     title: '启用',
     key: 'enabled',
-    render: (r) => h(NSwitch, { value: r.enabled, onUpdateValue: (v: boolean) => toggle(r, v) }),
+    width: 90,
+    render: (row) => h(NSwitch, { value: row.enabled, onUpdateValue: (value: boolean) => toggle(row, value) }),
   },
   {
     title: '操作',
     key: 'actions',
-    render: (r) =>
+    width: 160,
+    render: (row) =>
       h(NSpace, {}, {
         default: () => [
-          h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(r) }, { default: () => '删除' }),
+          h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => '编辑' }),
+          h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
         ],
       }),
   },
@@ -99,36 +103,14 @@ onMounted(load)
 </script>
 
 <template>
-  <n-space vertical size="large">
-    <n-space justify="space-between">
-      <n-button type="primary" @click="showCreate = true">新建渠道</n-button>
-      <n-button @click="load">刷新</n-button>
-    </n-space>
+  <NSpace vertical size="large">
+    <NSpace justify="space-between">
+      <NButton type="primary" @click="openCreate">新建渠道</NButton>
+      <NButton @click="load">刷新</NButton>
+    </NSpace>
 
-    <n-data-table :loading="loading" :columns="columns" :data="sinks" :bordered="false" />
+    <NDataTable :loading="loading" :columns="columns" :data="sinks" :bordered="false" />
 
-    <n-modal v-model:show="showCreate" preset="card" title="新建渠道" style="width: 560px">
-      <n-form label-placement="left" label-width="80">
-        <n-form-item label="类型">
-          <n-select v-model:value="form.type" :options="types.map((t) => ({ label: t, value: t }))" />
-        </n-form-item>
-        <n-form-item label="名称"><n-input v-model:value="form.name" /></n-form-item>
-        <n-form-item label="配置">
-          <n-input v-model:value="form.config" type="textarea" :autosize="{ minRows: 4 }" placeholder="JSON 配置" />
-        </n-form-item>
-        <n-form-item label="密钥">
-          <n-input v-model:value="form.secret" type="password" show-password-on="click" placeholder="webhook key / corpsecret 等" />
-        </n-form-item>
-        <n-text depth="3">
-          webhook: config {"url": "..."}；wecom_bot: secret=群机器人 key；wecom_app: config {"corpid","agentid"}，secret=corpsecret。
-        </n-text>
-      </n-form>
-      <template #footer>
-        <n-space justify="end">
-          <n-button @click="showCreate = false">取消</n-button>
-          <n-button type="primary" @click="create">创建</n-button>
-        </n-space>
-      </template>
-    </n-modal>
-  </n-space>
+    <SinkFormModal v-model:show="showForm" :descriptors="descriptors" :sink="editingSink" @saved="load" />
+  </NSpace>
 </template>

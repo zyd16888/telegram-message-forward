@@ -1,32 +1,44 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref, shallowRef } from 'vue'
-import { NButton, NSpace, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
+import { computed, h, onMounted, shallowRef } from 'vue'
+import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
+import PeerSyncPanel from '@/components/sources/PeerSyncPanel.vue'
 import { accountsApi, sourcesApi } from '@/api/client'
-import type { Account, Source, SyncedPeer } from '@/types'
+import type { Account, Source } from '@/types'
 import { errText } from '@/utils/error'
 
 const message = useMessage()
 const dialog = useDialog()
 
-const sources = ref<Source[]>([])
-const accounts = ref<Account[]>([])
-const loading = ref(false)
-const syncAccountId = ref<number | null>(null)
-const syncedPeers = ref<SyncedPeer[]>([])
-const syncing = ref(false)
-const peerTypeFilter = ref<string | null>(null)
-const syncController = shallowRef<AbortController | null>(null)
+const sources = shallowRef<Source[]>([])
+const accounts = shallowRef<Account[]>([])
+const loading = shallowRef(false)
+const sourceSearch = shallowRef('')
+const sourceKindFilter = shallowRef<string | null>(null)
 
-const visiblePeers = computed(() => {
-  if (!peerTypeFilter.value) return syncedPeers.value
-  return syncedPeers.value.filter((peer) => peer.peer_type === peerTypeFilter.value)
+const visibleSources = computed(() => {
+  const keyword = sourceSearch.value.trim().toLowerCase()
+  return sources.value.filter((source) => {
+    const kind = sourceDisplayType(source)
+    if (sourceKindFilter.value && kind !== sourceKindFilter.value) return false
+    if (!keyword) return true
+    return [source.name, source.username, String(source.peer_id), kind, source.peer_type]
+      .filter(Boolean)
+      .some((item) => String(item).toLowerCase().includes(keyword))
+  })
+})
+
+const sourceKindOptions = computed(() => {
+  const kinds = new Set<string>()
+  for (const source of sources.value) {
+    kinds.add(sourceDisplayType(source))
+  }
+  return [...kinds].map((kind) => ({ label: kind, value: kind }))
 })
 
 async function load() {
   loading.value = true
   try {
-    sources.value = await sourcesApi.list()
-    accounts.value = await accountsApi.list()
+    ;[sources.value, accounts.value] = await Promise.all([sourcesApi.list(), accountsApi.list()])
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
@@ -34,58 +46,20 @@ async function load() {
   }
 }
 
-async function doSync() {
-  if (!syncAccountId.value) {
-    message.warning('请选择账号')
-    return
-  }
-  syncController.value?.abort()
-  const controller = new AbortController()
-  syncController.value = controller
-  syncedPeers.value = []
-  syncing.value = true
-  try {
-    await sourcesApi.syncStream(
-      syncAccountId.value,
-      (peer) => {
-        syncedPeers.value.push(peer)
-      },
-      controller.signal,
-    )
-    message.success(`同步完成，共 ${syncedPeers.value.length} 个可选 peer`)
-  } catch (e) {
-    if (controller.signal.aborted) {
-      message.warning('已停止同步')
-    } else {
-      message.error('同步失败：' + errText(e))
-    }
-  } finally {
-    if (syncController.value === controller) {
-      syncController.value = null
-      syncing.value = false
-    }
-  }
+function sourceDisplayType(source: Source): string {
+  const displayType = source.config?.display_type
+  if (typeof displayType === 'string' && displayType) return displayType
+  if (source.peer_type === 'user') return '用户'
+  if (source.peer_type === 'chat') return '普通群'
+  return '频道/超级群'
 }
 
-function stopSync() {
-  syncController.value?.abort()
-}
-
-async function addPeer(peer: SyncedPeer) {
-  if (!syncAccountId.value) return
+async function toggle(row: Source, value: boolean) {
   try {
-    await sourcesApi.create({
-      account_id: syncAccountId.value,
-      peer_type: peer.peer_type,
-      peer_id: peer.peer_id,
-      name: peer.name,
-      username: peer.username ?? '',
-      enabled: true,
-    })
-    message.success('已添加为监听源')
-    await load()
+    await sourcesApi.update(row.id, { enabled: value })
+    row.enabled = value
   } catch (e) {
-    message.error('添加失败：' + errText(e))
+    message.error('更新失败：' + errText(e))
   }
 }
 
@@ -126,35 +100,34 @@ function confirmDelete(row: Source) {
 }
 
 const columns: DataTableColumns<Source> = [
-  { title: 'ID', key: 'id', width: 60 },
-  { title: '名称', key: 'name' },
-  { title: '类型', key: 'peer_type', render: (r) => h(NTag, { size: 'small' }, { default: () => r.peer_type }) },
-  { title: 'Peer ID', key: 'peer_id' },
-  { title: '账号', key: 'account_id' },
-  { title: '启用', key: 'enabled', render: (r) => (r.enabled ? '是' : '否') },
+  { title: 'ID', key: 'id', width: 70 },
+  { title: '名称', key: 'name', ellipsis: { tooltip: true } },
+  {
+    title: '类型',
+    key: 'peer_type',
+    width: 130,
+    render: (row) => h(NTag, { size: 'small' }, { default: () => sourceDisplayType(row) }),
+  },
+  { title: 'Peer ID', key: 'peer_id', width: 140 },
+  { title: '账号', key: 'account_id', width: 90 },
+  {
+    title: '启用',
+    key: 'enabled',
+    width: 90,
+    render: (row) => h(NSwitch, { value: row.enabled, onUpdateValue: (value: boolean) => toggle(row, value) }),
+  },
   {
     title: '操作',
     key: 'actions',
-    render: (r) =>
+    width: 220,
+    render: (row) =>
       h(NSpace, {}, {
         default: () => [
-          h(NButton, { size: 'small', onClick: () => start(r) }, { default: () => '启动' }),
-          h(NButton, { size: 'small', onClick: () => stop(r) }, { default: () => '停止' }),
-          h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(r) }, { default: () => '删除' }),
+          h(NButton, { size: 'small', onClick: () => start(row) }, { default: () => '启动' }),
+          h(NButton, { size: 'small', onClick: () => stop(row) }, { default: () => '停止' }),
+          h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
         ],
       }),
-  },
-]
-
-const peerColumns: DataTableColumns<SyncedPeer> = [
-  { title: '名称', key: 'name' },
-  { title: '类型', key: 'peer_type' },
-  { title: 'Peer ID', key: 'peer_id' },
-  { title: '用户名', key: 'username' },
-  {
-    title: '操作',
-    key: 'actions',
-    render: (r) => h(NButton, { size: 'small', type: 'primary', onClick: () => addPeer(r) }, { default: () => '添加' }),
   },
 ]
 
@@ -162,44 +135,33 @@ onMounted(load)
 </script>
 
 <template>
-  <n-space vertical size="large">
-    <n-card title="从账号同步可监听 peer">
-      <n-space>
-        <n-select
-          v-model:value="syncAccountId"
-          style="width: 240px"
-          placeholder="选择账号"
-          :options="accounts.map((a) => ({ label: `${a.name} (${a.status})`, value: a.id }))"
-        />
-        <n-button type="primary" :loading="syncing" @click="doSync">同步</n-button>
-        <n-button v-if="syncing" @click="stopSync">停止</n-button>
-        <n-select
-          v-model:value="peerTypeFilter"
-          clearable
-          style="width: 160px"
-          placeholder="全部类型"
-          :options="[
-            { label: '用户', value: 'user' },
-            { label: '普通群', value: 'chat' },
-            { label: '频道/超级群', value: 'channel' },
-          ]"
-        />
-        <n-text v-if="syncing || syncedPeers.length" depth="3">已加载 {{ syncedPeers.length }} 个</n-text>
-      </n-space>
-      <n-data-table
-        v-if="syncedPeers.length"
-        style="margin-top: 12px"
-        :columns="peerColumns"
-        :data="visiblePeers"
-        :bordered="false"
-        :max-height="260"
-      />
-    </n-card>
+  <NSpace vertical size="large">
+    <PeerSyncPanel :accounts="accounts" :sources="sources" @added="load" />
 
-    <n-space justify="space-between">
-      <n-text strong>已配置监听源</n-text>
-      <n-button @click="load">刷新</n-button>
-    </n-space>
-    <n-data-table :loading="loading" :columns="columns" :data="sources" :bordered="false" />
-  </n-space>
+    <NSpace justify="space-between" align="center">
+      <NText strong>已配置监听源</NText>
+      <NSpace>
+        <NInput v-model:value="sourceSearch" clearable class="source-search" placeholder="搜索名称、用户名、Peer ID" />
+        <NSelect
+          v-model:value="sourceKindFilter"
+          clearable
+          class="source-kind"
+          placeholder="全部类型"
+          :options="sourceKindOptions"
+        />
+        <NButton @click="load">刷新</NButton>
+      </NSpace>
+    </NSpace>
+    <NDataTable :loading="loading" :columns="columns" :data="visibleSources" :bordered="false" />
+  </NSpace>
 </template>
+
+<style scoped>
+.source-search {
+  width: 260px;
+}
+
+.source-kind {
+  width: 150px;
+}
+</style>

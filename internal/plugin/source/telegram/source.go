@@ -165,8 +165,18 @@ func (p *Plugin) emitDialogPeers(dialogs []tg.DialogClass, chats []tg.ChatClass,
 			if ch == nil || !markSeen(seen, domainpeer.TypeChannel, ch.ID) {
 				continue
 			}
+			kind, displayType, flags := channelDisplay(ch)
 			if err := emit(pluginsource.SyncedPeer{
-				PeerType: domainsource.PeerChannel, PeerID: ch.ID, Name: ch.Title, Username: ch.Username,
+				PeerType:     domainsource.PeerChannel,
+				PeerKind:     kind,
+				PeerID:       ch.ID,
+				Name:         ch.Title,
+				Username:     ch.Username,
+				DisplayType:  displayType,
+				IsChannel:    ch.Broadcast,
+				IsSupergroup: ch.Megagroup || ch.Gigagroup,
+				IsForum:      ch.Forum,
+				Flags:        flags,
 			}); err != nil {
 				return err
 			}
@@ -176,7 +186,12 @@ func (p *Plugin) emitDialogPeers(dialogs []tg.DialogClass, chats []tg.ChatClass,
 				continue
 			}
 			if err := emit(pluginsource.SyncedPeer{
-				PeerType: domainsource.PeerChat, PeerID: ch.ID, Name: ch.Title,
+				PeerType:    domainsource.PeerChat,
+				PeerKind:    "basic_group",
+				PeerID:      ch.ID,
+				Name:        ch.Title,
+				DisplayType: "普通群",
+				Flags:       chatFlags(ch),
 			}); err != nil {
 				return err
 			}
@@ -185,8 +200,16 @@ func (p *Plugin) emitDialogPeers(dialogs []tg.DialogClass, chats []tg.ChatClass,
 			if user == nil || !markSeen(seen, domainpeer.TypeUser, user.ID) {
 				continue
 			}
+			kind, displayType, flags := userDisplay(user)
 			if err := emit(pluginsource.SyncedPeer{
-				PeerType: domainsource.PeerUser, PeerID: user.ID, Name: userDisplayName(user), Username: user.Username,
+				PeerType:    domainsource.PeerUser,
+				PeerKind:    kind,
+				PeerID:      user.ID,
+				Name:        userDisplayName(user),
+				Username:    user.Username,
+				DisplayType: displayType,
+				IsBot:       user.Bot,
+				Flags:       flags,
 			}); err != nil {
 				return err
 			}
@@ -202,6 +225,90 @@ func markSeen(seen map[string]struct{}, t domainpeer.Type, id int64) bool {
 	}
 	seen[key] = struct{}{}
 	return true
+}
+
+func userDisplay(user *tg.User) (string, string, []string) {
+	flags := make([]string, 0, 4)
+	if user.Bot {
+		flags = append(flags, "bot")
+	}
+	if user.Verified {
+		flags = append(flags, "verified")
+	}
+	if user.Contact {
+		flags = append(flags, "contact")
+	}
+	if user.Scam {
+		flags = append(flags, "scam")
+	}
+	if user.Fake {
+		flags = append(flags, "fake")
+	}
+	if user.Bot {
+		return "bot", "机器人", flags
+	}
+	return "private_user", "私聊用户", flags
+}
+
+func channelDisplay(ch *tg.Channel) (string, string, []string) {
+	flags := make([]string, 0, 8)
+	if ch.Broadcast {
+		flags = append(flags, "broadcast")
+	}
+	if ch.Megagroup {
+		flags = append(flags, "megagroup")
+	}
+	if ch.Gigagroup {
+		flags = append(flags, "gigagroup")
+	}
+	if ch.Forum {
+		flags = append(flags, "forum")
+	}
+	if ch.Verified {
+		flags = append(flags, "verified")
+	}
+	if ch.Restricted {
+		flags = append(flags, "restricted")
+	}
+	if ch.Scam {
+		flags = append(flags, "scam")
+	}
+	if ch.Fake {
+		flags = append(flags, "fake")
+	}
+	if ch.Noforwards {
+		flags = append(flags, "noforwards")
+	}
+
+	switch {
+	case ch.Forum:
+		return "forum_supergroup", "论坛超级群", flags
+	case ch.Gigagroup:
+		return "gigagroup", "巨型群", flags
+	case ch.Megagroup:
+		return "supergroup", "超级群", flags
+	case ch.Broadcast:
+		return "channel", "频道", flags
+	default:
+		return "channel_like", "频道/超级群", flags
+	}
+}
+
+func chatFlags(ch *tg.Chat) []string {
+	flags := make([]string, 0, 4)
+	if ch.Creator {
+		flags = append(flags, "creator")
+	}
+	if ch.Left {
+		flags = append(flags, "left")
+	}
+	if ch.Deactivated {
+		flags = append(flags, "deactivated")
+	}
+	if ch.Noforwards {
+		flags = append(flags, "noforwards")
+	}
+	return flags
 }
 
 func nextDialogOffset(dialogs []tg.DialogClass, messages []tg.MessageClass, chats []tg.ChatClass, users []tg.UserClass) (tg.InputPeerClass, int, int) {

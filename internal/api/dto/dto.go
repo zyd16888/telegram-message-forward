@@ -306,10 +306,17 @@ type SourceUpdateRequest struct {
 
 // SyncedPeerDTO 是同步返回的可选 peer。
 type SyncedPeerDTO struct {
-	PeerType string `json:"peer_type"`
-	PeerID   int64  `json:"peer_id"`
-	Name     string `json:"name"`
-	Username string `json:"username,omitempty"`
+	PeerType     string   `json:"peer_type"`
+	PeerKind     string   `json:"peer_kind"`
+	PeerID       int64    `json:"peer_id"`
+	Name         string   `json:"name"`
+	Username     string   `json:"username,omitempty"`
+	DisplayType  string   `json:"display_type"`
+	IsBot        bool     `json:"is_bot"`
+	IsChannel    bool     `json:"is_channel"`
+	IsSupergroup bool     `json:"is_supergroup"`
+	IsForum      bool     `json:"is_forum"`
+	Flags        []string `json:"flags,omitempty"`
 }
 
 // --- Template ---
@@ -341,6 +348,18 @@ type TemplateRequest struct {
 	Name    string `json:"name" binding:"required"`
 	Format  string `json:"format" binding:"required"`
 	Content string `json:"content" binding:"required"`
+}
+
+// TemplatePreviewRequest 是模板预览请求。
+type TemplatePreviewRequest struct {
+	Format  string `json:"format" binding:"required"`
+	Content string `json:"content" binding:"required"`
+}
+
+// TemplatePreviewDTO 是模板预览响应。
+type TemplatePreviewDTO struct {
+	Format string `json:"format"`
+	Text   string `json:"text"`
 }
 
 // --- Rule ---

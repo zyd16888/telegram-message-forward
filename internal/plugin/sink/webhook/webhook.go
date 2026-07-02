@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"telegram-message-forward/internal/domain/formschema"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	"telegram-message-forward/internal/infra/httpclient"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
@@ -31,6 +32,38 @@ var _ pluginsink.Plugin = (*Sink)(nil)
 
 // Name 返回插件名。
 func (s *Sink) Name() string { return "webhook" }
+
+// Descriptor 返回后台表单元数据。
+func (s *Sink) Descriptor() pluginsink.Descriptor {
+	return pluginsink.Descriptor{
+		Type:        s.Name(),
+		Label:       "通用 Webhook",
+		Description: "将渲染后的消息以 JSON POST 到指定地址。",
+		ConfigFields: []formschema.FieldSpec{
+			{
+				Key:         "url",
+				Label:       "Webhook URL",
+				Type:        formschema.FieldText,
+				Required:    true,
+				Placeholder: "https://example.com/webhook",
+			},
+			{
+				Key:   "headers",
+				Label: "请求头",
+				Type:  formschema.FieldKeyValue,
+				Help:  "可选，逐项填写 HTTP header；Authorization 留空时会用密钥生成 Bearer token。",
+			},
+		},
+		SecretField: &formschema.FieldSpec{
+			Key:         "secret",
+			Label:       "Bearer Token",
+			Type:        formschema.FieldPassword,
+			Secret:      true,
+			Placeholder: "可选",
+		},
+		Capabilities: s.Capabilities(),
+	}
+}
 
 // Capabilities 声明 Webhook 支持的能力。
 func (s *Sink) Capabilities() domainsink.Capabilities {

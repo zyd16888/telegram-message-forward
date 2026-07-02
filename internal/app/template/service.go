@@ -4,8 +4,11 @@ package template
 import (
 	"context"
 	"fmt"
+	"time"
 
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domaintemplate "telegram-message-forward/internal/domain/template"
+	rendertemplate "telegram-message-forward/internal/template"
 )
 
 // Service 是模板应用服务。
@@ -82,4 +85,38 @@ func (s *Service) Update(ctx context.Context, id int64, in Input) (*domaintempla
 // Delete 删除模板。
 func (s *Service) Delete(ctx context.Context, id int64) error {
 	return s.repo.Delete(ctx, id)
+}
+
+// Preview 渲染一条示例消息，用于后台模板编辑即时校验。
+func (s *Service) Preview(in Input) (string, error) {
+	if !validFormat(in.Format) {
+		return "", fmt.Errorf("非法模板格式: %s", in.Format)
+	}
+	now := time.Now().UTC()
+	tpl := &domaintemplate.Template{
+		ID:      0,
+		Name:    "preview",
+		Format:  domaintemplate.Format(in.Format),
+		Content: in.Content,
+	}
+	msg := &domainmessage.NormalizedMessage{
+		ID:                1001,
+		SourceID:          12,
+		ExternalMessageID: 3456,
+		MessageType:       "text",
+		SenderPeerType:    "user",
+		SenderID:          789,
+		SenderName:        "Alice",
+		Text:              "这是一条用于模板预览的 Telegram 消息。",
+		OriginalURL:       "https://t.me/example/3456",
+		Links:             []domainmessage.Link{{URL: "https://example.com", Title: "Example"}},
+		SentAt:            &now,
+		ReceivedAt:        now,
+		CreatedAt:         now,
+	}
+	rendered, err := rendertemplate.NewRenderer().Render(tpl, msg)
+	if err != nil {
+		return "", err
+	}
+	return rendered.Text, nil
 }

@@ -9,11 +9,14 @@ import type {
   LoginFlow,
   Me,
   Rule,
+  RuleMeta,
   SharedProxy,
   Sink,
+  SinkDescriptor,
   Source,
   SyncedPeer,
   Template,
+  TemplatePreview,
   TelegramApp,
   TokenCreated,
 } from '@/types'
@@ -126,6 +129,7 @@ export const accountsApi = {
 export const sinksApi = {
   list: () => http.get<ApiList<Sink>>('/sinks').then((r) => r.data.data),
   types: () => http.get<ApiList<string>>('/sinks/types').then((r) => r.data.data),
+  meta: () => http.get<ApiList<SinkDescriptor>>('/sinks/meta').then((r) => r.data.data),
   get: (id: number) => http.get<ApiItem<Sink>>(`/sinks/${id}`).then((r) => r.data.data),
   create: (body: Record<string, unknown>) =>
     http.post<ApiItem<Sink>>('/sinks', body).then((r) => r.data.data),
@@ -221,6 +225,8 @@ export const sourcesApi = {
 // --- Templates ---
 export const templatesApi = {
   list: () => http.get<ApiList<Template>>('/templates').then((r) => r.data.data),
+  preview: (body: Record<string, unknown>) =>
+    http.post<ApiItem<TemplatePreview>>('/templates/preview', body).then((r) => r.data.data),
   create: (body: Record<string, unknown>) =>
     http.post<ApiItem<Template>>('/templates', body).then((r) => r.data.data),
   update: (id: number, body: Record<string, unknown>) =>
@@ -231,6 +237,7 @@ export const templatesApi = {
 // --- Rules ---
 export const rulesApi = {
   list: () => http.get<ApiList<Rule>>('/rules').then((r) => r.data.data),
+  meta: () => http.get<ApiItem<RuleMeta>>('/rules/meta').then((r) => r.data.data),
   get: (id: number) => http.get<ApiItem<Rule>>(`/rules/${id}`).then((r) => r.data.data),
   create: (body: Record<string, unknown>) =>
     http.post<ApiItem<Rule>>('/rules', body).then((r) => r.data.data),

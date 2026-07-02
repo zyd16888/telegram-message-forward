@@ -3,12 +3,30 @@ package processor
 import (
 	"context"
 
+	"telegram-message-forward/internal/domain/formschema"
 	domainmessage "telegram-message-forward/internal/domain/message"
 )
 
 func init() {
-	Register("append_source", appendSource{})
-	Register("truncate_text", truncateText{})
+	RegisterWithDescriptor("append_source", appendSource{}, Descriptor{
+		Type:        "append_source",
+		Label:       "追加来源",
+		Description: "在消息前后追加一段来源说明或固定文本。",
+		Fields: []formschema.FieldSpec{
+			{Key: "label", Label: "来源名称", Type: formschema.FieldText, Placeholder: "例如：技术频道"},
+			{Key: "text", Label: "自定义文本", Type: formschema.FieldTextarea, Placeholder: "\n\n-- via 技术频道"},
+			{Key: "prefix", Label: "放在正文前", Type: formschema.FieldBoolean, Default: false},
+		},
+	})
+	RegisterWithDescriptor("truncate_text", truncateText{}, Descriptor{
+		Type:        "truncate_text",
+		Label:       "截断文本",
+		Description: "超过指定长度时截断，并追加省略符。",
+		Fields: []formschema.FieldSpec{
+			{Key: "max_length", Label: "最大长度", Type: formschema.FieldNumber, Required: true, Placeholder: "500"},
+			{Key: "ellipsis", Label: "省略符", Type: formschema.FieldText, Default: "…", Placeholder: "…"},
+		},
+	})
 }
 
 // appendSource 在文本末尾追加来源标注。

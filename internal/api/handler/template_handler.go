@@ -47,6 +47,20 @@ func (h *TemplateHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": dto.NewTemplateDTO(t)})
 }
 
+// Preview POST /templates/preview
+func (h *TemplateHandler) Preview(c *gin.Context) {
+	var req dto.TemplatePreviewRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	text, err := h.svc.Preview(apptemplate.Input{Format: req.Format, Content: req.Content})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.TemplatePreviewDTO{Format: req.Format, Text: text}})
+}
+
 // Create POST /templates
 func (h *TemplateHandler) Create(c *gin.Context) {
 	var req dto.TemplateRequest

@@ -126,9 +126,7 @@ func (h *SourceHandler) Sync(c *gin.Context) {
 	}
 	out := make([]dto.SyncedPeerDTO, 0, len(peers))
 	for _, p := range peers {
-		out = append(out, dto.SyncedPeerDTO{
-			PeerType: string(p.PeerType), PeerID: p.PeerID, Name: p.Name, Username: p.Username,
-		})
+		out = append(out, newSyncedPeerDTO(p))
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
@@ -164,15 +162,29 @@ func (h *SourceHandler) SyncStream(c *gin.Context) {
 	count := 0
 	err = h.svc.SyncStream(c.Request.Context(), accountID, func(p pluginsource.SyncedPeer) error {
 		count++
-		return writeEvent("peer", dto.SyncedPeerDTO{
-			PeerType: string(p.PeerType), PeerID: p.PeerID, Name: p.Name, Username: p.Username,
-		})
+		return writeEvent("peer", newSyncedPeerDTO(p))
 	})
 	if err != nil {
 		_ = writeEvent("error", gin.H{"error": err.Error()})
 		return
 	}
 	_ = writeEvent("done", gin.H{"count": count})
+}
+
+func newSyncedPeerDTO(p pluginsource.SyncedPeer) dto.SyncedPeerDTO {
+	return dto.SyncedPeerDTO{
+		PeerType:     string(p.PeerType),
+		PeerKind:     p.PeerKind,
+		PeerID:       p.PeerID,
+		Name:         p.Name,
+		Username:     p.Username,
+		DisplayType:  p.DisplayType,
+		IsBot:        p.IsBot,
+		IsChannel:    p.IsChannel,
+		IsSupergroup: p.IsSupergroup,
+		IsForum:      p.IsForum,
+		Flags:        p.Flags,
+	}
 }
 
 // Start POST /sources/:id/start

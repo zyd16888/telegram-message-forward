@@ -8,6 +8,8 @@ import (
 	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domaintemplate "telegram-message-forward/internal/domain/template"
+	"telegram-message-forward/internal/ruleengine/condition"
+	"telegram-message-forward/internal/ruleengine/processor"
 )
 
 // Service 是规则应用服务。
@@ -58,6 +60,9 @@ type Input struct {
 // Create 创建规则及其来源/目标关联。
 func (s *Service) Create(ctx context.Context, in Input) (*domainrule.Rule, error) {
 	r := toRule(0, in)
+	if err := s.validateRuleConfig(r); err != nil {
+		return nil, err
+	}
 	if err := s.validateTargets(ctx, r.Targets); err != nil {
 		return nil, err
 	}
@@ -75,6 +80,9 @@ func (s *Service) Update(ctx context.Context, id int64, in Input) (*domainrule.R
 	}
 	r := toRule(existing.ID, in)
 	r.CreatedAt = existing.CreatedAt
+	if err := s.validateRuleConfig(r); err != nil {
+		return nil, err
+	}
 	if err := s.validateTargets(ctx, r.Targets); err != nil {
 		return nil, err
 	}
@@ -89,6 +97,16 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return s.repo.Delete(ctx, id)
 }
 
+// ConditionDescriptors 返回已注册条件的后台配置元数据。
+func (s *Service) ConditionDescriptors() []condition.Descriptor {
+	return condition.Descriptors()
+}
+
+// ProcessorDescriptors 返回已注册处理器的后台配置元数据。
+func (s *Service) ProcessorDescriptors() []processor.Descriptor {
+	return processor.Descriptors()
+}
+
 func toRule(id int64, in Input) *domainrule.Rule {
 	return &domainrule.Rule{
 		ID:          id,
@@ -101,6 +119,20 @@ func toRule(id int64, in Input) *domainrule.Rule {
 		SourceIDs:   in.SourceIDs,
 		Targets:     in.Targets,
 	}
+}
+
+func (s *Service) validateRuleConfig(r *domainrule.Rule) error {
+	for _, cfg := range r.Conditions {
+		if err := condition.ValidateConfig(cfg.Type, cfg.Config); err != nil {
+			return fmt.Errorf("条件 %s 配置无效: %w", cfg.Type, err)
+		}
+	}
+	for _, cfg := range r.Processors {
+		if err := processor.ValidateConfig(cfg.Type, cfg.Config); err != nil {
+			return fmt.Errorf("处理器 %s 配置无效: %w", cfg.Type, err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) validateTargets(ctx context.Context, targets []domainrule.Target) error {
