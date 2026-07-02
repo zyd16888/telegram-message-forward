@@ -75,13 +75,29 @@ func (r *fakeTokenRepo) ExistsActiveHash(_ context.Context, hash string) (bool, 
 func (r *fakeTokenRepo) CountActive(_ context.Context) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.countActiveLocked(), nil
+}
+
+func (r *fakeTokenRepo) countActiveLocked() int64 {
 	var n int64
 	for _, t := range r.items {
 		if t.RevokedAt == nil {
 			n++
 		}
 	}
-	return n, nil
+	return n
+}
+
+// CreateIfNoneActive 用互斥锁模拟存储层的原子检查+创建，覆盖并发 bootstrap 场景。
+func (r *fakeTokenRepo) CreateIfNoneActive(_ context.Context, name, hash string) (int64, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.countActiveLocked() > 0 {
+		return 0, false, nil
+	}
+	r.nextID++
+	r.items[r.nextID] = &domainapitoken.Token{ID: r.nextID, Name: name, TokenHash: hash, CreatedAt: time.Now()}
+	return r.nextID, true, nil
 }
 
 // fakeSinkRepo 是内存版 sink 仓储，List 返回空即可满足 200 校验。
@@ -239,5 +255,47 @@ func TestBootstrapOnlyWhenNoActiveToken(t *testing.T) {
 	// 错误凭证登录失败。
 	if code, _ := do(t, r, http.MethodPost, "/api/v1/auth/login", "", map[string]any{"token": "nope"}); code != http.StatusUnauthorized {
 		t.Fatalf("错误 token 登录应 401，实际 %d", code)
+	}
+}
+
+// TestBootstrapConcurrent 验证 bootstrap 并发原子性：多个并发请求同时到达时，
+// 最多只有一个创建成功（201），其余必须返回初始化入口已关闭（409），不允许
+// 出现多个“首个管理凭证”。
+func TestBootstrapConcurrent(t *testing.T) {
+	repo := newFakeTokenRepo()
+	r := buildRouter(t, true, repo)
+
+	const n = 20
+	codes := make([]int, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			code, _ := do(t, r, http.MethodPost, "/api/v1/auth/bootstrap", "", map[string]any{"name": "admin"})
+			codes[idx] = code
+		}(i)
+	}
+	wg.Wait()
+
+	created, conflict := 0, 0
+	for _, code := range codes {
+		switch code {
+		case http.StatusCreated:
+			created++
+		case http.StatusConflict:
+			conflict++
+		default:
+			t.Fatalf("并发 bootstrap 出现非预期状态码 %d", code)
+		}
+	}
+	if created != 1 {
+		t.Fatalf("并发 bootstrap 应恰好一次成功，实际成功 %d 次", created)
+	}
+	if conflict != n-1 {
+		t.Fatalf("其余请求应返回 409，实际 409 次数 %d", conflict)
+	}
+	if active, _ := repo.CountActive(context.Background()); active != 1 {
+		t.Fatalf("最终应恰好有 1 个 active token，实际 %d", active)
 	}
 }

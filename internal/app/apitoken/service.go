@@ -41,6 +41,25 @@ func (s *Service) Create(ctx context.Context, name string) (*Created, error) {
 	return &Created{ID: id, Name: name, Token: token}, nil
 }
 
+// CreateIfNoneActive 原子地生成一个新 token，仅当当前没有任何 active token 时才创建，
+// 用于 bootstrap 场景防止并发请求都通过前置检查而创建出多个“首个管理凭证”。
+// created=false 表示已存在 active token，未创建（此时返回值中的 *Created 为 nil）。
+func (s *Service) CreateIfNoneActive(ctx context.Context, name string) (*Created, bool, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, false, err
+	}
+	token := hex.EncodeToString(buf)
+	id, created, err := s.repo.CreateIfNoneActive(ctx, name, security.HashToken(token))
+	if err != nil {
+		return nil, false, err
+	}
+	if !created {
+		return nil, false, nil
+	}
+	return &Created{ID: id, Name: name, Token: token}, true, nil
+}
+
 // List 返回全部 token（不含明文）。
 func (s *Service) List(ctx context.Context) ([]*domainapitoken.Token, error) {
 	return s.repo.List(ctx)

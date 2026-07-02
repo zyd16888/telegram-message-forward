@@ -26,4 +26,8 @@ type Repository interface {
 	ExistsActiveHash(ctx context.Context, hash string) (bool, error)
 	// CountActive 返回未吊销的 token 数量，用于判断是否允许 bootstrap 初始化。
 	CountActive(ctx context.Context) (int64, error)
+	// CreateIfNoneActive 原子地检查并创建：仅当当前没有任何未吊销 token 时才创建，
+	// 用于防止并发 bootstrap 请求都看到 count=0 而各自创建出多个“首个管理凭证”。
+	// created=false 表示已存在 active token，未创建。
+	CreateIfNoneActive(ctx context.Context, name, hash string) (id int64, created bool, err error)
 }

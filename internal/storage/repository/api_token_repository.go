@@ -73,6 +73,42 @@ func (r *APITokenRepository) CountActive(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+// bootstrapAdvisoryLockKey 是 bootstrap 初始化专用的 PostgreSQL advisory lock key，
+// 用于把并发 bootstrap 请求串行化，避免都看到 count=0 而各自创建出多个管理凭证。
+// 取值任意，只需在本项目内唯一即可；事务结束自动释放锁。
+const bootstrapAdvisoryLockKey = 8823001
+
+// CreateIfNoneActive 在同一事务内加 advisory lock 后检查并创建，保证并发调用下
+// 最多只有一次创建成功：先到的请求持锁完成检查+创建并提交，后到的请求阻塞到锁释放后
+// 会看到已存在 active token，从而 created=false 不重复创建。
+func (r *APITokenRepository) CreateIfNoneActive(ctx context.Context, name, hash string) (int64, bool, error) {
+	var id int64
+	created := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", bootstrapAdvisoryLockKey).Error; err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&model.APIToken{}).Where("revoked_at IS NULL").Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return nil
+		}
+		m := &model.APIToken{Name: name, TokenHash: hash}
+		if err := tx.Create(m).Error; err != nil {
+			return err
+		}
+		id = m.ID
+		created = true
+		return nil
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	return id, created, nil
+}
+
 func toAPITokenDomain(m *model.APIToken) *domainapitoken.Token {
 	return &domainapitoken.Token{
 		ID:         m.ID,

@@ -61,18 +61,21 @@ type ErrBootstrapClosed struct{}
 func (ErrBootstrapClosed) Error() string { return "已存在管理凭证，初始化入口已关闭" }
 
 // Bootstrap 在没有任何 active token 时创建首个管理凭证，返回明文（仅此一次）。
+//
+// 检查与创建在存储层同一事务内通过 advisory lock 原子完成，防止并发 bootstrap
+// 请求都看到“无 active token”而各自创建出多个首个管理凭证。
 func (s *Service) Bootstrap(ctx context.Context, name string) (*apptoken.Created, error) {
-	can, err := s.canBootstrap(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !can {
-		return nil, ErrBootstrapClosed{}
-	}
 	if name == "" {
 		name = "admin"
 	}
-	return s.tokens.Create(ctx, name)
+	created, ok, err := s.tokens.CreateIfNoneActive(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrBootstrapClosed{}
+	}
+	return created, nil
 }
 
 // Login 校验管理 token 是否有效（存在且未吊销）。
