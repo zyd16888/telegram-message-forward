@@ -110,10 +110,11 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 
 		for {
 			res, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-				Limit:      syncDialogsPageSize,
-				OffsetPeer: offsetPeer,
-				OffsetID:   offsetID,
-				OffsetDate: offsetDate,
+				ExcludePinned: offsetID != 0,
+				Limit:         syncDialogsPageSize,
+				OffsetPeer:    offsetPeer,
+				OffsetID:      offsetID,
+				OffsetDate:    offsetDate,
 			})
 			if err != nil {
 				return fmt.Errorf("拉取会话列表失败: %w", err)
@@ -145,9 +146,9 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 func unpackDialogs(res tg.MessagesDialogsClass) ([]tg.DialogClass, []tg.MessageClass, []tg.ChatClass, []tg.UserClass, bool, error) {
 	switch v := res.(type) {
 	case *tg.MessagesDialogs:
-		return v.Dialogs, v.Messages, v.Chats, v.Users, false, nil
+		return v.Dialogs, v.Messages, v.Chats, v.Users, len(v.Dialogs) >= syncDialogsPageSize, nil
 	case *tg.MessagesDialogsSlice:
-		return v.Dialogs, v.Messages, v.Chats, v.Users, len(v.Dialogs) >= syncDialogsPageSize && len(v.Dialogs) < v.Count, nil
+		return v.Dialogs, v.Messages, v.Chats, v.Users, len(v.Dialogs) >= syncDialogsPageSize, nil
 	default:
 		return nil, nil, nil, nil, false, fmt.Errorf("未预期的会话列表类型: %T", res)
 	}
@@ -312,14 +313,19 @@ func chatFlags(ch *tg.Chat) []string {
 }
 
 func nextDialogOffset(dialogs []tg.DialogClass, messages []tg.MessageClass, chats []tg.ChatClass, users []tg.UserClass) (tg.InputPeerClass, int, int) {
-	if len(dialogs) == 0 {
-		return nil, 0, 0
+	for i := len(dialogs) - 1; i >= 0; i-- {
+		d := dialogs[i]
+		topID := d.GetTopMessage()
+		if topID == 0 {
+			continue
+		}
+		input := inputPeerFromPeer(d.GetPeer(), chats, users)
+		if input == nil {
+			continue
+		}
+		return input, topID, messageDate(messages, topID)
 	}
-	last := dialogs[len(dialogs)-1]
-	topID := last.GetTopMessage()
-	input := inputPeerFromPeer(last.GetPeer(), chats, users)
-	date := messageDate(messages, topID)
-	return input, topID, date
+	return nil, 0, 0
 }
 
 func inputPeerFromPeer(peer tg.PeerClass, chats []tg.ChatClass, users []tg.UserClass) tg.InputPeerClass {
