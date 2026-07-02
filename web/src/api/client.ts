@@ -4,7 +4,9 @@ import type {
   ApiItem,
   ApiList,
   ApiToken,
+  BootstrapStatus,
   Delivery,
+  Me,
   Rule,
   Sink,
   Source,
@@ -39,6 +41,36 @@ http.interceptors.request.use((config) => {
   }
   return config
 })
+
+// 会话失效（401）时清理本地凭证并跳转登录页；auth 端点自身的 401 由调用方处理。
+http.interceptors.response.use(
+  (resp) => resp,
+  (error) => {
+    const url: string = error?.config?.url ?? ''
+    const status: number | undefined = error?.response?.status
+    if (status === 401 && !url.startsWith('/auth/')) {
+      setToken('')
+      void import('@/router').then(({ router }) => {
+        if (router.currentRoute.value.name !== 'login') {
+          router.push({ name: 'login' })
+        }
+      })
+    }
+    return Promise.reject(error)
+  },
+)
+
+// --- Auth ---
+export const authApi = {
+  bootstrapStatus: () =>
+    http.get<ApiItem<BootstrapStatus>>('/auth/bootstrap').then((r) => r.data.data),
+  bootstrap: (name: string) =>
+    http.post<ApiItem<TokenCreated>>('/auth/bootstrap', { name }).then((r) => r.data.data),
+  login: (token: string) =>
+    http.post<ApiItem<{ authenticated: boolean }>>('/auth/login', { token }).then((r) => r.data.data),
+  me: () => http.get<ApiItem<Me>>('/auth/me').then((r) => r.data.data),
+  logout: () => http.post('/auth/logout'),
+}
 
 // --- Accounts ---
 export const accountsApi = {

@@ -14,6 +14,7 @@ import (
 	"telegram-message-forward/internal/api/handler"
 	appaccount "telegram-message-forward/internal/app/account"
 	apptoken "telegram-message-forward/internal/app/apitoken"
+	appauth "telegram-message-forward/internal/app/auth"
 	appdelivery "telegram-message-forward/internal/app/delivery"
 	appingest "telegram-message-forward/internal/app/ingest"
 	apprule "telegram-message-forward/internal/app/rule"
@@ -166,10 +167,13 @@ func Build(cfg *config.Config) (*App, error) {
 	ruleSvc := apprule.NewService(rules, apprule.ValidatorDeps{Sinks: sinks, Templates: templates})
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)
 	tokenSvc := apptoken.NewService(apiTokens)
+	authSvc := appauth.NewService(apiTokens, tokenSvc, cfg.Security.AuthEnabled)
 
 	router := api.NewRouter(api.Deps{
 		Logger:         log,
 		TokenValidator: validator,
+		AuthEnabled:    cfg.Security.AuthEnabled,
+		Auth:           handler.NewAuthHandler(authSvc),
 		Account:        handler.NewAccountHandler(accountSvc),
 		Sink:           handler.NewSinkHandler(sinkSvc),
 		Source:         handler.NewSourceHandler(sourceSvc),

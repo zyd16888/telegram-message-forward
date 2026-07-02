@@ -12,6 +12,9 @@ const auth = useAuthStore()
 const dark = ref(false)
 const theme = computed(() => (dark.value ? darkTheme : null))
 
+// 登录页不套后台布局。
+const isLoginRoute = computed(() => route.name === 'login')
+
 const menuOptions: MenuOption[] = [
   { label: '仪表盘', key: 'dashboard' },
   { label: '账号', key: 'accounts' },
@@ -26,8 +29,20 @@ const menuOptions: MenuOption[] = [
 const activeKey = computed(() => route.name as string)
 const currentTitle = computed(() => (route.meta.title as string) ?? '')
 
+// 头部鉴权状态标签。
+const authTag = computed(() => {
+  if (auth.devNoAuth) return { type: 'warning' as const, text: '开发免鉴权', color: '#f0a020' }
+  if (auth.authenticated) return { type: 'success' as const, text: '已登录', color: '#18a058' }
+  return { type: 'warning' as const, text: '未登录', color: '#f0a020' }
+})
+
 function handleMenu(key: string) {
   router.push({ name: key })
+}
+
+async function logout() {
+  await auth.logout()
+  router.push({ name: 'login' })
 }
 
 // 简单的连接状态图标。
@@ -40,7 +55,9 @@ function dot(color: string) {
   <n-config-provider :theme="theme">
     <n-message-provider>
       <n-dialog-provider>
-        <n-layout has-sider style="height: 100vh">
+        <RouterView v-if="isLoginRoute" />
+
+        <n-layout v-else has-sider style="height: 100vh">
           <n-layout-sider
             bordered
             :width="220"
@@ -59,13 +76,16 @@ function dot(color: string) {
             <n-layout-header bordered class="header">
               <span class="title">{{ currentTitle }}</span>
               <n-space align="center">
-                <n-tag :type="auth.hasToken ? 'success' : 'warning'" size="small" :render-icon="dot(auth.hasToken ? '#18a058' : '#f0a020')">
-                  {{ auth.hasToken ? '已配置 Token' : '未配置 Token' }}
+                <n-tag :type="authTag.type" size="small" :render-icon="dot(authTag.color)">
+                  {{ authTag.text }}
                 </n-tag>
                 <n-switch v-model:value="dark" size="small">
                   <template #checked>暗</template>
                   <template #unchecked>亮</template>
                 </n-switch>
+                <n-button v-if="!auth.devNoAuth" size="small" quaternary @click="logout">
+                  退出登录
+                </n-button>
               </n-space>
             </n-layout-header>
             <n-layout-content class="content" :native-scrollbar="false">

@@ -1,0 +1,105 @@
+package handler
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+
+	"telegram-message-forward/internal/api/dto"
+	appauth "telegram-message-forward/internal/app/auth"
+)
+
+// AuthHandler 处理管理后台登录相关请求。
+//
+// 这些端点不经过 Auth 中间件：登录前必须可访问，用于识别鉴权模式、
+// 初始化首个管理凭证与校验 token。
+type AuthHandler struct {
+	svc *appauth.Service
+}
+
+// NewAuthHandler 创建 auth handler。
+func NewAuthHandler(svc *appauth.Service) *AuthHandler {
+	return &AuthHandler{svc: svc}
+}
+
+// BootstrapStatus GET /auth/bootstrap — 返回是否可初始化首个管理凭证。
+func (h *AuthHandler) BootstrapStatus(c *gin.Context) {
+	status, err := h.svc.BootstrapStatus(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.BootstrapStatusDTO{
+		AuthEnabled:  status.AuthEnabled,
+		CanBootstrap: status.CanBootstrap,
+	}})
+}
+
+// Bootstrap POST /auth/bootstrap — 创建首个管理凭证，明文仅此一次返回。
+func (h *AuthHandler) Bootstrap(c *gin.Context) {
+	var req dto.BootstrapRequest
+	// name 可空，绑定失败仅在 body 非法时报错。
+	_ = c.ShouldBindJSON(&req)
+	created, err := h.svc.Bootstrap(c.Request.Context(), strings.TrimSpace(req.Name))
+	if err != nil {
+		var closed appauth.ErrBootstrapClosed
+		if errors.As(err, &closed) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": dto.TokenCreatedDTO{
+		ID: created.ID, Name: created.Name, Token: created.Token,
+	}})
+}
+
+// Login POST /auth/login — 校验管理 token 是否有效。
+func (h *AuthHandler) Login(c *gin.Context) {
+	var req dto.LoginRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	ok, err := h.svc.Login(c.Request.Context(), strings.TrimSpace(req.Token))
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "token 无效"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.LoginResultDTO{Authenticated: true}})
+}
+
+// Me GET /auth/me — 返回当前登录身份状态。
+func (h *AuthHandler) Me(c *gin.Context) {
+	token := bearerToken(c.GetHeader("Authorization"))
+	id, err := h.svc.Me(c.Request.Context(), token)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.MeDTO{
+		AuthEnabled:   id.AuthEnabled,
+		Authenticated: id.Authenticated,
+		CanBootstrap:  id.CanBootstrap,
+	}})
+}
+
+// Logout POST /auth/logout — 前端清理本地凭证；服务端当前无会话状态。
+func (h *AuthHandler) Logout(c *gin.Context) {
+	c.Status(http.StatusNoContent)
+}
+
+// bearerToken 解析 Authorization: Bearer <token>。
+func bearerToken(header string) string {
+	const prefix = "Bearer "
+	if strings.HasPrefix(header, prefix) {
+		return strings.TrimSpace(header[len(prefix):])
+	}
+	return ""
+}

@@ -63,6 +63,16 @@ func (r *APITokenRepository) ExistsActiveHash(ctx context.Context, hash string) 
 	return count > 0, err
 }
 
+// CountActive 返回未吊销的 token 数量。
+func (r *APITokenRepository) CountActive(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&model.APIToken{}).
+		Where("revoked_at IS NULL").
+		Count(&count).Error
+	return count, err
+}
+
 func toAPITokenDomain(m *model.APIToken) *domainapitoken.Token {
 	return &domainapitoken.Token{
 		ID:         m.ID,

@@ -24,4 +24,6 @@ type Repository interface {
 	List(ctx context.Context) ([]*Token, error)
 	Revoke(ctx context.Context, id int64) error
 	ExistsActiveHash(ctx context.Context, hash string) (bool, error)
+	// CountActive 返回未吊销的 token 数量，用于判断是否允许 bootstrap 初始化。
+	CountActive(ctx context.Context) (int64, error)
 }

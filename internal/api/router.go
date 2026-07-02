@@ -14,7 +14,10 @@ import (
 type Deps struct {
 	Logger         *slog.Logger
 	TokenValidator middleware.TokenValidator
+	// AuthEnabled 为 false 时 /api/v1 不挂 Auth 中间件（开发免鉴权）。
+	AuthEnabled bool
 
+	Auth     *handler.AuthHandler
 	Account  *handler.AccountHandler
 	Sink     *handler.SinkHandler
 	Source   *handler.SourceHandler
@@ -33,9 +36,21 @@ func NewRouter(deps Deps) *gin.Engine {
 	health := handler.NewHealthHandler()
 	r.GET("/healthz", health.Health)
 
-	// 管理 API 需要 token 鉴权。
+	// 登录相关端点不经过 Auth 中间件：登录前必须可访问。
+	authGroup := r.Group("/api/v1/auth")
+	{
+		authGroup.GET("/bootstrap", deps.Auth.BootstrapStatus)
+		authGroup.POST("/bootstrap", deps.Auth.Bootstrap)
+		authGroup.POST("/login", deps.Auth.Login)
+		authGroup.GET("/me", deps.Auth.Me)
+		authGroup.POST("/logout", deps.Auth.Logout)
+	}
+
+	// 管理 API 需要 token 鉴权；auth_enabled=false 时跳过（开发免鉴权）。
 	v1 := r.Group("/api/v1")
-	v1.Use(middleware.Auth(deps.TokenValidator))
+	if deps.AuthEnabled {
+		v1.Use(middleware.Auth(deps.TokenValidator))
+	}
 	{
 		accounts := v1.Group("/accounts")
 		{

@@ -49,6 +49,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.max_open_conns", 20)
 	v.SetDefault("database.max_idle_conns", 5)
 	v.SetDefault("database.auto_migrate", false)
+	// 鉴权默认开启；仅开发/本地可通过 TMF_SECURITY_AUTH_ENABLED=false 关闭。
+	v.SetDefault("security.auth_enabled", true)
 	v.SetDefault("dispatch.worker_count", 2)
 	v.SetDefault("dispatch.poll_interval", "2s")
 	v.SetDefault("dispatch.visibility_timeout", "5m")

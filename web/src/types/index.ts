@@ -139,3 +139,14 @@ export interface TokenCreated {
   name: string
   token: string
 }
+
+export interface BootstrapStatus {
+  auth_enabled: boolean
+  can_bootstrap: boolean
+}
+
+export interface Me {
+  auth_enabled: boolean
+  authenticated: boolean
+  can_bootstrap: boolean
+}

@@ -35,6 +35,10 @@ type DatabaseConfig struct {
 type SecurityConfig struct {
 	// EncryptionKey 是敏感字段加密主密钥（KEK），必须为 32 字节。
 	EncryptionKey string `mapstructure:"encryption_key"`
+	// AuthEnabled 控制 /api/v1 是否启用 Bearer Token 鉴权，默认 true。
+	// 仅在开发或单人本地使用时可通过 TMF_SECURITY_AUTH_ENABLED=false 关闭；
+	// /healthz 始终无鉴权。
+	AuthEnabled bool `mapstructure:"auth_enabled"`
 }
 
 // DispatchConfig 是投递 worker 配置。

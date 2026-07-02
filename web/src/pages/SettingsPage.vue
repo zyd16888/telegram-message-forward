@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { NButton, useMessage, type DataTableColumns } from 'naive-ui'
 import { tokensApi } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -9,20 +9,19 @@ import { errText } from '@/utils/error'
 const message = useMessage()
 const auth = useAuthStore()
 
-const tokenInput = ref(auth.token)
 const tokens = ref<ApiToken[]>([])
 const newTokenName = ref('')
 const createdToken = ref('')
 const loading = ref(false)
 
-function saveToken() {
-  auth.save(tokenInput.value.trim())
-  message.success('Token 已保存到本地')
-  void loadTokens()
-}
+// 当前鉴权模式描述。
+const authStatus = computed(() =>
+  auth.devNoAuth
+    ? { type: 'warning' as const, title: '开发免鉴权', desc: '当前后端已关闭管理 API 鉴权（auth_enabled=false）。Token 管理为可选。' }
+    : { type: 'success' as const, title: '鉴权已启用', desc: '管理 API 需要有效 Bearer Token。登录入口在登录页，Settings 仅用于凭证维护。' },
+)
 
 async function loadTokens() {
-  if (!auth.hasToken) return
   loading.value = true
   try {
     tokens.value = await tokensApi.list()
@@ -81,26 +80,17 @@ onMounted(loadTokens)
 
 <template>
   <n-space vertical size="large">
-    <n-card title="API Token（本地）">
-      <n-space vertical>
-        <n-text depth="3">
-          管理 API 需要 Bearer Token。首个 token 用
-          <n-text code>go run ./cmd/token create</n-text> 生成，粘贴到此处保存。
-        </n-text>
-        <n-input-group>
-          <n-input
-            v-model:value="tokenInput"
-            type="password"
-            show-password-on="click"
-            placeholder="粘贴 API token"
-          />
-          <n-button type="primary" @click="saveToken">保存</n-button>
-        </n-input-group>
-      </n-space>
+    <n-card title="API 鉴权状态">
+      <n-alert :type="authStatus.type" :title="authStatus.title">
+        {{ authStatus.desc }}
+      </n-alert>
     </n-card>
 
-    <n-card title="Token 管理">
+    <n-card title="Token 管理（管理凭证维护）">
       <n-space vertical>
+        <n-text depth="3">
+          在此维护管理凭证：生成新凭证、吊销旧凭证。生成的明文 Token 仅显示一次。
+        </n-text>
         <n-input-group>
           <n-input v-model:value="newTokenName" placeholder="新 token 名称" />
           <n-button type="primary" @click="createToken">生成新 Token</n-button>

@@ -414,3 +414,33 @@ type TokenCreatedDTO struct {
 	Name  string `json:"name"`
 	Token string `json:"token"`
 }
+
+// --- Auth ---
+
+// BootstrapStatusDTO 描述首次初始化管理凭证的可用性。
+type BootstrapStatusDTO struct {
+	AuthEnabled  bool `json:"auth_enabled"`
+	CanBootstrap bool `json:"can_bootstrap"`
+}
+
+// BootstrapRequest 是创建首个管理凭证请求。
+type BootstrapRequest struct {
+	Name string `json:"name"`
+}
+
+// LoginRequest 是登录请求，仅校验 token 有效性。
+type LoginRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+// LoginResultDTO 是登录结果。
+type LoginResultDTO struct {
+	Authenticated bool `json:"authenticated"`
+}
+
+// MeDTO 是当前登录身份状态。
+type MeDTO struct {
+	AuthEnabled   bool `json:"auth_enabled"`
+	Authenticated bool `json:"authenticated"`
+	CanBootstrap  bool `json:"can_bootstrap"`
+}
