@@ -165,7 +165,7 @@ func TestPhoneLoginHappyPath(t *testing.T) {
 		t.Fatalf("Start 后应为 code_required，实际 %s", flow.Status)
 	}
 
-	flow, err = svc.SubmitCode(ctx, flow.FlowID, "12345")
+	flow, err = svc.SubmitCode(ctx, accID, flow.FlowID, "12345")
 	if err != nil {
 		t.Fatalf("SubmitCode 失败: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestPhoneLogin2FA(t *testing.T) {
 	ctx := context.Background()
 
 	flow, _ := svc.Start(ctx, accID)
-	flow, err := svc.SubmitCode(ctx, flow.FlowID, "12345")
+	flow, err := svc.SubmitCode(ctx, accID, flow.FlowID, "12345")
 	if err != nil {
 		t.Fatalf("SubmitCode 失败: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestPhoneLogin2FA(t *testing.T) {
 		t.Fatal("2FA 完成前账号不应 active")
 	}
 
-	flow, err = svc.SubmitPassword(ctx, flow.FlowID, "secret")
+	flow, err = svc.SubmitPassword(ctx, accID, flow.FlowID, "secret")
 	if err != nil {
 		t.Fatalf("SubmitPassword 失败: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestSubmitCodeInvalid(t *testing.T) {
 	ctx := context.Background()
 
 	flow, _ := svc.Start(ctx, accID)
-	flow, err := svc.SubmitCode(ctx, flow.FlowID, "00000")
+	flow, err := svc.SubmitCode(ctx, accID, flow.FlowID, "00000")
 	if !errors.Is(err, infratelegram.ErrCodeInvalid) {
 		t.Fatalf("应返回验证码错误，实际 %v", err)
 	}
@@ -247,7 +247,7 @@ func TestSubmitCodeExpiredByServer(t *testing.T) {
 	svc, _, _, _, accID := setup(t, &fakeRunner{codeErr: infratelegram.ErrCodeExpired})
 	ctx := context.Background()
 	flow, _ := svc.Start(ctx, accID)
-	flow, err := svc.SubmitCode(ctx, flow.FlowID, "00000")
+	flow, err := svc.SubmitCode(ctx, accID, flow.FlowID, "00000")
 	if !errors.Is(err, infratelegram.ErrCodeExpired) {
 		t.Fatalf("应返回验证码过期，实际 %v", err)
 	}
@@ -263,7 +263,7 @@ func TestFlowExpiryByClock(t *testing.T) {
 	flow, _ := svc.Start(ctx, accID)
 	// 时钟前进超过 TTL。
 	clk.t = clk.t.Add(defaultFlowTTL + time.Minute)
-	flow, err := svc.SubmitCode(ctx, flow.FlowID, "12345")
+	flow, err := svc.SubmitCode(ctx, accID, flow.FlowID, "12345")
 	if !errors.Is(err, ErrFlowExpired) {
 		t.Fatalf("应返回 flow 过期，实际 %v", err)
 	}
@@ -277,7 +277,7 @@ func TestCancel(t *testing.T) {
 	svc, accounts, _, _, accID := setup(t, &fakeRunner{})
 	ctx := context.Background()
 	flow, _ := svc.Start(ctx, accID)
-	flow, err := svc.Cancel(ctx, flow.FlowID)
+	flow, err := svc.Cancel(ctx, accID, flow.FlowID)
 	if err != nil {
 		t.Fatalf("Cancel 失败: %v", err)
 	}
@@ -286,6 +286,54 @@ func TestCancel(t *testing.T) {
 	}
 	if acc, _ := accounts.GetByID(ctx, accID); acc.Status != domainaccount.StatusInactive {
 		t.Fatalf("取消后账号应回退 inactive，实际 %s", acc.Status)
+	}
+}
+
+// TestSubmitCodeAccountMismatch 验证账号归属校验：用另一个账号 id 提交验证码必须
+// 返回明确的不匹配错误，且不能修改该 flow（flow 仍保持 code_required 可被真正账号继续）。
+func TestSubmitCodeAccountMismatch(t *testing.T) {
+	svc, accounts, _, _, accID := setup(t, &fakeRunner{})
+	ctx := context.Background()
+
+	other := &domainaccount.Account{Name: "b", PhoneNumber: "+8613900000000", AppID: 1, AppHash: "h", Status: domainaccount.StatusInactive}
+	_ = accounts.Create(ctx, other)
+
+	flow, _ := svc.Start(ctx, accID)
+
+	got, err := svc.SubmitCode(ctx, other.ID, flow.FlowID, "12345")
+	if !errors.Is(err, ErrFlowAccountMismatch) {
+		t.Fatalf("应返回账号不匹配错误，实际 %v", err)
+	}
+	if got != nil {
+		t.Fatal("账号不匹配时不应返回 flow 数据")
+	}
+
+	// flow 未被跨账号请求修改，真正所属账号仍可正常提交验证码。
+	flow, err = svc.SubmitCode(ctx, accID, flow.FlowID, "12345")
+	if err != nil {
+		t.Fatalf("所属账号提交验证码应成功: %v", err)
+	}
+	if flow.Status != domainloginflow.StatusAuthorized {
+		t.Fatalf("应为 authorized，实际 %s", flow.Status)
+	}
+}
+
+// TestCancelAccountMismatch 验证 Cancel 同样校验账号归属，不允许跨账号取消他人 flow。
+func TestCancelAccountMismatch(t *testing.T) {
+	svc, accounts, _, _, accID := setup(t, &fakeRunner{})
+	ctx := context.Background()
+
+	other := &domainaccount.Account{Name: "b", PhoneNumber: "+8613900000000", AppID: 1, AppHash: "h", Status: domainaccount.StatusInactive}
+	_ = accounts.Create(ctx, other)
+
+	flow, _ := svc.Start(ctx, accID)
+
+	if _, err := svc.Cancel(ctx, other.ID, flow.FlowID); !errors.Is(err, ErrFlowAccountMismatch) {
+		t.Fatalf("跨账号取消应返回不匹配错误，实际 %v", err)
+	}
+	stored, _ := svc.GetActiveByAccount(ctx, accID)
+	if stored == nil || stored.Status.IsTerminal() {
+		t.Fatal("跨账号取消不应影响真正所属账号的 flow")
 	}
 }
 

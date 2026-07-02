@@ -30,6 +30,8 @@ var (
 	ErrWrongStep = errors.New("当前登录步骤不允许该操作")
 	// ErrWrongMethod 表示 flow 登录方式与操作不匹配。
 	ErrWrongMethod = errors.New("登录方式不匹配")
+	// ErrFlowAccountMismatch 表示 flow 不属于该账号，禁止跨账号操作。
+	ErrFlowAccountMismatch = errors.New("登录流程与账号不匹配")
 )
 
 // flowRunner 抽象 Telegram 验证码分步登录操作，便于测试注入 fake。
@@ -125,10 +127,10 @@ func (s *Service) Start(ctx context.Context, accountID int64) (*domainloginflow.
 }
 
 // SubmitCode 提交验证码。需要 2FA 时进入 password_required。
-func (s *Service) SubmitCode(ctx context.Context, flowID, code string) (*domainloginflow.Flow, error) {
-	flow, err := s.flows.GetByFlowID(ctx, flowID)
+func (s *Service) SubmitCode(ctx context.Context, accountID int64, flowID, code string) (*domainloginflow.Flow, error) {
+	flow, err := s.loadFlowForAccount(ctx, accountID, flowID)
 	if err != nil {
-		return nil, err
+		return flow, err
 	}
 	if flow.Method != domainloginflow.MethodPhoneCode {
 		return flow, ErrWrongMethod
@@ -167,10 +169,10 @@ func (s *Service) SubmitCode(ctx context.Context, flowID, code string) (*domainl
 }
 
 // SubmitPassword 提交两步验证密码。password 不落库、不打印。
-func (s *Service) SubmitPassword(ctx context.Context, flowID, password string) (*domainloginflow.Flow, error) {
-	flow, err := s.flows.GetByFlowID(ctx, flowID)
+func (s *Service) SubmitPassword(ctx context.Context, accountID int64, flowID, password string) (*domainloginflow.Flow, error) {
+	flow, err := s.loadFlowForAccount(ctx, accountID, flowID)
 	if err != nil {
-		return nil, err
+		return flow, err
 	}
 	if flow.Method != domainloginflow.MethodPhoneCode {
 		return flow, ErrWrongMethod
@@ -229,10 +231,10 @@ func (s *Service) GetActiveByAccount(ctx context.Context, accountID int64) (*dom
 }
 
 // Cancel 取消一个进行中的 flow。
-func (s *Service) Cancel(ctx context.Context, flowID string) (*domainloginflow.Flow, error) {
-	flow, err := s.flows.GetByFlowID(ctx, flowID)
+func (s *Service) Cancel(ctx context.Context, accountID int64, flowID string) (*domainloginflow.Flow, error) {
+	flow, err := s.loadFlowForAccount(ctx, accountID, flowID)
 	if err != nil {
-		return nil, err
+		return flow, err
 	}
 	if flow.Status.IsTerminal() {
 		return flow, nil
@@ -320,10 +322,10 @@ func (s *Service) StartQR(ctx context.Context, accountID int64) (*domainloginflo
 // QRStatus 读取扫码登录会话状态：成功则完成登录；过期或后台会话已丢失
 // （例如服务重启）则进入 qr_refresh_required。不会因轮询而重新导出 token，
 // 因为状态直接读取 infra 层长连接会话的内存快照。
-func (s *Service) QRStatus(ctx context.Context, flowID string) (*domainloginflow.Flow, error) {
-	flow, err := s.flows.GetByFlowID(ctx, flowID)
+func (s *Service) QRStatus(ctx context.Context, accountID int64, flowID string) (*domainloginflow.Flow, error) {
+	flow, err := s.loadFlowForAccount(ctx, accountID, flowID)
 	if err != nil {
-		return nil, err
+		return flow, err
 	}
 	if flow.Method != domainloginflow.MethodQR {
 		return flow, ErrWrongMethod
@@ -377,10 +379,10 @@ func (s *Service) QRStatus(ctx context.Context, flowID string) (*domainloginflow
 }
 
 // RefreshQR 丢弃旧的后台会话，重新发起一次扫码登录会话，重置等待状态与过期时间。
-func (s *Service) RefreshQR(ctx context.Context, flowID string) (*domainloginflow.Flow, error) {
-	flow, err := s.flows.GetByFlowID(ctx, flowID)
+func (s *Service) RefreshQR(ctx context.Context, accountID int64, flowID string) (*domainloginflow.Flow, error) {
+	flow, err := s.loadFlowForAccount(ctx, accountID, flowID)
 	if err != nil {
-		return nil, err
+		return flow, err
 	}
 	if flow.Method != domainloginflow.MethodQR {
 		return flow, ErrWrongMethod
@@ -469,6 +471,19 @@ func (s *Service) buildConfig(acc *domainaccount.Account) infratelegram.LoginFlo
 			return s.accounts.Update(ctx, fresh)
 		},
 	}
+}
+
+// loadFlowForAccount 加载 flow 并校验其属于 accountID，避免跨账号误操作。
+// 不匹配时不返回 flow，避免向调用方泄露其它账号的登录状态。
+func (s *Service) loadFlowForAccount(ctx context.Context, accountID int64, flowID string) (*domainloginflow.Flow, error) {
+	flow, err := s.flows.GetByFlowID(ctx, flowID)
+	if err != nil {
+		return nil, err
+	}
+	if flow.AccountID != accountID {
+		return nil, ErrFlowAccountMismatch
+	}
+	return flow, nil
 }
 
 func (s *Service) isExpired(flow *domainloginflow.Flow) bool {

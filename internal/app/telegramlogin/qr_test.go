@@ -2,6 +2,7 @@ package telegramlogin
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -103,7 +104,7 @@ func TestQRStartAndAuthorize(t *testing.T) {
 	}
 
 	// 第一次轮询仍在等待。
-	flow, err = svc.QRStatus(ctx, flow.FlowID)
+	flow, err = svc.QRStatus(ctx, accID, flow.FlowID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func TestQRStartAndAuthorize(t *testing.T) {
 	}
 
 	// 第二次轮询完成登录。
-	flow, err = svc.QRStatus(ctx, flow.FlowID)
+	flow, err = svc.QRStatus(ctx, accID, flow.FlowID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +150,7 @@ func TestQRStatusDoesNotRefreshTokenOnEachPoll(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		flow, err = svc.QRStatus(ctx, flow.FlowID)
+		flow, err = svc.QRStatus(ctx, accID, flow.FlowID)
 		if err != nil {
 			t.Fatalf("第 %d 次轮询失败: %v", i+1, err)
 		}
@@ -178,7 +179,7 @@ func TestQRMigrateBranch(t *testing.T) {
 	ctx := context.Background()
 
 	flow, _ := svc.StartQR(ctx, accID)
-	flow, err := svc.QRStatus(ctx, flow.FlowID)
+	flow, err := svc.QRStatus(ctx, accID, flow.FlowID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +205,7 @@ func TestQRExpiredRefresh(t *testing.T) {
 
 	flow, _ := svc.StartQR(ctx, accID)
 	oldFlowID := flow.FlowID
-	flow, err := svc.QRStatus(ctx, flow.FlowID)
+	flow, err := svc.QRStatus(ctx, accID, flow.FlowID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +216,7 @@ func TestQRExpiredRefresh(t *testing.T) {
 		t.Fatal("过期后旧会话应已被清理")
 	}
 
-	flow, err = svc.RefreshQR(ctx, flow.FlowID)
+	flow, err = svc.RefreshQR(ctx, accID, flow.FlowID)
 	if err != nil {
 		t.Fatalf("RefreshQR 失败: %v", err)
 	}
@@ -245,7 +246,7 @@ func TestQRSessionLostAfterRestart(t *testing.T) {
 	// 模拟进程重启：内存态会话丢失。
 	qr.QRCancel(flow.FlowID)
 
-	flow, err = svc.QRStatus(ctx, flow.FlowID)
+	flow, err = svc.QRStatus(ctx, accID, flow.FlowID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,4 +284,51 @@ func TestQRFlowRecovery(t *testing.T) {
 		t.Fatalf("超期后不应再有活跃 flow，实际 %v", got.Status)
 	}
 	_ = flow
+}
+
+// TestQRStatusAccountMismatch 验证账号归属校验：用另一个账号 id 轮询该 flow 必须
+// 返回明确的不匹配错误，且不能返回 flow 数据（避免跨账号泄露登录状态）。
+func TestQRStatusAccountMismatch(t *testing.T) {
+	qr := newFakeQRRunner()
+	svc, accounts, _, _, accID := setupQR(t, qr)
+	ctx := context.Background()
+
+	other := &domainaccount.Account{Name: "b", PhoneNumber: "+8613900000000", AppID: 1, AppHash: "h", Status: domainaccount.StatusInactive}
+	_ = accounts.Create(ctx, other)
+
+	flow, err := svc.StartQR(ctx, accID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.QRStatus(ctx, other.ID, flow.FlowID)
+	if !errors.Is(err, ErrFlowAccountMismatch) {
+		t.Fatalf("应返回账号不匹配错误，实际 %v", err)
+	}
+	if got != nil {
+		t.Fatal("账号不匹配时不应返回 flow 数据")
+	}
+
+	// 真正所属账号仍可正常轮询。
+	if _, err := svc.QRStatus(ctx, accID, flow.FlowID); err != nil {
+		t.Fatalf("所属账号轮询应成功: %v", err)
+	}
+}
+
+// TestQRRefreshAccountMismatch 验证 RefreshQR 同样校验账号归属，不允许跨账号刷新。
+func TestQRRefreshAccountMismatch(t *testing.T) {
+	qr := newFakeQRRunner()
+	qr.checkResults = []infratelegram.QRCheckResult{{Expired: true}}
+	svc, accounts, _, _, accID := setupQR(t, qr)
+	ctx := context.Background()
+
+	other := &domainaccount.Account{Name: "b", PhoneNumber: "+8613900000000", AppID: 1, AppHash: "h", Status: domainaccount.StatusInactive}
+	_ = accounts.Create(ctx, other)
+
+	flow, _ := svc.StartQR(ctx, accID)
+	_, _ = svc.QRStatus(ctx, accID, flow.FlowID) // 触发过期
+
+	if _, err := svc.RefreshQR(ctx, other.ID, flow.FlowID); !errors.Is(err, ErrFlowAccountMismatch) {
+		t.Fatalf("跨账号刷新应返回不匹配错误，实际 %v", err)
+	}
 }
