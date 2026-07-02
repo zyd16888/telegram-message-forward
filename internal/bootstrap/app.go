@@ -173,7 +173,8 @@ func Build(cfg *config.Config) (*App, error) {
 	tokenSvc := apptoken.NewService(apiTokens)
 	authSvc := appauth.NewService(apiTokens, tokenSvc, cfg.Security.AuthEnabled)
 	tgLoginRunner := infratelegram.LoginFlowService{}
-	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, tgLoginRunner, tgLoginRunner, clk, log)
+	tgQRRunner := infratelegram.NewQRSessionManager()
+	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, tgLoginRunner, tgQRRunner, clk, log)
 
 	router := api.NewRouter(api.Deps{
 		Logger:         log,

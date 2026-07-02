@@ -10,27 +10,42 @@ import (
 	infratelegram "telegram-message-forward/internal/infra/telegram"
 )
 
-// fakeQRRunner 模拟扫码登录的分步结果。
+// fakeQRRunner 模拟 infra/telegram.QRSessionManager 的后台会话契约：
+// QRStart 建立一次会话并返回首个 token；QRCheck 按预设序列依次返回状态快照，
+// 不接收/不依赖 token 参数，天然验证「轮询不会重新导出 token」；QRCancel
+// 模拟服务重启或主动取消导致会话丢失。
 type fakeQRRunner struct {
-	exportErr error
-	// checkResults 按调用顺序返回；用尽后返回最后一个。
+	startErr error
+	// checkResults 按调用顺序返回；用尽后保持返回最后一个（默认 Waiting）。
 	checkResults []infratelegram.QRCheckResult
 	calls        int
+	sessions     map[string]bool
 }
 
-func (f *fakeQRRunner) QRExport(ctx context.Context, cfg infratelegram.LoginFlowConfig) (infratelegram.QRExportResult, error) {
-	if f.exportErr != nil {
-		return infratelegram.QRExportResult{}, f.exportErr
+func newFakeQRRunner() *fakeQRRunner {
+	return &fakeQRRunner{sessions: map[string]bool{}}
+}
+
+func (f *fakeQRRunner) QRStart(ctx context.Context, cfg infratelegram.LoginFlowConfig, sessionID string) (infratelegram.QRExportResult, error) {
+	if f.startErr != nil {
+		return infratelegram.QRExportResult{}, f.startErr
 	}
+	f.sessions[sessionID] = true
+	f.calls = 0
+	// 模拟 gotd 建立长连接后立即持久化 session（onSession 在连接握手时触发，
+	// 与是否已授权无关）；扫码成功后无需再次显式保存。
+	_ = cfg.SaveSession(ctx, []byte("qr-session-bytes"))
 	return infratelegram.QRExportResult{
 		Token:     []byte("qr-token-bytes"),
 		URL:       "tg://login?token=x",
 		ExpiresAt: time.Date(2026, 7, 1, 12, 0, 30, 0, time.UTC),
-		DCID:      2,
 	}, nil
 }
 
-func (f *fakeQRRunner) QRCheck(ctx context.Context, cfg infratelegram.LoginFlowConfig, _ []byte, _ int64) (infratelegram.QRCheckResult, error) {
+func (f *fakeQRRunner) QRCheck(ctx context.Context, sessionID string) (infratelegram.QRCheckResult, error) {
+	if !f.sessions[sessionID] {
+		return infratelegram.QRCheckResult{}, infratelegram.ErrQRSessionNotFound
+	}
 	if len(f.checkResults) == 0 {
 		return infratelegram.QRCheckResult{Waiting: true}, nil
 	}
@@ -40,11 +55,14 @@ func (f *fakeQRRunner) QRCheck(ctx context.Context, cfg infratelegram.LoginFlowC
 	}
 	f.calls++
 	res := f.checkResults[idx]
-	if res.Authorized {
-		// 模拟 gotd 完成登录后持久化授权 session。
-		_ = cfg.SaveSession(ctx, []byte("auth-session"))
+	if res.Authorized || res.Expired || res.Err != nil {
+		delete(f.sessions, sessionID)
 	}
 	return res, nil
+}
+
+func (f *fakeQRRunner) QRCancel(sessionID string) {
+	delete(f.sessions, sessionID)
 }
 
 func setupQR(t *testing.T, qr *fakeQRRunner) (*Service, *fakeAccountRepo, *fakeFlowRepo, *fakeClock, int64) {
@@ -58,12 +76,14 @@ func setupQR(t *testing.T, qr *fakeQRRunner) (*Service, *fakeAccountRepo, *fakeF
 	return svc, accounts, flows, clk, acc.ID
 }
 
-// TestQRStartAndAuthorize 验证扫码登录：start 生成二维码，轮询到 authorized 后账号 active。
+// TestQRStartAndAuthorize 验证扫码登录：start 生成二维码，轮询到 authorized 后账号 active、
+// session 已加密落库（在 QRStart 建立长连接时即已保存）。
 func TestQRStartAndAuthorize(t *testing.T) {
-	qr := &fakeQRRunner{checkResults: []infratelegram.QRCheckResult{
-		{Waiting: true, RefreshedToken: []byte("qr-token-2"), ExpiresAt: time.Date(2026, 7, 1, 12, 1, 0, 0, time.UTC)},
+	qr := newFakeQRRunner()
+	qr.checkResults = []infratelegram.QRCheckResult{
+		{Waiting: true},
 		{Authorized: true},
-	}}
+	}
 	svc, accounts, _, _, accID := setupQR(t, qr)
 	ctx := context.Background()
 
@@ -76,6 +96,10 @@ func TestQRStartAndAuthorize(t *testing.T) {
 	}
 	if flow.QRURL == "" {
 		t.Fatal("应返回 qr_url 用于渲染二维码")
+	}
+	// session 在建立长连接时已保存，不必等到 authorized。
+	if acc, _ := accounts.GetByID(ctx, accID); string(acc.Session) != "qr-session-bytes" {
+		t.Fatalf("StartQR 后应已保存 session，实际 %q", string(acc.Session))
 	}
 
 	// 第一次轮询仍在等待。
@@ -99,53 +123,96 @@ func TestQRStartAndAuthorize(t *testing.T) {
 	if acc.Status != domainaccount.StatusActive {
 		t.Fatalf("账号应 active，实际 %s", acc.Status)
 	}
-	if string(acc.Session) != "auth-session" {
-		t.Fatalf("应保存授权 session，实际 %q", string(acc.Session))
+	if string(acc.Session) != "qr-session-bytes" {
+		t.Fatalf("应保存 session，实际 %q", string(acc.Session))
 	}
 }
 
-// TestQRMigrateBranch 验证 DC migrate 分支：先返回 migrate 记录 dc，再轮询成功。
+// TestQRStatusDoesNotRefreshTokenOnEachPoll 验证多次轮询「等待中」状态时，
+// qr_url（由 token 派生）保持不变，且底层 QRCheck 不会重新 export 新 token——
+// 这正是修复的核心问题：轮询不应每次替换二维码。
+func TestQRStatusDoesNotRefreshTokenOnEachPoll(t *testing.T) {
+	qr := newFakeQRRunner()
+	qr.checkResults = []infratelegram.QRCheckResult{
+		{Waiting: true}, {Waiting: true}, {Waiting: true},
+	}
+	svc, _, _, _, accID := setupQR(t, qr)
+	ctx := context.Background()
+
+	flow, err := svc.StartQR(ctx, accID)
+	if err != nil {
+		t.Fatalf("StartQR 失败: %v", err)
+	}
+	firstURL := flow.QRURL
+	if firstURL == "" {
+		t.Fatal("应返回 qr_url")
+	}
+
+	for i := 0; i < 3; i++ {
+		flow, err = svc.QRStatus(ctx, flow.FlowID)
+		if err != nil {
+			t.Fatalf("第 %d 次轮询失败: %v", i+1, err)
+		}
+		if flow.Status != domainloginflow.StatusWaitingScan {
+			t.Fatalf("第 %d 次轮询应仍等待，实际 %s", i+1, flow.Status)
+		}
+		if flow.QRURL != firstURL {
+			t.Fatalf("第 %d 次轮询后 qr_url 不应变化，原 %q 现 %q", i+1, firstURL, flow.QRURL)
+		}
+	}
+	// QRCheck 只读取会话快照，不会触发 QRStart（QRStart 只在真正 start/refresh 时调用一次）。
+	if qr.calls != 3 {
+		t.Fatalf("应恰好轮询 3 次 QRCheck，实际 %d", qr.calls)
+	}
+}
+
+// TestQRMigrateBranch 验证 DC migrate 分支：授权结果携带 MigrateDC 时，
+// flow.DCID 被真实记录（对应 infra 层通过 client.MigrateTo 完成的真实迁移与导入），
+// 而不只是把请求挂起。
 func TestQRMigrateBranch(t *testing.T) {
-	qr := &fakeQRRunner{checkResults: []infratelegram.QRCheckResult{
-		{MigrateDC: 4},
-		{Authorized: true},
-	}}
-	svc, _, flows, _, accID := setupQR(t, qr)
+	qr := newFakeQRRunner()
+	qr.checkResults = []infratelegram.QRCheckResult{
+		{Authorized: true, MigrateDC: 4},
+	}
+	svc, accounts, flows, _, accID := setupQR(t, qr)
 	ctx := context.Background()
 
 	flow, _ := svc.StartQR(ctx, accID)
-	// 第一次轮询触发 migrate，记录 dc_id 并保持等待。
 	flow, err := svc.QRStatus(ctx, flow.FlowID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if flow.Status != domainloginflow.StatusWaitingScan {
-		t.Fatalf("migrate 后应仍等待，实际 %s", flow.Status)
-	}
-	stored, _ := flows.GetByFlowID(ctx, flow.FlowID)
-	if stored.DCID != 4 {
-		t.Fatalf("应记录迁移目标 dc=4，实际 %d", stored.DCID)
-	}
-	// 第二次轮询完成登录。
-	flow, _ = svc.QRStatus(ctx, flow.FlowID)
 	if flow.Status != domainloginflow.StatusAuthorized {
 		t.Fatalf("migrate 后应完成登录，实际 %s", flow.Status)
 	}
+	stored, _ := flows.GetByFlowID(ctx, flow.FlowID)
+	if stored.DCID != 4 {
+		t.Fatalf("应记录真实迁移目标 dc=4，实际 %d", stored.DCID)
+	}
+	if acc, _ := accounts.GetByID(ctx, accID); acc.Status != domainaccount.StatusActive {
+		t.Fatal("migrate 后账号应 active")
+	}
 }
 
-// TestQRExpiredRefresh 验证二维码过期与刷新：过期进入 qr_refresh_required，刷新回到 waiting_scan。
+// TestQRExpiredRefresh 验证二维码过期与刷新：过期进入 qr_refresh_required，刷新后重新
+// 发起会话（旧会话被取消）并回到 waiting_scan。
 func TestQRExpiredRefresh(t *testing.T) {
-	qr := &fakeQRRunner{checkResults: []infratelegram.QRCheckResult{{Expired: true}}}
+	qr := newFakeQRRunner()
+	qr.checkResults = []infratelegram.QRCheckResult{{Expired: true}}
 	svc, _, _, _, accID := setupQR(t, qr)
 	ctx := context.Background()
 
 	flow, _ := svc.StartQR(ctx, accID)
+	oldFlowID := flow.FlowID
 	flow, err := svc.QRStatus(ctx, flow.FlowID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if flow.Status != domainloginflow.StatusQRRefreshRequired {
 		t.Fatalf("过期应为 qr_refresh_required，实际 %s", flow.Status)
+	}
+	if qr.sessions[oldFlowID] {
+		t.Fatal("过期后旧会话应已被清理")
 	}
 
 	flow, err = svc.RefreshQR(ctx, flow.FlowID)
@@ -158,17 +225,43 @@ func TestQRExpiredRefresh(t *testing.T) {
 	if flow.QRURL == "" {
 		t.Fatal("刷新后应返回新的 qr_url")
 	}
+	if !qr.sessions[flow.FlowID] {
+		t.Fatal("刷新后应重新发起会话")
+	}
 }
 
-// TestQRTokenNotLeaked 验证 QR flow 的 DTO 侧不会泄露原始 token（domain 保留明文供内部使用，
-// 但持久化经加密、响应仅暴露派生 URL）。此处校验 attachQRURL 只依赖 token 派生 URL，不外泄 token。
+// TestQRSessionLostAfterRestart 验证服务重启后（内存态会话丢失）：轮询检测到
+// ErrQRSessionNotFound 时应将 flow 置为 qr_refresh_required，而不是报错卡死，
+// 这是 HTTP 轮询式 UI 恢复 gotd 推送语义会话的方式。
+func TestQRSessionLostAfterRestart(t *testing.T) {
+	qr := newFakeQRRunner()
+	svc, _, _, _, accID := setupQR(t, qr)
+	ctx := context.Background()
+
+	flow, err := svc.StartQR(ctx, accID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 模拟进程重启：内存态会话丢失。
+	qr.QRCancel(flow.FlowID)
+
+	flow, err = svc.QRStatus(ctx, flow.FlowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flow.Status != domainloginflow.StatusQRRefreshRequired {
+		t.Fatalf("会话丢失后应为 qr_refresh_required，实际 %s", flow.Status)
+	}
+}
+
+// TestQRFlowRecovery 验证服务重启后 flow 仍可通过 GetActiveByAccount 恢复展示，
+// 超过整体 TTL 后 RecoverStale 清理为 expired。
 func TestQRFlowRecovery(t *testing.T) {
-	qr := &fakeQRRunner{}
+	qr := newFakeQRRunner()
 	svc, _, _, clk, accID := setupQR(t, qr)
 	ctx := context.Background()
 
 	flow, _ := svc.StartQR(ctx, accID)
-	// 模拟服务重启：通过 GetActiveByAccount 恢复。
 	got, err := svc.GetActiveByAccount(ctx, accID)
 	if err != nil {
 		t.Fatal(err)

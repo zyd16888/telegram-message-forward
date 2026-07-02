@@ -40,11 +40,14 @@ type flowRunner interface {
 	SignInPassword(ctx context.Context, cfg infratelegram.LoginFlowConfig, password string) (infratelegram.SignInResult, error)
 }
 
-// qrRunner 抽象 Telegram 扫码登录操作，便于测试注入 fake。
-// 实现见 infra/telegram.LoginFlowService。
+// qrRunner 抽象 Telegram 扫码登录后台会话，便于测试注入 fake。
+// 实现见 infra/telegram.QRSessionManager：QRStart 建立长连接并导出首个
+// token，之后在后台监听扫码确认；QRCheck 只读取会话内存快照，不重新
+// export、不刷新 token；QRCancel 停止并清理会话。
 type qrRunner interface {
-	QRExport(ctx context.Context, cfg infratelegram.LoginFlowConfig) (infratelegram.QRExportResult, error)
-	QRCheck(ctx context.Context, cfg infratelegram.LoginFlowConfig, token []byte, expiresUnix int64) (infratelegram.QRCheckResult, error)
+	QRStart(ctx context.Context, cfg infratelegram.LoginFlowConfig, sessionID string) (infratelegram.QRExportResult, error)
+	QRCheck(ctx context.Context, sessionID string) (infratelegram.QRCheckResult, error)
+	QRCancel(sessionID string)
 }
 
 // Service 是 Telegram 登录应用服务。
@@ -234,6 +237,10 @@ func (s *Service) Cancel(ctx context.Context, flowID string) (*domainloginflow.F
 	if flow.Status.IsTerminal() {
 		return flow, nil
 	}
+	if flow.Method == domainloginflow.MethodQR && s.qr != nil {
+		// 停止后台监听会话，避免遗留 goroutine 与长连接。
+		s.qr.QRCancel(flow.FlowID)
+	}
 	flow.Status = domainloginflow.StatusCancelled
 	clearSensitive(flow)
 	if err := s.flows.Update(ctx, flow); err != nil {
@@ -266,6 +273,9 @@ func (s *Service) StartQR(ctx context.Context, accountID int64) (*domainloginflo
 		return nil, err
 	}
 	if existing, _ := s.flows.GetActiveByAccount(ctx, accountID); existing != nil {
+		if existing.Method == domainloginflow.MethodQR && s.qr != nil {
+			s.qr.QRCancel(existing.FlowID)
+		}
 		existing.Status = domainloginflow.StatusCancelled
 		clearSensitive(existing)
 		_ = s.flows.Update(ctx, existing)
@@ -290,13 +300,13 @@ func (s *Service) StartQR(ctx context.Context, accountID int64) (*domainloginflo
 		return nil, err
 	}
 
-	res, err := s.qr.QRExport(ctx, s.buildConfig(acc))
+	res, err := s.qr.QRStart(ctx, s.buildConfig(acc), flow.FlowID)
 	if err != nil {
 		s.failFlow(ctx, flow, err)
 		s.markAccountError(ctx, accountID, err)
 		return flow, err
 	}
-	s.applyQRToken(flow, res.Token, res.ExpiresAt, res.DCID)
+	s.applyQRToken(flow, res.Token, res.ExpiresAt)
 	flow.Status = domainloginflow.StatusWaitingScan
 	flow.CurrentStep = string(domainloginflow.StatusWaitingScan)
 	flow.LastError = ""
@@ -307,7 +317,9 @@ func (s *Service) StartQR(ctx context.Context, accountID int64) (*domainloginflo
 	return flow, nil
 }
 
-// QRStatus 轮询扫码登录状态：成功则完成登录；等待则刷新二维码；过期则进入 qr_refresh_required。
+// QRStatus 读取扫码登录会话状态：成功则完成登录；过期或后台会话已丢失
+// （例如服务重启）则进入 qr_refresh_required。不会因轮询而重新导出 token，
+// 因为状态直接读取 infra 层长连接会话的内存快照。
 func (s *Service) QRStatus(ctx context.Context, flowID string) (*domainloginflow.Flow, error) {
 	flow, err := s.flows.GetByFlowID(ctx, flowID)
 	if err != nil {
@@ -323,12 +335,17 @@ func (s *Service) QRStatus(ctx context.Context, flowID string) (*domainloginflow
 		return s.markExpired(ctx, flow), nil
 	}
 
-	acc, err := s.accounts.GetByID(ctx, flow.AccountID)
+	res, err := s.qr.QRCheck(ctx, flow.FlowID)
 	if err != nil {
-		return nil, err
-	}
-	res, err := s.qr.QRCheck(ctx, s.buildConfig(acc), flow.QRToken, flow.QRTokenExpiresAt.Unix())
-	if err != nil {
+		if errors.Is(err, infratelegram.ErrQRSessionNotFound) {
+			flow.Status = domainloginflow.StatusQRRefreshRequired
+			flow.CurrentStep = string(domainloginflow.StatusQRRefreshRequired)
+			flow.LastError = ""
+			if err := s.flows.Update(ctx, flow); err != nil {
+				return nil, err
+			}
+			return flow, nil
+		}
 		flow.LastError = err.Error()
 		_ = s.flows.Update(ctx, flow)
 		s.attachQRURL(flow)
@@ -336,18 +353,10 @@ func (s *Service) QRStatus(ctx context.Context, flowID string) (*domainloginflow
 	}
 	switch {
 	case res.Authorized:
-		return s.finalize(ctx, flow)
-	case res.MigrateDC > 0:
-		// 记录目标 DC，保持等待，下次轮询在迁移后的 session 上尝试完成。
-		flow.DCID = res.MigrateDC
-		flow.Status = domainloginflow.StatusWaitingScan
-		flow.CurrentStep = string(domainloginflow.StatusWaitingScan)
-		flow.LastError = ""
-		if err := s.flows.Update(ctx, flow); err != nil {
-			return nil, err
+		if res.MigrateDC > 0 {
+			flow.DCID = res.MigrateDC
 		}
-		s.attachQRURL(flow)
-		return flow, nil
+		return s.finalize(ctx, flow)
 	case res.Expired:
 		flow.Status = domainloginflow.StatusQRRefreshRequired
 		flow.CurrentStep = string(domainloginflow.StatusQRRefreshRequired)
@@ -355,10 +364,7 @@ func (s *Service) QRStatus(ctx context.Context, flowID string) (*domainloginflow
 			return nil, err
 		}
 		return flow, nil
-	default: // waiting
-		if len(res.RefreshedToken) > 0 {
-			s.applyQRToken(flow, res.RefreshedToken, res.ExpiresAt, flow.DCID)
-		}
+	default: // waiting：token 未变化，仅刷新 updated_at 与 qr_url。
 		flow.Status = domainloginflow.StatusWaitingScan
 		flow.CurrentStep = string(domainloginflow.StatusWaitingScan)
 		flow.LastError = ""
@@ -370,7 +376,7 @@ func (s *Service) QRStatus(ctx context.Context, flowID string) (*domainloginflow
 	}
 }
 
-// RefreshQR 重新生成二维码，重置等待状态与过期时间。
+// RefreshQR 丢弃旧的后台会话，重新发起一次扫码登录会话，重置等待状态与过期时间。
 func (s *Service) RefreshQR(ctx context.Context, flowID string) (*domainloginflow.Flow, error) {
 	flow, err := s.flows.GetByFlowID(ctx, flowID)
 	if err != nil {
@@ -387,13 +393,14 @@ func (s *Service) RefreshQR(ctx context.Context, flowID string) (*domainloginflo
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.qr.QRExport(ctx, s.buildConfig(acc))
+	s.qr.QRCancel(flow.FlowID)
+	res, err := s.qr.QRStart(ctx, s.buildConfig(acc), flow.FlowID)
 	if err != nil {
 		flow.LastError = err.Error()
 		_ = s.flows.Update(ctx, flow)
 		return flow, err
 	}
-	s.applyQRToken(flow, res.Token, res.ExpiresAt, res.DCID)
+	s.applyQRToken(flow, res.Token, res.ExpiresAt)
 	flow.Status = domainloginflow.StatusWaitingScan
 	flow.CurrentStep = string(domainloginflow.StatusWaitingScan)
 	flow.LastError = ""
@@ -406,12 +413,9 @@ func (s *Service) RefreshQR(ctx context.Context, flowID string) (*domainloginflo
 }
 
 // applyQRToken 更新 flow 的 QR token 与短过期时间。
-func (s *Service) applyQRToken(flow *domainloginflow.Flow, token []byte, expiresAt time.Time, dcID int) {
+func (s *Service) applyQRToken(flow *domainloginflow.Flow, token []byte, expiresAt time.Time) {
 	flow.QRToken = token
 	flow.QRTokenExpiresAt = expiresAt
-	if dcID > 0 {
-		flow.DCID = dcID
-	}
 }
 
 // attachQRURL 为等待中的 QR flow 即时构造 qr_url（不落库、不持久化）。
@@ -510,8 +514,8 @@ func newFlowID() string {
 	return hex.EncodeToString(buf)
 }
 
-// 确保 infra 实现同时满足验证码与扫码 runner 接口。
+// 确保 infra 实现满足验证码与扫码 runner 接口。
 var (
 	_ flowRunner = infratelegram.LoginFlowService{}
-	_ qrRunner   = infratelegram.LoginFlowService{}
+	_ qrRunner   = (*infratelegram.QRSessionManager)(nil)
 )
