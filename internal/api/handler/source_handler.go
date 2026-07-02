@@ -13,6 +13,8 @@ import (
 	pluginsource "telegram-message-forward/internal/plugin/source"
 )
 
+const syncStreamPeerBatchSize = 50
+
 // SourceHandler 处理监听源相关请求。
 type SourceHandler struct {
 	svc *appsource.Service
@@ -160,12 +162,30 @@ func (h *SourceHandler) SyncStream(c *gin.Context) {
 	}
 
 	count := 0
+	batch := make([]dto.SyncedPeerDTO, 0, syncStreamPeerBatchSize)
+	flushBatch := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := writeEvent("peers", batch); err != nil {
+			return err
+		}
+		batch = batch[:0]
+		return nil
+	}
 	err = h.svc.SyncStream(c.Request.Context(), accountID, func(p pluginsource.SyncedPeer) error {
 		count++
-		return writeEvent("peer", newSyncedPeerDTO(p))
+		batch = append(batch, newSyncedPeerDTO(p))
+		if len(batch) >= syncStreamPeerBatchSize {
+			return flushBatch()
+		}
+		return nil
 	})
 	if err != nil {
 		_ = writeEvent("error", gin.H{"error": err.Error()})
+		return
+	}
+	if err := flushBatch(); err != nil {
 		return
 	}
 	_ = writeEvent("done", gin.H{"count": count})

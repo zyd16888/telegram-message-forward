@@ -99,8 +99,8 @@ async function doSync() {
   try {
     await sourcesApi.syncStream(
       syncAccountId.value,
-      (peer) => {
-        syncedPeers.value = [...syncedPeers.value, peer]
+      (peers) => {
+        syncedPeers.value = [...syncedPeers.value, ...peers]
       },
       controller.signal,
     )

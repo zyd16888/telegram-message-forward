@@ -156,7 +156,7 @@ export const sourcesApi = {
     http
       .post<ApiList<SyncedPeer>>(`/sources/sync?account_id=${accountId}`, undefined, { timeout: 120000 })
       .then((r) => r.data.data),
-  syncStream: async (accountId: number, onPeer: (peer: SyncedPeer) => void, signal?: AbortSignal) => {
+  syncStream: async (accountId: number, onPeers: (peers: SyncedPeer[]) => void, signal?: AbortSignal) => {
     const headers = new Headers()
     const token = getToken()
     if (token) {
@@ -192,9 +192,13 @@ export const sourcesApi = {
         }
       }
       if (data.length === 0) return
-      const payload = JSON.parse(data.join('\n')) as SyncedPeer | { error?: string }
+      const payload = JSON.parse(data.join('\n')) as SyncedPeer | SyncedPeer[] | { error?: string }
       if (event === 'peer') {
-        onPeer(payload as SyncedPeer)
+        onPeers([payload as SyncedPeer])
+        return
+      }
+      if (event === 'peers') {
+        onPeers(payload as SyncedPeer[])
         return
       }
       if (event === 'error') {
