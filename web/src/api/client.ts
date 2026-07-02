@@ -6,6 +6,7 @@ import type {
   ApiToken,
   BootstrapStatus,
   Delivery,
+  LoginFlow,
   Me,
   Rule,
   Sink,
@@ -81,6 +82,23 @@ export const accountsApi = {
   update: (id: number, body: Record<string, unknown>) =>
     http.put<ApiItem<Account>>(`/accounts/${id}`, body).then((r) => r.data.data),
   remove: (id: number) => http.delete(`/accounts/${id}`),
+  // Telegram 登录 flow（验证码登录）。
+  login: {
+    start: (id: number) =>
+      http.post<ApiItem<LoginFlow>>(`/accounts/${id}/login/start`).then((r) => r.data.data),
+    code: (id: number, flowId: string, code: string) =>
+      http
+        .post<ApiItem<LoginFlow>>(`/accounts/${id}/login/code`, { flow_id: flowId, code })
+        .then((r) => r.data.data),
+    password: (id: number, flowId: string, password: string) =>
+      http
+        .post<ApiItem<LoginFlow>>(`/accounts/${id}/login/password`, { flow_id: flowId, password })
+        .then((r) => r.data.data),
+    status: (id: number) =>
+      http.get<ApiItem<LoginFlow | null>>(`/accounts/${id}/login/status`).then((r) => r.data.data),
+    cancel: (id: number, flowId: string) =>
+      http.post(`/accounts/${id}/login/cancel`, { flow_id: flowId }),
+  },
 }
 
 // --- Sinks ---

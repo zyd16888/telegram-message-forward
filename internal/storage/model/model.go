@@ -192,6 +192,28 @@ type APIToken struct {
 
 func (APIToken) TableName() string { return "api_tokens" }
 
+// TelegramLoginFlow 对应 telegram_login_flows 表。
+//
+// 敏感字段（phone_code_hash、qr_token）加密存储在 *_encrypted 列。
+type TelegramLoginFlow struct {
+	ID                     int64 `gorm:"primaryKey"`
+	FlowID                 string
+	AccountID              int64
+	Method                 string
+	Status                 string
+	CurrentStep            string
+	PhoneCodeHashEncrypted []byte
+	QRTokenEncrypted       []byte
+	DCID                   int
+	ExpiresAt              time.Time
+	LastError              string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	CompletedAt            *time.Time
+}
+
+func (TelegramLoginFlow) TableName() string { return "telegram_login_flows" }
+
 // Setting 对应 settings 表。
 type Setting struct {
 	Key       string `gorm:"primaryKey"`

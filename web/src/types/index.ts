@@ -140,6 +140,17 @@ export interface TokenCreated {
   token: string
 }
 
+export interface LoginFlow {
+  flow_id: string
+  account_id: number
+  method: string
+  status: string
+  current_step: string
+  expires_at: string
+  last_error?: string
+  completed_at?: string
+}
+
 export interface BootstrapStatus {
   auth_enabled: boolean
   can_bootstrap: boolean

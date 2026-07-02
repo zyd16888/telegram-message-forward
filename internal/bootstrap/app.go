@@ -20,6 +20,7 @@ import (
 	apprule "telegram-message-forward/internal/app/rule"
 	appsink "telegram-message-forward/internal/app/sink"
 	appsource "telegram-message-forward/internal/app/source"
+	apptelegramlogin "telegram-message-forward/internal/app/telegramlogin"
 	apptemplate "telegram-message-forward/internal/app/template"
 	"telegram-message-forward/internal/config"
 	"telegram-message-forward/internal/dispatch"
@@ -27,6 +28,7 @@ import (
 	"telegram-message-forward/internal/infra/clock"
 	"telegram-message-forward/internal/infra/crypto"
 	"telegram-message-forward/internal/infra/logger"
+	infratelegram "telegram-message-forward/internal/infra/telegram"
 	pluginsource "telegram-message-forward/internal/plugin/source"
 	tgsource "telegram-message-forward/internal/plugin/source/telegram"
 	"telegram-message-forward/internal/ruleengine"
@@ -48,6 +50,7 @@ type App struct {
 	server     *http.Server
 	workers    []*dispatch.Worker
 	srcManager *appsource.Manager
+	tgLogin    *apptelegramlogin.Service
 	deps       *Deps
 }
 
@@ -109,6 +112,7 @@ func Build(cfg *config.Config) (*App, error) {
 	deliveries := repository.NewDeliveryRepository(db)
 	peers := repository.NewTelegramPeerRepository(db)
 	apiTokens := repository.NewAPITokenRepository(db)
+	loginFlows := repository.NewTelegramLoginFlowRepository(db, cipher)
 
 	// 规则引擎、渲染器、投递队列。
 	engine := ruleengine.NewEngine()
@@ -168,6 +172,7 @@ func Build(cfg *config.Config) (*App, error) {
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)
 	tokenSvc := apptoken.NewService(apiTokens)
 	authSvc := appauth.NewService(apiTokens, tokenSvc, cfg.Security.AuthEnabled)
+	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, infratelegram.LoginFlowService{}, clk, log)
 
 	router := api.NewRouter(api.Deps{
 		Logger:         log,
@@ -175,6 +180,7 @@ func Build(cfg *config.Config) (*App, error) {
 		AuthEnabled:    cfg.Security.AuthEnabled,
 		Auth:           handler.NewAuthHandler(authSvc),
 		Account:        handler.NewAccountHandler(accountSvc),
+		AccountLogin:   handler.NewAccountLoginHandler(tgLoginSvc),
 		Sink:           handler.NewSinkHandler(sinkSvc),
 		Source:         handler.NewSourceHandler(sourceSvc),
 		Template:       handler.NewTemplateHandler(templateSvc),
@@ -207,7 +213,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Delivery:   deliverySvc,
 	}
 
-	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, deps: deps}, nil
+	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, tgLogin: tgLoginSvc, deps: deps}, nil
 }
 
 // Handler 返回已装配的 HTTP handler，供集成测试使用。
@@ -231,6 +237,11 @@ func (a *App) Run(ctx context.Context) error {
 		}(w)
 	}
 	a.log.Info("投递 worker 已启动", "count", len(a.workers))
+
+	// 清理服务重启前遗留的过期登录 flow。
+	if err := a.tgLogin.RecoverStale(ctx); err != nil {
+		a.log.Error("清理过期登录 flow 失败", "err", err)
+	}
 
 	// 启动已启用且账号可用的监听源。
 	if err := a.srcManager.StartAll(ctx); err != nil {

@@ -17,9 +17,10 @@ type Deps struct {
 	// AuthEnabled 为 false 时 /api/v1 不挂 Auth 中间件（开发免鉴权）。
 	AuthEnabled bool
 
-	Auth     *handler.AuthHandler
-	Account  *handler.AccountHandler
-	Sink     *handler.SinkHandler
+	Auth         *handler.AuthHandler
+	Account      *handler.AccountHandler
+	AccountLogin *handler.AccountLoginHandler
+	Sink         *handler.SinkHandler
 	Source   *handler.SourceHandler
 	Template *handler.TemplateHandler
 	Rule     *handler.RuleHandler
@@ -59,6 +60,16 @@ func NewRouter(deps Deps) *gin.Engine {
 			accounts.GET("/:id", deps.Account.Get)
 			accounts.PUT("/:id", deps.Account.Update)
 			accounts.DELETE("/:id", deps.Account.Delete)
+
+			// Telegram 登录 flow（验证码登录）。
+			login := accounts.Group("/:id/login")
+			{
+				login.POST("/start", deps.AccountLogin.Start)
+				login.POST("/code", deps.AccountLogin.Code)
+				login.POST("/password", deps.AccountLogin.Password)
+				login.GET("/status", deps.AccountLogin.Status)
+				login.POST("/cancel", deps.AccountLogin.Cancel)
+			}
 		}
 
 		sinks := v1.Group("/sinks")

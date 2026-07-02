@@ -10,6 +10,7 @@ import (
 	domainaccount "telegram-message-forward/internal/domain/account"
 	domainapitoken "telegram-message-forward/internal/domain/apitoken"
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
+	domainloginflow "telegram-message-forward/internal/domain/loginflow"
 	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domainsource "telegram-message-forward/internal/domain/source"
@@ -413,6 +414,51 @@ type TokenCreatedDTO struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Token string `json:"token"`
+}
+
+// --- Telegram 登录 flow ---
+
+// LoginFlowDTO 是登录 flow 状态响应；不包含 phone_code_hash、qr_token 等敏感字段。
+type LoginFlowDTO struct {
+	FlowID      string     `json:"flow_id"`
+	AccountID   int64      `json:"account_id"`
+	Method      string     `json:"method"`
+	Status      string     `json:"status"`
+	CurrentStep string     `json:"current_step"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	LastError   string     `json:"last_error,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// NewLoginFlowDTO 从 domain flow 构造 DTO（脱敏）。
+func NewLoginFlowDTO(f *domainloginflow.Flow) LoginFlowDTO {
+	return LoginFlowDTO{
+		FlowID:      f.FlowID,
+		AccountID:   f.AccountID,
+		Method:      string(f.Method),
+		Status:      string(f.Status),
+		CurrentStep: f.CurrentStep,
+		ExpiresAt:   f.ExpiresAt,
+		LastError:   f.LastError,
+		CompletedAt: f.CompletedAt,
+	}
+}
+
+// LoginCodeRequest 是提交验证码请求。
+type LoginCodeRequest struct {
+	FlowID string `json:"flow_id" binding:"required"`
+	Code   string `json:"code" binding:"required"`
+}
+
+// LoginPasswordRequest 是提交两步验证密码请求。
+type LoginPasswordRequest struct {
+	FlowID   string `json:"flow_id" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+// LoginCancelRequest 是取消登录 flow 请求。
+type LoginCancelRequest struct {
+	FlowID string `json:"flow_id" binding:"required"`
 }
 
 // --- Auth ---
