@@ -46,6 +46,7 @@ jobs:
           name: web-dist
           path: internal/webui/dist
           if-no-files-found: error
+          retention-days: 1
 
   build-go:
     name: Build Go (${{ matrix.platform }})
@@ -90,6 +91,7 @@ jobs:
           name: server-${{ matrix.arch }}
           path: dist/server
           if-no-files-found: error
+          retention-days: 1
 
   build-image:
     name: Build image (${{ matrix.platform }})
