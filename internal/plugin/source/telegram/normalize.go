@@ -5,6 +5,8 @@
 package telegram
 
 import (
+	"mime"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -47,10 +49,13 @@ func messageType(msg *tg.Message) string {
 	if !ok || media == nil {
 		return "text"
 	}
-	switch media.(type) {
+	switch m := media.(type) {
 	case *tg.MessageMediaPhoto:
 		return "photo"
 	case *tg.MessageMediaDocument:
+		if doc, ok := mediaDocument(m); ok && isImageMIME(doc.MimeType) {
+			return "image"
+		}
 		return "document"
 	case *tg.MessageMediaWebPage:
 		return "text"
@@ -106,7 +111,7 @@ func userDisplayName(u *tg.User) string {
 	return strconv.FormatInt(u.ID, 10)
 }
 
-// extractMedia 提取媒体的轻量描述（v1 不下载文件，仅标注类型与元信息）。
+// extractMedia 提取媒体的轻量描述。下载由监听路径在拥有 Telegram client 时补充。
 func extractMedia(msg *tg.Message) []domainmessage.Media {
 	media, ok := msg.GetMedia()
 	if !ok || media == nil {
@@ -114,22 +119,117 @@ func extractMedia(msg *tg.Message) []domainmessage.Media {
 	}
 	switch m := media.(type) {
 	case *tg.MessageMediaPhoto:
-		return []domainmessage.Media{{Type: "photo"}}
-	case *tg.MessageMediaDocument:
-		item := domainmessage.Media{Type: "document"}
-		if doc, ok := m.Document.(*tg.Document); ok {
-			item.MimeType = doc.MimeType
-			item.Size = doc.Size
-			for _, attr := range doc.Attributes {
-				if fn, ok := attr.(*tg.DocumentAttributeFilename); ok {
-					item.FileName = fn.FileName
-				}
+		item := domainmessage.Media{Type: "photo", MimeType: "image/jpeg", Caption: msg.Message}
+		if photo, ok := mediaPhoto(m); ok {
+			if size, ok := largestPhotoSize(photo.Sizes); ok {
+				item.Width = size.width
+				item.Height = size.height
+				item.Size = int64(size.size)
 			}
+		}
+		return []domainmessage.Media{item}
+	case *tg.MessageMediaDocument:
+		doc, ok := mediaDocument(m)
+		if !ok {
+			return nil
+		}
+		item := domainmessage.Media{Type: "document", MimeType: doc.MimeType, Size: doc.Size, Caption: msg.Message}
+		if isImageMIME(doc.MimeType) {
+			item.Type = "image"
+		}
+		for _, attr := range doc.Attributes {
+			switch a := attr.(type) {
+			case *tg.DocumentAttributeFilename:
+				item.FileName = a.FileName
+			case *tg.DocumentAttributeImageSize:
+				item.Width = a.W
+				item.Height = a.H
+			}
+		}
+		if item.FileName == "" {
+			item.FileName = defaultFileName(item.Type, item.MimeType)
 		}
 		return []domainmessage.Media{item}
 	default:
 		return nil
 	}
+}
+
+type photoSizeInfo struct {
+	typ    string
+	width  int
+	height int
+	size   int
+}
+
+func mediaPhoto(m *tg.MessageMediaPhoto) (*tg.Photo, bool) {
+	if m == nil {
+		return nil, false
+	}
+	photoClass, ok := m.GetPhoto()
+	if !ok || photoClass == nil {
+		return nil, false
+	}
+	return photoClass.AsNotEmpty()
+}
+
+func mediaDocument(m *tg.MessageMediaDocument) (*tg.Document, bool) {
+	if m == nil {
+		return nil, false
+	}
+	docClass, ok := m.GetDocument()
+	if !ok || docClass == nil {
+		return nil, false
+	}
+	return docClass.AsNotEmpty()
+}
+
+func largestPhotoSize(sizes []tg.PhotoSizeClass) (photoSizeInfo, bool) {
+	var best photoSizeInfo
+	for _, size := range sizes {
+		switch s := size.(type) {
+		case *tg.PhotoSize:
+			if s.Size > best.size {
+				best = photoSizeInfo{typ: s.Type, width: s.W, height: s.H, size: s.Size}
+			}
+		case *tg.PhotoSizeProgressive:
+			sizeBytes := 0
+			for _, candidate := range s.Sizes {
+				if candidate > sizeBytes {
+					sizeBytes = candidate
+				}
+			}
+			if sizeBytes > best.size {
+				best = photoSizeInfo{typ: s.Type, width: s.W, height: s.H, size: sizeBytes}
+			}
+		}
+	}
+	return best, best.typ != ""
+}
+
+func isImageMIME(mimeType string) bool {
+	return strings.HasPrefix(strings.ToLower(mimeType), "image/")
+}
+
+func defaultFileName(mediaType, mimeType string) string {
+	ext := ".bin"
+	if exts, err := mime.ExtensionsByType(mimeType); err == nil && len(exts) > 0 {
+		ext = exts[0]
+	}
+	if mediaType == "image" && ext == ".jpe" {
+		ext = ".jpg"
+	}
+	return mediaType + ext
+}
+
+func safeExt(name, mimeType string) string {
+	if ext := filepath.Ext(name); ext != "" {
+		return ext
+	}
+	if exts, err := mime.ExtensionsByType(mimeType); err == nil && len(exts) > 0 {
+		return exts[0]
+	}
+	return ".bin"
 }
 
 // originalURL 为带 username 的频道消息构造 t.me 链接。

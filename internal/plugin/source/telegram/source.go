@@ -548,12 +548,19 @@ func messageDate(messages []tg.MessageClass, id int) int {
 func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domainsource.Source, handler pluginsource.Handler) error {
 	runCtx, cancel := context.WithCancel(context.Background())
 
+	var client *telegram.Client
 	forward := func(runCtx context.Context, e tg.Entities, m tg.MessageClass) {
 		msg, ok := m.(*tg.Message)
 		if !ok || !matchesSource(msg, src) {
 			return
 		}
 		nm := Normalize(src.ID, msg, e)
+		nm.Media = downloadMessageImages(runCtx, client, src.ID, msg, nm.Media)
+		for _, media := range nm.Media {
+			if media.DownloadStatus == "failed" {
+				p.deps.Log.Warn("Telegram 媒体下载失败，按降级文本继续处理", "source", src.ID, "message_id", msg.ID, "media_type", media.Type, "err", media.DownloadError)
+			}
+		}
 		if err := handler(runCtx, nm); err != nil {
 			p.deps.Log.Error("处理 Telegram 消息失败", "source", src.ID, "err", err)
 		}
@@ -569,7 +576,8 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 		return nil
 	})
 
-	client, err := p.buildClient(acc, dispatcher)
+	var err error
+	client, err = p.buildClient(acc, dispatcher)
 	if err != nil {
 		cancel()
 		return err

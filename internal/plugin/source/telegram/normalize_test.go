@@ -14,7 +14,15 @@ func TestNormalizeChannelPhotoMessage(t *testing.T) {
 		PeerID:  &tg.PeerChannel{ChannelID: 123},
 	}
 	msg.SetGroupedID(456)
-	msg.SetMedia(&tg.MessageMediaPhoto{})
+	media := &tg.MessageMediaPhoto{}
+	media.SetPhoto(&tg.Photo{
+		ID: 1, AccessHash: 2, FileReference: []byte{3},
+		Sizes: []tg.PhotoSizeClass{
+			&tg.PhotoSize{Type: "m", W: 320, H: 240, Size: 2048},
+			&tg.PhotoSize{Type: "x", W: 1280, H: 720, Size: 8192},
+		},
+	})
+	msg.SetMedia(media)
 
 	ent := tg.Entities{
 		Channels: map[int64]*tg.Channel{
@@ -53,6 +61,55 @@ func TestNormalizeChannelPhotoMessage(t *testing.T) {
 	}
 	if len(nm.Media) != 1 || nm.Media[0].Type != "photo" {
 		t.Fatalf("Media = %+v", nm.Media)
+	}
+	if nm.Media[0].Width != 1280 || nm.Media[0].Height != 720 || nm.Media[0].Size != 8192 {
+		t.Fatalf("photo media metadata = %+v", nm.Media[0])
+	}
+	if nm.Media[0].Caption != "hello from channel" {
+		t.Fatalf("Caption = %q", nm.Media[0].Caption)
+	}
+}
+
+func TestNormalizeDocumentImageMessage(t *testing.T) {
+	media := &tg.MessageMediaDocument{}
+	media.SetDocument(&tg.Document{
+		ID: 9, AccessHash: 10, FileReference: []byte{1, 2},
+		MimeType: "image/png",
+		Size:     4096,
+		Attributes: []tg.DocumentAttributeClass{
+			&tg.DocumentAttributeFilename{FileName: "chart.png"},
+			&tg.DocumentAttributeImageSize{W: 640, H: 480},
+		},
+	})
+	msg := &tg.Message{
+		ID:      77,
+		Message: "chart caption",
+		PeerID:  &tg.PeerChannel{ChannelID: 123},
+	}
+	msg.SetMedia(media)
+
+	ent := tg.Entities{
+		Channels: map[int64]*tg.Channel{
+			123: {ID: 123, Title: "Images", Username: "images"},
+		},
+	}
+
+	nm := Normalize(8, msg, ent)
+	if nm.MessageType != "image" {
+		t.Fatalf("MessageType = %q, want image", nm.MessageType)
+	}
+	if len(nm.Media) != 1 {
+		t.Fatalf("Media length = %d, want 1", len(nm.Media))
+	}
+	got := nm.Media[0]
+	if got.Type != "image" || got.MimeType != "image/png" || got.FileName != "chart.png" {
+		t.Fatalf("image media identity = %+v", got)
+	}
+	if got.Width != 640 || got.Height != 480 || got.Size != 4096 {
+		t.Fatalf("image media metadata = %+v", got)
+	}
+	if got.Caption != "chart caption" {
+		t.Fatalf("Caption = %q", got.Caption)
 	}
 }
 

@@ -8,11 +8,20 @@ import (
 
 // Media 是一个媒体附件的内部描述。
 type Media struct {
-	Type     string `json:"type"` // photo | video | document | ...
-	URL      string `json:"url,omitempty"`
-	FileName string `json:"file_name,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
-	Size     int64  `json:"size,omitempty"`
+	Type           string     `json:"type"` // photo | image | video | audio | document | ...
+	URL            string     `json:"url,omitempty"`
+	RemoteURL      string     `json:"remote_url,omitempty"`
+	FileName       string     `json:"file_name,omitempty"`
+	MimeType       string     `json:"mime_type,omitempty"`
+	Size           int64      `json:"size,omitempty"`
+	Width          int        `json:"width,omitempty"`
+	Height         int        `json:"height,omitempty"`
+	Caption        string     `json:"caption,omitempty"`
+	LocalPath      string     `json:"local_path,omitempty"`
+	StorageKey     string     `json:"storage_key,omitempty"`
+	DownloadStatus string     `json:"download_status,omitempty"`
+	DownloadError  string     `json:"download_error,omitempty"`
+	CreatedAt      *time.Time `json:"created_at,omitempty"`
 }
 
 // Link 是消息中的链接。
