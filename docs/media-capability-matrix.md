@@ -62,6 +62,13 @@
 - RSS Source 不下载二进制媒体，不保存正文外的大字段；是否能投递媒体继续由目标 Sink capability 决定。
 - `feed_url` 必填，`poll_interval_seconds` 默认 300 秒，`max_items` 默认 20 条；重复条目通过稳定 external message id 交给消息入库幂等处理。
 
+### Webhook Source
+
+- 接收路径为 `POST /api/v1/sources/{id}/webhook`。
+- 每个 Webhook Source 必须配置 `token`；外部请求通过 `X-TMF-Webhook-Token` header 或 `?token=` 传入，错误响应不会回显 token。
+- JSON payload 支持 `message_id`、`text`、`sender/sender_name`、`timestamp`、`original_url`、`links[]`、`media[]`；非 JSON body 会按纯文本消息处理。
+- `media[]` 使用内部 `domain/message.Media` 字段结构，支持远程 URL 元数据，不在 Webhook Source 内下载二进制。
+
 ## 后续实现要求
 
 - Telegram 下载产物不得直接通过 API 暴露本地路径。

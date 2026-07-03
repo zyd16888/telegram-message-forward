@@ -2,12 +2,16 @@ package source
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"strings"
 	"sync"
 	"time"
 
 	domainaccount "telegram-message-forward/internal/domain/account"
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsource "telegram-message-forward/internal/domain/source"
 	pluginsource "telegram-message-forward/internal/plugin/source"
 )
@@ -18,6 +22,11 @@ import (
 // 需要翻的页数越多，一次全量同步可能耗时十几分钟。短时间内重复点「同步」只会重复触发这个
 // 耗时过程，因此默认在冷却窗口内改为只返回缓存，除非调用方显式要求 force 全量刷新。
 const minFullSyncInterval = 15 * time.Minute
+
+var (
+	ErrWebhookDisabled     = errors.New("webhook source 未启用")
+	ErrWebhookUnauthorized = errors.New("webhook token 无效")
+)
 
 // Service 是监听源应用服务（CRUD + 同步 + 启停）。
 type Service struct {
@@ -115,6 +124,14 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domainsource.Sou
 		}
 		if in.PeerID == 0 {
 			in.PeerID = stablePositiveID(configString(in.Config, "feed_url"))
+		}
+	}
+	if sourceType == "webhook" {
+		if in.PeerType == "" {
+			in.PeerType = "webhook"
+		}
+		if in.PeerID == 0 {
+			in.PeerID = stablePositiveID(in.Name + ":" + configString(in.Config, "token"))
 		}
 	}
 	if sourceType == "telegram" && in.AccountID <= 0 {
@@ -304,6 +321,40 @@ func (s *Service) Stop(ctx context.Context, id int64) error {
 	return plugin.Stop(ctx, src)
 }
 
+// ReceiveWebhook 校验并接收外部 Webhook 请求。
+func (s *Service) ReceiveWebhook(ctx context.Context, id int64, req pluginsource.WebhookRequest) (*domainmessage.NormalizedMessage, error) {
+	src, err := s.sources.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if normalizeSourceType(src.Type) != "webhook" {
+		return nil, fmt.Errorf("source %d 不是 webhook 类型", id)
+	}
+	if !src.Enabled {
+		return nil, ErrWebhookDisabled
+	}
+	expected := configString(src.Config, "token")
+	if expected == "" || !sameToken(expected, webhookToken(req)) {
+		return nil, ErrWebhookUnauthorized
+	}
+	plugin, err := s.pluginForSource(src)
+	if err != nil {
+		return nil, err
+	}
+	receiver, ok := plugin.(pluginsource.WebhookReceiver)
+	if !ok {
+		return nil, fmt.Errorf("source 插件不支持 webhook 接收: %s", normalizeSourceType(src.Type))
+	}
+	msg, err := receiver.Receive(ctx, src, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.manager.ingest.Ingest(ctx, msg); err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
 func (s *Service) pluginForSource(src *domainsource.Source) (pluginsource.Plugin, error) {
 	sourceType := normalizeSourceType(src.Type)
 	plugin, ok := s.plugins[sourceType]
@@ -326,11 +377,30 @@ func sourceRequiresAccount(src *domainsource.Source) bool {
 
 func configString(config map[string]any, key string) string {
 	v, _ := config[key].(string)
-	return v
+	return strings.TrimSpace(v)
 }
 
 func stablePositiveID(value string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(value))
 	return int64(h.Sum64() & 0x7fffffffffffffff)
+}
+
+func webhookToken(req pluginsource.WebhookRequest) string {
+	for _, key := range []string{"X-TMF-Webhook-Token", "x-tmf-webhook-token"} {
+		if v := strings.TrimSpace(req.Headers[key]); v != "" {
+			return v
+		}
+	}
+	if values := req.Query["token"]; len(values) > 0 {
+		return strings.TrimSpace(values[0])
+	}
+	return ""
+}
+
+func sameToken(expected string, got string) bool {
+	if expected == "" || got == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(got)) == 1
 }

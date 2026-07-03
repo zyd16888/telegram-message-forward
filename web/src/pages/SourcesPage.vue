@@ -21,11 +21,17 @@ const loading = shallowRef(false)
 const sourceSearch = shallowRef('')
 const sourceKindFilter = shallowRef<string | null>(null)
 const rssSubmitting = shallowRef(false)
+const webhookSubmitting = shallowRef(false)
 const rssForm = reactive({
   name: '',
   feed_url: '',
   poll_interval_seconds: 300,
   max_items: 20,
+  enabled: true,
+})
+const webhookForm = reactive({
+  name: '',
+  token: '',
   enabled: true,
 })
 
@@ -78,6 +84,7 @@ async function load() {
 
 function sourceDisplayType(source: Source): string {
   if (source.type === 'rss') return 'RSS Feed'
+  if (source.type === 'webhook') return 'Webhook'
   const displayType = source.config?.display_type
   if (typeof displayType === 'string' && displayType) return displayType
   if (source.peer_type === 'user') return '用户'
@@ -157,6 +164,40 @@ async function addRSSSource() {
     message.error('添加 RSS 失败：' + errText(e))
   } finally {
     rssSubmitting.value = false
+  }
+}
+
+async function addWebhookSource() {
+  const name = webhookForm.name.trim()
+  const token = webhookForm.token.trim()
+  if (!name || !token) {
+    message.warning('请填写名称和 Token')
+    return
+  }
+  webhookSubmitting.value = true
+  try {
+    const created = await sourcesApi.create({
+      type: 'webhook',
+      account_id: 0,
+      peer_type: 'webhook',
+      peer_id: 0,
+      name,
+      username: '',
+      enabled: webhookForm.enabled,
+      config: {
+        token,
+        display_type: 'Webhook',
+      },
+    })
+    webhookForm.name = ''
+    webhookForm.token = ''
+    webhookForm.enabled = true
+    message.success(`Webhook Source 已添加，接收路径 /api/v1/sources/${created.id}/webhook`)
+    await load()
+  } catch (e) {
+    message.error('添加 Webhook 失败：' + errText(e))
+  } finally {
+    webhookSubmitting.value = false
   }
 }
 
@@ -298,6 +339,26 @@ onMounted(() => {
       </NForm>
     </NCard>
 
+    <NCard title="添加 Webhook Source">
+      <NForm label-placement="left" label-width="96" class="webhook-form">
+        <NFormItem label="名称">
+          <NInput v-model:value="webhookForm.name" placeholder="例如：CI 事件入口" />
+        </NFormItem>
+        <NFormItem label="Token">
+          <NInput v-model:value="webhookForm.token" type="password" show-password-on="click" placeholder="外部请求鉴权 token" />
+        </NFormItem>
+        <NFormItem label="启用">
+          <NSwitch v-model:value="webhookForm.enabled" />
+        </NFormItem>
+        <NFormItem label=" ">
+          <NButton type="primary" :loading="webhookSubmitting" @click="addWebhookSource">
+            <template #icon><ClayIcon name="plus" :size="16" /></template>
+            添加 Webhook
+          </NButton>
+        </NFormItem>
+      </NForm>
+    </NCard>
+
     <div class="list-toolbar">
       <NText strong class="list-title">已配置监听源</NText>
       <div class="list-filters">
@@ -343,13 +404,15 @@ onMounted(() => {
   width: 150px;
 }
 
-.rss-form {
+.rss-form,
+.webhook-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(260px, 1fr));
   gap: 2px 18px;
 }
 
-.rss-form :deep(.n-form-item:last-child) {
+.rss-form :deep(.n-form-item:last-child),
+.webhook-form :deep(.n-form-item:last-child) {
   grid-column: 1 / -1;
 }
 
@@ -370,7 +433,8 @@ onMounted(() => {
     flex: 1;
     width: auto;
   }
-  .rss-form {
+  .rss-form,
+  .webhook-form {
     grid-template-columns: 1fr;
   }
 }

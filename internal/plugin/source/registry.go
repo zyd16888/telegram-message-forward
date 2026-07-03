@@ -54,6 +54,18 @@ type RunnerStatusProvider interface {
 	RunnerStatuses() []RunnerStatus
 }
 
+// WebhookRequest 是外部 Webhook Source 的原始请求快照。
+type WebhookRequest struct {
+	Headers map[string]string
+	Query   map[string][]string
+	Body    []byte
+}
+
+// WebhookReceiver 可由 Webhook Source 插件实现，用于把 HTTP 请求标准化为内部消息。
+type WebhookReceiver interface {
+	Receive(ctx context.Context, src *domainsource.Source, req WebhookRequest) (*domainmessage.NormalizedMessage, error)
+}
+
 // SyncPeerHandler 接收同步过程中的单个 peer。
 type SyncPeerHandler func(peer SyncedPeer) error
 

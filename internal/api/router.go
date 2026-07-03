@@ -50,6 +50,9 @@ func NewRouter(deps Deps) *gin.Engine {
 		authGroup.POST("/logout", deps.Auth.Logout)
 	}
 
+	// Webhook Source 使用每个 source 自己的 token 鉴权，不能依赖管理后台会话 token。
+	r.POST("/api/v1/sources/:id/webhook", deps.Source.Webhook)
+
 	// 管理 API 需要 token 鉴权；auth_enabled=false 时跳过（开发免鉴权）。
 	v1 := r.Group("/api/v1")
 	if deps.AuthEnabled {

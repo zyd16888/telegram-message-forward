@@ -237,7 +237,7 @@ v3 优先完成六条主线：
 4. Bark Sink（已完成 `/push` JSON）
 5. Gotify Sink（已完成 `POST /message` JSON）
 6. RSS Source（已完成 RSS/Atom 轮询）
-7. Webhook Source
+7. Webhook Source（已完成 token 鉴权接收入口）
 
 每个 Sink 必须包含：
 
@@ -285,12 +285,12 @@ v3 优先完成六条主线：
 - [x] RSS Source 与 ingest 接线。
 - [x] RSS Source 单测。
 - [x] RSS Source UI 配置入口。
-- [ ] Webhook Source 插件实现。
-- [ ] Webhook Source 标准消息 normalize。
-- [ ] Webhook Source 配置校验。
-- [ ] Webhook Source 与 ingest 接线。
-- [ ] Webhook Source 单测。
-- [ ] Webhook Source UI 配置入口。
+- [x] Webhook Source 插件实现。
+- [x] Webhook Source 标准消息 normalize。
+- [x] Webhook Source 配置校验。
+- [x] Webhook Source 与 ingest 接线。
+- [x] Webhook Source 单测。
+- [x] Webhook Source UI 配置入口。
 
 验收：
 

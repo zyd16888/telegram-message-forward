@@ -33,6 +33,7 @@ import (
 	pluginsource "telegram-message-forward/internal/plugin/source"
 	rsssource "telegram-message-forward/internal/plugin/source/rss"
 	tgsource "telegram-message-forward/internal/plugin/source/telegram"
+	webhooksource "telegram-message-forward/internal/plugin/source/webhook"
 	"telegram-message-forward/internal/ruleengine"
 	"telegram-message-forward/internal/security"
 	"telegram-message-forward/internal/storage"
@@ -165,8 +166,10 @@ func Build(cfg *config.Config) (*App, error) {
 	})
 	pluginsource.Register("telegram", func() (pluginsource.Plugin, error) { return tgPlugin, nil })
 	rssPlugin := rsssource.New()
+	webhookPlugin := webhooksource.New()
 	srcManager := appsource.NewManager(accounts, sources, tgPlugin, ingestSvc, log)
 	srcManager.RegisterPlugin("rss", rssPlugin)
+	srcManager.RegisterPlugin("webhook", webhookPlugin)
 
 	// worker 装配。
 	workerCount := cfg.Dispatch.WorkerCount
@@ -203,6 +206,7 @@ func Build(cfg *config.Config) (*App, error) {
 	ruleSvc := apprule.NewService(rules, apprule.ValidatorDeps{Sinks: sinks, Templates: templates})
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)
 	sourceSvc.RegisterPlugin("rss", rssPlugin)
+	sourceSvc.RegisterPlugin("webhook", webhookPlugin)
 	tokenSvc := apptoken.NewService(apiTokens)
 	authSvc := appauth.NewService(admins, apiTokens, tokenSvc, cfg.Security.AuthEnabled)
 	tgConfigSvc := apptelegramconfig.NewService(telegramApps, proxies)

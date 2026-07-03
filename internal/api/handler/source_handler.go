@@ -2,7 +2,9 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -253,4 +255,36 @@ func (h *SourceHandler) Stop(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "stopped"})
+}
+
+// Webhook POST /sources/:id/webhook
+func (h *SourceHandler) Webhook(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "读取请求体失败"})
+		return
+	}
+	msg, err := h.svc.ReceiveWebhook(c.Request.Context(), id, pluginsource.WebhookRequest{
+		Headers: map[string]string{
+			"X-TMF-Webhook-Token": c.GetHeader("X-TMF-Webhook-Token"),
+		},
+		Query: c.Request.URL.Query(),
+		Body:  body,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, appsource.ErrWebhookUnauthorized):
+			c.JSON(http.StatusForbidden, gin.H{"error": "webhook token 无效"})
+		case errors.Is(err, appsource.ErrWebhookDisabled):
+			c.JSON(http.StatusForbidden, gin.H{"error": "webhook source 未启用"})
+		default:
+			respondError(c, err)
+		}
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"status": "accepted", "message_id": msg.ID, "external_message_id": msg.ExternalMessageID})
 }
