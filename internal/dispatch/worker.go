@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"telegram-message-forward/internal/config"
@@ -177,7 +178,17 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 	if err != nil {
 		return nil, err
 	}
-	payload := pluginsink.Payload{Format: string(rendered.Format), Text: rendered.Text}
+	fallbackText := mediaFallbackText(rendered.Text, msg)
+	payload := pluginsink.Payload{
+		Format:       string(rendered.Format),
+		Text:         rendered.Text,
+		Media:        msg.Media,
+		FallbackText: fallbackText,
+	}
+	if len(msg.Media) > 0 && !supportsAllMedia(s.Capabilities, msg.Media) {
+		payload.Format = string(domaintemplate.FormatText)
+		payload.Text = fallbackText
+	}
 	return plugin.Send(ctx, s, payload, pluginsink.Options{})
 }
 
@@ -191,6 +202,81 @@ func supportsFormat(c domainsink.Capabilities, f domaintemplate.Format) bool {
 		return c.SupportsHTML
 	default:
 		return false
+	}
+}
+
+func supportsAllMedia(c domainsink.Capabilities, media []domainmessage.Media) bool {
+	for _, item := range media {
+		switch item.Type {
+		case "photo", "image":
+			if !c.SupportsImage {
+				return false
+			}
+		case "file", "document":
+			if !c.SupportsFile {
+				return false
+			}
+		case "audio", "voice":
+			if !c.SupportsAudio {
+				return false
+			}
+		case "video":
+			if !c.SupportsVideo {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func mediaFallbackText(text string, msg *domainmessage.NormalizedMessage) string {
+	if len(msg.Media) == 0 {
+		return text
+	}
+	out := text
+	for _, item := range msg.Media {
+		label := item.Type
+		if label == "photo" || label == "image" {
+			label = "图片"
+		}
+		line := "[" + label + "消息]"
+		if item.Caption != "" && item.Caption != text {
+			line += " " + item.Caption
+		}
+		if item.FileName != "" {
+			line += " 文件：" + item.FileName
+		}
+		if item.Size > 0 {
+			line += " 大小：" + humanBytes(item.Size)
+		}
+		if item.RemoteURL != "" {
+			line += " " + item.RemoteURL
+		} else if item.URL != "" {
+			line += " " + item.URL
+		} else if msg.OriginalURL != "" {
+			line += " " + msg.OriginalURL
+		}
+		if out == "" {
+			out = line
+		} else {
+			out += "\n" + line
+		}
+	}
+	return out
+}
+
+func humanBytes(n int64) string {
+	const mb = 1024 * 1024
+	const kb = 1024
+	switch {
+	case n >= mb:
+		return strconv.FormatFloat(float64(n)/mb, 'f', 1, 64) + " MB"
+	case n >= kb:
+		return strconv.FormatFloat(float64(n)/kb, 'f', 1, 64) + " KB"
+	default:
+		return strconv.FormatInt(n, 10) + " B"
 	}
 }
 

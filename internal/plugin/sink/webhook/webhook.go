@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"telegram-message-forward/internal/domain/formschema"
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	"telegram-message-forward/internal/infra/httpclient"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
@@ -95,8 +96,23 @@ func (s *Sink) ValidateConfig(config map[string]any) error {
 
 // body 是默认的 Webhook 请求体。
 type body struct {
-	Text   string `json:"text"`
-	Format string `json:"format"`
+	Text         string         `json:"text"`
+	Format       string         `json:"format"`
+	Media        []webhookMedia `json:"media,omitempty"`
+	FallbackText string         `json:"fallback_text,omitempty"`
+}
+
+type webhookMedia struct {
+	Type           string `json:"type"`
+	URL            string `json:"url,omitempty"`
+	RemoteURL      string `json:"remote_url,omitempty"`
+	FileName       string `json:"file_name,omitempty"`
+	MimeType       string `json:"mime_type,omitempty"`
+	Size           int64  `json:"size,omitempty"`
+	Width          int    `json:"width,omitempty"`
+	Height         int    `json:"height,omitempty"`
+	Caption        string `json:"caption,omitempty"`
+	DownloadStatus string `json:"download_status,omitempty"`
 }
 
 // Send 将渲染内容 POST 到目标 URL。
@@ -121,7 +137,7 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 		}
 	}
 
-	reqBody := body{Text: payload.Text, Format: payload.Format}
+	reqBody := body{Text: payload.Text, Format: payload.Format, Media: publicMedia(payload.Media), FallbackText: payload.FallbackText}
 	resp, err := s.client.PostJSON(ctx, url, reqBody, headers)
 	if err != nil {
 		return &pluginsink.Result{Success: false, Error: err.Error()}, err
@@ -136,6 +152,28 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 		}, nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
+}
+
+func publicMedia(media []domainmessage.Media) []webhookMedia {
+	if len(media) == 0 {
+		return nil
+	}
+	out := make([]webhookMedia, 0, len(media))
+	for _, item := range media {
+		out = append(out, webhookMedia{
+			Type:           item.Type,
+			URL:            item.URL,
+			RemoteURL:      item.RemoteURL,
+			FileName:       item.FileName,
+			MimeType:       item.MimeType,
+			Size:           item.Size,
+			Width:          item.Width,
+			Height:         item.Height,
+			Caption:        item.Caption,
+			DownloadStatus: item.DownloadStatus,
+		})
+	}
+	return out
 }
 
 // responseSummary 生成脱敏后的响应摘要，截断过长 body。

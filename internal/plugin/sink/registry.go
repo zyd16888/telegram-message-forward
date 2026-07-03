@@ -8,13 +8,16 @@ import (
 	"sync"
 
 	"telegram-message-forward/internal/domain/formschema"
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
 )
 
 // Payload 是渲染后待投递的内容。
 type Payload struct {
-	Format string // text | markdown | html
-	Text   string
+	Format       string // text | markdown | html
+	Text         string
+	Media        []domainmessage.Media
+	FallbackText string
 }
 
 // Options 是投递可选项。
