@@ -11,6 +11,7 @@ const emit = defineEmits<{
   editSource: [id: number]
   editRule: [id: number]
   editSink: [id: number]
+  createRule: [sourceId: number]
 }>()
 </script>
 
@@ -59,7 +60,11 @@ const emit = defineEmits<{
                 </div>
               </article>
             </div>
-            <NEmpty v-else description="这个来源还没有进入任何规则" />
+            <NEmpty v-else description="这个来源还没有进入任何规则">
+              <template #extra>
+                <NButton type="primary" @click="emit('createRule', node.source.id)">为此来源建规则</NButton>
+              </template>
+            </NEmpty>
           </section>
         </NSpace>
       </template>
@@ -67,7 +72,8 @@ const emit = defineEmits<{
       <template #footer>
         <NSpace justify="end">
           <NButton v-if="node" @click="emit('editSource', node.source.id)">查看来源</NButton>
-          <NButton type="primary" @click="show = false">关闭</NButton>
+          <NButton v-if="node" type="primary" @click="emit('createRule', node.source.id)">新建规则</NButton>
+          <NButton @click="show = false">关闭</NButton>
         </NSpace>
       </template>
     </NDrawerContent>

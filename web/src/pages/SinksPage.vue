@@ -76,6 +76,14 @@ function goToRules(sinkId: number) {
   router.push({ name: 'rules', query: { sink_id: String(sinkId) } })
 }
 
+function goToFlow(sinkId: number) {
+  router.push({ name: 'flow', query: { sink_id: String(sinkId) } })
+}
+
+function createRuleForSink(sinkId: number) {
+  router.push({ name: 'rules', query: { create: '1', sink_id: String(sinkId) } })
+}
+
 function confirmDelete(row: Sink) {
   dialog.warning({
     title: '删除渠道',
@@ -127,10 +135,12 @@ const columns: DataTableColumns<Sink> = [
   {
     title: '操作',
     key: 'actions',
-    width: 160,
+    width: 250,
     render: (row) =>
       h(NSpace, {}, {
         default: () => [
+          h(NButton, { size: 'small', onClick: () => goToFlow(row.id) }, { default: () => '编排' }),
+          h(NButton, { size: 'small', onClick: () => createRuleForSink(row.id) }, { default: () => '建规则' }),
           h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => '编辑' }),
           h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
         ],
@@ -156,7 +166,7 @@ onMounted(load)
       </template>
     </PageHeader>
 
-    <NDataTable :loading="loading" :columns="columns" :data="sinks" :bordered="false" :scroll-x="760" />
+    <NDataTable :loading="loading" :columns="columns" :data="sinks" :bordered="false" :scroll-x="900" />
 
     <SinkFormModal v-model:show="showForm" :descriptors="descriptors" :sink="editingSink" @saved="load" />
   </NSpace>

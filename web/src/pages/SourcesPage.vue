@@ -95,6 +95,14 @@ function goToRules(sourceId: number) {
   router.push({ name: 'rules', query: { source_id: String(sourceId) } })
 }
 
+function goToFlow(sourceId: number) {
+  router.push({ name: 'flow', query: { source_id: String(sourceId) } })
+}
+
+function createRuleForSource(sourceId: number) {
+  router.push({ name: 'rules', query: { create: '1', source_id: String(sourceId) } })
+}
+
 function confirmDelete(row: Source) {
   dialog.warning({
     title: '删除监听源',
@@ -147,9 +155,15 @@ const columns: DataTableColumns<Source> = [
   {
     title: '操作',
     key: 'actions',
-    width: 90,
+    width: 250,
     render: (row) =>
-      h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
+      h(NSpace, {}, {
+        default: () => [
+          h(NButton, { size: 'small', onClick: () => goToFlow(row.id) }, { default: () => '编排' }),
+          h(NButton, { size: 'small', onClick: () => createRuleForSource(row.id) }, { default: () => '建规则' }),
+          h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
+        ],
+      }),
   },
 ]
 
@@ -184,7 +198,7 @@ onMounted(() => {
         </NButton>
       </div>
     </div>
-    <NDataTable :loading="loading" :columns="columns" :data="visibleSources" :bordered="false" :scroll-x="820" />
+    <NDataTable :loading="loading" :columns="columns" :data="visibleSources" :bordered="false" :scroll-x="980" />
   </NSpace>
 </template>
 

@@ -182,6 +182,12 @@ export interface Rule {
   updated_at: string
 }
 
+export interface RuleInitialDraft {
+  name?: string
+  source_ids?: number[]
+  targets?: RuleTarget[]
+}
+
 export interface Delivery {
   id: number
   message_id: number

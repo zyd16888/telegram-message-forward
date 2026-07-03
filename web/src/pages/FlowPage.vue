@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, shallowRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import ClayIcon from '@/components/ClayIcon.vue'
 import FlowDetailDrawer from '@/components/flow/FlowDetailDrawer.vue'
@@ -9,6 +9,7 @@ import { useForwardingGraph, type FlowSourceNode } from '@/composables/useForwar
 import { errText } from '@/utils/error'
 
 const router = useRouter()
+const route = useRoute()
 const message = useMessage()
 
 const { accounts, loading, orphanRules, sourceNodes, stats, load } = useForwardingGraph()
@@ -17,10 +18,27 @@ const selectedNode = shallowRef<FlowSourceNode | null>(null)
 const detailOpen = shallowRef(false)
 const keyword = shallowRef('')
 const onlyWarnings = shallowRef(false)
+const autoSelected = shallowRef(false)
+
+function queryId(key: string): number | null {
+  const raw = route.query[key]
+  const id = Number(Array.isArray(raw) ? raw[0] : raw)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+const querySourceId = computed(() => queryId('source_id'))
+const queryRuleId = computed(() => queryId('rule_id'))
+const querySinkId = computed(() => queryId('sink_id'))
+const queryTemplateId = computed(() => queryId('template_id'))
+
+const hasRelationFilter = computed(() =>
+  Boolean(querySourceId.value || queryRuleId.value || querySinkId.value || queryTemplateId.value),
+)
 
 const visibleNodes = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   return sourceNodes.value.filter((node) => {
+    if (!matchRelationFilter(node)) return false
     if (onlyWarnings.value && node.warnings.length === 0) return false
     if (!q) return true
     return [
@@ -37,12 +55,27 @@ const visibleNodes = computed(() => {
 })
 
 const checklist = computed(() => [
-  { label: '配置 Telegram App', done: accounts.value.length > 0 },
-  { label: '同步监听源', done: stats.value.totalSources > 0 },
-  { label: '创建目标渠道', done: stats.value.totalSinks > 0 },
-  { label: '创建模板', done: stats.value.totalTemplates > 0 },
-  { label: '关联规则', done: stats.value.enabledRules > 0 && stats.value.linkedSources > 0 },
+  { label: '配置 Telegram App', done: accounts.value.length > 0, route: 'telegram-config' },
+  { label: '同步监听源', done: stats.value.totalSources > 0, route: 'sources' },
+  { label: '创建目标渠道', done: stats.value.totalSinks > 0, route: 'sinks' },
+  { label: '创建模板', done: stats.value.totalTemplates > 0, route: 'templates' },
+  { label: '关联规则', done: stats.value.enabledRules > 0 && stats.value.linkedSources > 0, route: 'rules' },
 ])
+
+function matchRelationFilter(node: FlowSourceNode): boolean {
+  if (querySourceId.value && node.source.id !== querySourceId.value) return false
+  if (queryRuleId.value && !node.rules.some((item) => item.rule.id === queryRuleId.value)) return false
+  if (querySinkId.value && !node.rules.some((item) => item.targets.some((target) => target.sinkId === querySinkId.value))) {
+    return false
+  }
+  if (
+    queryTemplateId.value &&
+    !node.rules.some((item) => item.targets.some((target) => target.templateId === queryTemplateId.value))
+  ) {
+    return false
+  }
+  return true
+}
 
 async function refresh() {
   try {
@@ -61,6 +94,24 @@ function go(name: string, query?: Record<string, string>) {
   router.push({ name, query })
 }
 
+function clearRelationFilter() {
+  router.replace({ name: 'flow', query: {} })
+  autoSelected.value = false
+  selectedNode.value = null
+  detailOpen.value = false
+}
+
+function createRuleFromSelected() {
+  const query: Record<string, string> = { create: '1' }
+  if (selectedNode.value) query.source_id = String(selectedNode.value.source.id)
+  go('rules', query)
+}
+
+function createRuleForSource(sourceId: number) {
+  detailOpen.value = false
+  go('rules', { create: '1', source_id: String(sourceId) })
+}
+
 function editSource(id: number) {
   detailOpen.value = false
   go('sources', { source_id: String(id) })
@@ -76,6 +127,25 @@ function editSink(id: number) {
   go('rules', { sink_id: String(id) })
 }
 
+watch(
+  () => [visibleNodes.value, hasRelationFilter.value] as const,
+  ([nodes, filtered]) => {
+    if (!filtered || autoSelected.value || nodes.length !== 1) return
+    selectedNode.value = nodes[0]
+    detailOpen.value = true
+    autoSelected.value = true
+  },
+)
+
+watch(
+  () => [querySourceId.value, queryRuleId.value, querySinkId.value, queryTemplateId.value] as const,
+  () => {
+    autoSelected.value = false
+    selectedNode.value = null
+    detailOpen.value = false
+  },
+)
+
 onMounted(refresh)
 </script>
 
@@ -90,9 +160,9 @@ onMounted(refresh)
         </div>
       </div>
       <div class="hero-actions">
-        <NButton type="primary" @click="go('rules')">
+        <NButton type="primary" @click="createRuleFromSelected">
           <template #icon><ClayIcon name="plus" :size="16" /></template>
-          新建规则
+          {{ selectedNode ? '为当前来源建规则' : '新建规则' }}
         </NButton>
         <NButton secondary :loading="loading" @click="refresh">
           <template #icon><ClayIcon name="refresh" :size="16" /></template>
@@ -104,15 +174,17 @@ onMounted(refresh)
     <section class="setup-panel">
       <div class="setup-title">配置进度</div>
       <div class="setup-steps">
-        <div
+        <button
           v-for="item in checklist"
           :key="item.label"
+          type="button"
           class="setup-step"
           :class="{ done: item.done }"
+          @click="go(item.route)"
         >
           <span class="step-dot">{{ item.done ? '✓' : '!' }}</span>
           <span>{{ item.label }}</span>
-        </div>
+        </button>
       </div>
     </section>
 
@@ -148,6 +220,9 @@ onMounted(refresh)
         <div class="map-filters">
           <NInput v-model:value="keyword" clearable class="search-input" placeholder="搜索来源、规则、模板、渠道" />
           <NCheckbox v-model:checked="onlyWarnings">只看异常</NCheckbox>
+          <NButton v-if="hasRelationFilter" size="small" text type="primary" @click="clearRelationFilter">
+            清除定位
+          </NButton>
         </div>
       </div>
 
@@ -175,6 +250,7 @@ onMounted(refresh)
       @edit-source="editSource"
       @edit-rule="editRule"
       @edit-sink="editSink"
+      @create-rule="createRuleForSource"
     />
   </NSpace>
 </template>
@@ -271,6 +347,14 @@ onMounted(refresh)
   color: var(--clay-text-2);
   background: var(--clay-surface-2);
   font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.setup-step:hover,
+.setup-step:focus-visible {
+  border-color: var(--clay-border-strong);
+  outline: none;
 }
 
 .setup-step.done {

@@ -3,7 +3,17 @@ import { computed, reactive, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import ConfigFormRenderer from '@/components/ConfigFormRenderer.vue'
 import { rulesApi } from '@/api/client'
-import type { ConditionConfig, ProcessorConfig, Rule, RuleItemDescriptor, RuleTarget, Sink, Source, Template } from '@/types'
+import type {
+  ConditionConfig,
+  ProcessorConfig,
+  Rule,
+  RuleInitialDraft,
+  RuleItemDescriptor,
+  RuleTarget,
+  Sink,
+  Source,
+  Template,
+} from '@/types'
 import { errText } from '@/utils/error'
 
 const show = defineModel<boolean>('show', { required: true })
@@ -15,6 +25,7 @@ const props = defineProps<{
   templates: Template[]
   conditionDescriptors: RuleItemDescriptor[]
   processorDescriptors: RuleItemDescriptor[]
+  initialDraft?: RuleInitialDraft | null
 }>()
 
 const emit = defineEmits<{
@@ -41,7 +52,7 @@ const conditionOptions = computed(() => props.conditionDescriptors.map((item) =>
 const processorOptions = computed(() => props.processorDescriptors.map((item) => ({ label: item.label, value: item.type })))
 
 watch(
-  () => [show.value, props.rule] as const,
+  () => [show.value, props.rule, props.initialDraft] as const,
   () => {
     if (!show.value) return
     resetForm()
@@ -61,14 +72,15 @@ function resetForm() {
     form.targets = props.rule.targets.map((item) => ({ ...item }))
     return
   }
-  form.name = ''
+  const draft = props.initialDraft
+  form.name = draft?.name ?? ''
   form.enabled = true
   form.priority = 0
   form.stop_on_match = false
   form.conditions = []
   form.processors = []
-  form.source_ids = []
-  form.targets = []
+  form.source_ids = [...(draft?.source_ids ?? [])]
+  form.targets = (draft?.targets ?? []).map((item) => ({ ...item }))
 }
 
 function defaultsFor(desc?: RuleItemDescriptor): Record<string, unknown> {
