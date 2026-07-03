@@ -87,7 +87,15 @@ func (s *Sink) Capabilities() domainsink.Capabilities {
 	return domainsink.Capabilities{
 		SupportsText:     true,
 		SupportsMarkdown: true,
+		SupportsImage:    true,
 		MaxTextLength:    20000,
+		Media: []domainsink.MediaCapability{
+			{Type: "image", Supported: true, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: false, DeliveryMode: "markdown_public_url", Fallback: "本地图片无法直传时降级为 [图片消息] + caption + 原始链接"},
+			{Type: "file", Supported: false, Fallback: "自定义机器人不支持文件直传，降级为文件名、大小和原始链接摘要"},
+			{Type: "audio", Supported: false, Fallback: "降级为音频文件名、大小和原始链接摘要"},
+			{Type: "video", Supported: false, Fallback: "降级为视频文件名、大小和原始链接摘要"},
+		},
+		Notes: []string{"钉钉自定义机器人可在 markdown 中引用公网图片 URL；本地媒体需降级或另行上传到公网可访问位置。"},
 	}
 }
 

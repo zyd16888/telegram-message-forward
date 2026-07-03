@@ -64,7 +64,17 @@ func (s *BotSink) Capabilities() domainsink.Capabilities {
 	return domainsink.Capabilities{
 		SupportsText:     true,
 		SupportsMarkdown: true,
+		SupportsImage:    true,
+		SupportsFile:     true,
 		MaxTextLength:    4096,
+		MaxFileSizeMB:    20,
+		Media: []domainsink.MediaCapability{
+			{Type: "image", Supported: true, MaxSizeMB: 2, SupportsPublicURL: false, RequiresUpload: false, SupportsBinary: true, DeliveryMode: "base64_md5", Fallback: "降级为 [图片消息] + caption + 原始链接"},
+			{Type: "file", Supported: true, MaxSizeMB: 20, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为文件名、大小和原始链接摘要"},
+			{Type: "audio", Supported: false, Fallback: "降级为音频文件名、大小和原始链接摘要"},
+			{Type: "video", Supported: false, Fallback: "降级为视频文件名、大小和原始链接摘要"},
+		},
+		Notes: []string{"群机器人图片使用 base64 + md5；文件需先上传获取 media_id。"},
 	}
 }
 

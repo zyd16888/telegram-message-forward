@@ -201,34 +201,21 @@ type SinkDTO struct {
 
 // NewSinkDTO 从 domain 渠道构造 DTO（secret 不回显）。
 func NewSinkDTO(s *domainsink.Sink) SinkDTO {
+	cfg := s.Config
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
 	return SinkDTO{
 		ID:           s.ID,
 		Type:         s.Type,
 		Name:         s.Name,
 		Enabled:      s.Enabled,
-		Config:       maskSinkConfig(s.Config),
+		Config:       cfg,
 		Capabilities: s.Capabilities,
 		HasSecret:    len(s.Secret) > 0,
 		CreatedAt:    s.CreatedAt,
 		UpdatedAt:    s.UpdatedAt,
 	}
-}
-
-// maskSinkConfig 拷贝配置并抹去可能的敏感键。
-func maskSinkConfig(config map[string]any) map[string]any {
-	if config == nil {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(config))
-	for k, v := range config {
-		switch k {
-		case "webhook_url", "key", "secret", "corpsecret", "password":
-			out[k] = "***"
-		default:
-			out[k] = v
-		}
-	}
-	return out
 }
 
 // SinkCreateRequest 是创建渠道请求。

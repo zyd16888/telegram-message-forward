@@ -6,15 +6,31 @@ import (
 	"time"
 )
 
+// MediaCapability 声明一个 Sink 对某类媒体的投递能力。
+type MediaCapability struct {
+	Type              string `json:"type"`
+	Supported         bool   `json:"supported"`
+	MaxSizeMB         int    `json:"max_size_mb,omitempty"`
+	SupportsPublicURL bool   `json:"supports_public_url"`
+	RequiresUpload    bool   `json:"requires_upload"`
+	SupportsBinary    bool   `json:"supports_binary"`
+	DeliveryMode      string `json:"delivery_mode,omitempty"`
+	Fallback          string `json:"fallback,omitempty"`
+}
+
 // Capabilities 声明一个 Sink 支持的能力。
 type Capabilities struct {
-	SupportsText     bool `json:"supports_text"`
-	SupportsMarkdown bool `json:"supports_markdown"`
-	SupportsHTML     bool `json:"supports_html"`
-	SupportsImage    bool `json:"supports_image"`
-	SupportsFile     bool `json:"supports_file"`
-	MaxTextLength    int  `json:"max_text_length,omitempty"`
-	MaxFileSizeMB    int  `json:"max_file_size_mb,omitempty"`
+	SupportsText     bool              `json:"supports_text"`
+	SupportsMarkdown bool              `json:"supports_markdown"`
+	SupportsHTML     bool              `json:"supports_html"`
+	SupportsImage    bool              `json:"supports_image"`
+	SupportsFile     bool              `json:"supports_file"`
+	SupportsAudio    bool              `json:"supports_audio"`
+	SupportsVideo    bool              `json:"supports_video"`
+	MaxTextLength    int               `json:"max_text_length,omitempty"`
+	MaxFileSizeMB    int               `json:"max_file_size_mb,omitempty"`
+	Media            []MediaCapability `json:"media,omitempty"`
+	Notes            []string          `json:"notes,omitempty"`
 }
 
 // Sink 是一个目标渠道配置。

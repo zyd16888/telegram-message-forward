@@ -71,6 +71,17 @@ func (s *Sink) Capabilities() domainsink.Capabilities {
 		SupportsText:     true,
 		SupportsMarkdown: true,
 		SupportsHTML:     true,
+		SupportsImage:    true,
+		SupportsFile:     true,
+		SupportsAudio:    true,
+		SupportsVideo:    true,
+		Media: []domainsink.MediaCapability{
+			{Type: "image", Supported: true, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: false, DeliveryMode: "metadata", Fallback: "随 payload 附带媒体元数据，由接收方自行处理"},
+			{Type: "file", Supported: true, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: false, DeliveryMode: "metadata", Fallback: "随 payload 附带文件元数据，由接收方自行处理"},
+			{Type: "audio", Supported: true, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: false, DeliveryMode: "metadata", Fallback: "随 payload 附带音频元数据，由接收方自行处理"},
+			{Type: "video", Supported: true, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: false, DeliveryMode: "metadata", Fallback: "随 payload 附带视频元数据，由接收方自行处理"},
+		},
+		Notes: []string{"Webhook 默认发送 JSON，不默认发送二进制；媒体能力表示可携带 metadata/URL。"},
 	}
 }
 

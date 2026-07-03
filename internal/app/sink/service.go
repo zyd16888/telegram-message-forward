@@ -94,6 +94,11 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*domain
 	if in.Secret != nil {
 		sk.Secret = []byte(*in.Secret)
 	}
+	plugin, err := pluginsink.New(sk.Type)
+	if err != nil {
+		return nil, err
+	}
+	sk.Capabilities = plugin.Capabilities()
 	if err := s.repo.Update(ctx, sk); err != nil {
 		return nil, err
 	}
