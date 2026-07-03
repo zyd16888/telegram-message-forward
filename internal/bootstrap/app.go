@@ -201,7 +201,7 @@ func Build(cfg *config.Config) (*App, error) {
 
 	// 应用服务装配。
 	accountSvc := appaccount.NewService(accounts, telegramApps, proxies)
-	sinkSvc := appsink.NewService(sinks)
+	sinkSvc := appsink.NewService(sinks, deliveries)
 	templateSvc := apptemplate.NewService(templates)
 	ruleSvc := apprule.NewService(rules, apprule.ValidatorDeps{Sinks: sinks, Templates: templates})
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)

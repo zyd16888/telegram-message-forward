@@ -234,6 +234,9 @@ func (fakeSinkRepo) List(context.Context) ([]*domainsink.Sink, error) {
 	return []*domainsink.Sink{}, nil
 }
 func (fakeSinkRepo) Delete(context.Context, int64) error { return nil }
+func (fakeSinkRepo) UpdateTestResult(context.Context, int64, time.Time, bool, string) error {
+	return nil
+}
 
 func buildRouter(t *testing.T, authEnabled bool, repo *fakeTokenRepo) *gin.Engine {
 	return buildRouterWithWebDir(t, authEnabled, repo, "")

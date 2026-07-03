@@ -188,15 +188,26 @@ type AccountUpdateRequest struct {
 
 // SinkDTO 是渠道响应（不含 secret）。
 type SinkDTO struct {
-	ID           int64                   `json:"id"`
-	Type         string                  `json:"type"`
-	Name         string                  `json:"name"`
-	Enabled      bool                    `json:"enabled"`
-	Config       map[string]any          `json:"config"`
-	Capabilities domainsink.Capabilities `json:"capabilities"`
-	HasSecret    bool                    `json:"has_secret"`
-	CreatedAt    time.Time               `json:"created_at"`
-	UpdatedAt    time.Time               `json:"updated_at"`
+	ID            int64                   `json:"id"`
+	Type          string                  `json:"type"`
+	Name          string                  `json:"name"`
+	Enabled       bool                    `json:"enabled"`
+	Config        map[string]any          `json:"config"`
+	Capabilities  domainsink.Capabilities `json:"capabilities"`
+	Observability SinkObservabilityDTO    `json:"observability"`
+	HasSecret     bool                    `json:"has_secret"`
+	CreatedAt     time.Time               `json:"created_at"`
+	UpdatedAt     time.Time               `json:"updated_at"`
+}
+
+type SinkObservabilityDTO struct {
+	LastTestAt         *time.Time `json:"last_test_at,omitempty"`
+	LastTestSuccess    bool       `json:"last_test_success"`
+	LastTestError      string     `json:"last_test_error,omitempty"`
+	RecentFailure      string     `json:"recent_failure,omitempty"`
+	DeliveryTotal24h   int64      `json:"delivery_total_24h"`
+	DeliverySuccess24h int64      `json:"delivery_success_24h"`
+	SuccessRate24h     float64    `json:"success_rate_24h"`
 }
 
 // NewSinkDTO 从 domain 渠道构造 DTO（secret 不回显）。
@@ -212,9 +223,18 @@ func NewSinkDTO(s *domainsink.Sink) SinkDTO {
 		Enabled:      s.Enabled,
 		Config:       cfg,
 		Capabilities: s.Capabilities,
-		HasSecret:    len(s.Secret) > 0,
-		CreatedAt:    s.CreatedAt,
-		UpdatedAt:    s.UpdatedAt,
+		Observability: SinkObservabilityDTO{
+			LastTestAt:         s.Observability.LastTestAt,
+			LastTestSuccess:    s.Observability.LastTestSuccess,
+			LastTestError:      s.Observability.LastTestError,
+			RecentFailure:      s.Observability.RecentFailure,
+			DeliveryTotal24h:   s.Observability.DeliveryTotal24h,
+			DeliverySuccess24h: s.Observability.DeliverySuccess24h,
+			SuccessRate24h:     s.Observability.SuccessRate24h,
+		},
+		HasSecret: len(s.Secret) > 0,
+		CreatedAt: s.CreatedAt,
+		UpdatedAt: s.UpdatedAt,
 	}
 }
 

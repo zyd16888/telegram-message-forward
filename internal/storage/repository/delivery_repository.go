@@ -12,6 +12,7 @@ import (
 
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
 	domainmessage "telegram-message-forward/internal/domain/message"
+	domainsink "telegram-message-forward/internal/domain/sink"
 	"telegram-message-forward/internal/storage/model"
 )
 
@@ -259,6 +260,46 @@ func (r *DeliveryRepository) CountByQuery(ctx context.Context, q domaindelivery.
 	var count int64
 	err := r.deliveryQuery(ctx, q).Count(&count).Error
 	return count, err
+}
+
+// SinkStatsSince 汇总某时间点之后各 Sink 的投递状态。
+func (r *DeliveryRepository) SinkStatsSince(ctx context.Context, since time.Time) (map[int64]domainsink.DeliveryStats, error) {
+	type row struct {
+		SinkID      int64
+		Total       int64
+		Success     int64
+		LastFailure string
+	}
+	var rows []row
+	const q = `
+SELECT
+    dt.sink_id,
+    COUNT(*) AS total,
+    COUNT(*) FILTER (WHERE dt.status = 'success') AS success,
+    COALESCE((
+        SELECT dt2.last_error
+        FROM delivery_tasks dt2
+        WHERE dt2.sink_id = dt.sink_id
+          AND dt2.status IN ('failed', 'dead')
+          AND dt2.last_error <> ''
+        ORDER BY dt2.updated_at DESC, dt2.id DESC
+        LIMIT 1
+    ), '') AS last_failure
+FROM delivery_tasks dt
+WHERE dt.created_at >= ?
+GROUP BY dt.sink_id`
+	if err := r.db.WithContext(ctx).Raw(q, since).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[int64]domainsink.DeliveryStats, len(rows))
+	for _, row := range rows {
+		out[row.SinkID] = domainsink.DeliveryStats{
+			Total:       row.Total,
+			Success:     row.Success,
+			LastFailure: row.LastFailure,
+		}
+	}
+	return out, nil
 }
 
 func (r *DeliveryRepository) deliveryStatusQuery(ctx context.Context, status domaindelivery.Status) *gorm.DB {

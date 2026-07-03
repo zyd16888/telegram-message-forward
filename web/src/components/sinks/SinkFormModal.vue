@@ -159,9 +159,11 @@ async function testConfig() {
     testing.success = result.success
     testing.message = result.success ? '测试消息已发送成功' : result.error || '测试失败'
     testing.summary = result.response_summary ? JSON.stringify(result.response_summary, null, 2) : ''
+    if (props.sink) emit('saved')
   } catch (e) {
     testing.success = false
     testing.message = errText(e)
+    if (props.sink) emit('saved')
   } finally {
     testing.loading = false
   }

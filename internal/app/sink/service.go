@@ -4,6 +4,7 @@ package sink
 import (
 	"context"
 	"fmt"
+	"time"
 
 	domainsink "telegram-message-forward/internal/domain/sink"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
@@ -11,22 +12,40 @@ import (
 
 // Service 是渠道应用服务。
 type Service struct {
-	repo domainsink.Repository
+	repo          domainsink.Repository
+	deliveryStats DeliveryStatsReader
 }
 
 // NewService 创建渠道服务。
-func NewService(repo domainsink.Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo domainsink.Repository, statsReader ...DeliveryStatsReader) *Service {
+	var reader DeliveryStatsReader
+	if len(statsReader) > 0 {
+		reader = statsReader[0]
+	}
+	return &Service{repo: repo, deliveryStats: reader}
+}
+
+// DeliveryStatsReader 提供 Sink 维度投递统计。
+type DeliveryStatsReader interface {
+	SinkStatsSince(ctx context.Context, since time.Time) (map[int64]domainsink.DeliveryStats, error)
 }
 
 // List 返回全部渠道。
 func (s *Service) List(ctx context.Context) ([]*domainsink.Sink, error) {
-	return s.repo.List(ctx)
+	items, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return items, s.attachObservability(ctx, items)
 }
 
 // Get 查询单个渠道。
 func (s *Service) Get(ctx context.Context, id int64) (*domainsink.Sink, error) {
-	return s.repo.GetByID(ctx, id)
+	item, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return item, s.attachObservability(ctx, []*domainsink.Sink{item})
 }
 
 // CreateInput 是创建渠道的输入。Secret 为明文，存储层加密。
@@ -151,12 +170,28 @@ func (s *Service) Test(ctx context.Context, in TestInput) (*pluginsink.Result, e
 		return nil, err
 	}
 	if err := plugin.ValidateConfig(sk.Config); err != nil {
+		if in.ID > 0 {
+			_ = s.repo.UpdateTestResult(ctx, in.ID, time.Now(), false, err.Error())
+		}
 		return nil, fmt.Errorf("渠道配置校验失败: %w", err)
 	}
-	return plugin.Send(ctx, sk, pluginsink.Payload{
+	result, sendErr := plugin.Send(ctx, sk, pluginsink.Payload{
 		Format: "text",
 		Text:   "这是一条来自 Telegram Message Forward 的渠道测试消息。",
 	}, pluginsink.Options{})
+	if in.ID > 0 {
+		success := result != nil && result.Success && sendErr == nil
+		errText := ""
+		if sendErr != nil {
+			errText = sendErr.Error()
+		} else if result != nil {
+			errText = result.Error
+		} else {
+			errText = "渠道未返回测试结果"
+		}
+		_ = s.repo.UpdateTestResult(ctx, in.ID, time.Now(), success, errText)
+	}
+	return result, sendErr
 }
 
 // Types 返回已注册的 Sink 类型。
@@ -167,4 +202,24 @@ func (s *Service) Types() []string {
 // Descriptors 返回已注册 Sink 的后台配置元数据。
 func (s *Service) Descriptors() []pluginsink.Descriptor {
 	return pluginsink.Descriptors()
+}
+
+func (s *Service) attachObservability(ctx context.Context, items []*domainsink.Sink) error {
+	if s.deliveryStats == nil || len(items) == 0 {
+		return nil
+	}
+	stats, err := s.deliveryStats.SinkStatsSince(ctx, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		stat := stats[item.ID]
+		item.Observability.DeliveryTotal24h = stat.Total
+		item.Observability.DeliverySuccess24h = stat.Success
+		item.Observability.RecentFailure = stat.LastFailure
+		if stat.Total > 0 {
+			item.Observability.SuccessRate24h = float64(stat.Success) / float64(stat.Total)
+		}
+	}
+	return nil
 }

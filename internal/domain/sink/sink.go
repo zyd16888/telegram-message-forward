@@ -37,15 +37,34 @@ type Capabilities struct {
 //
 // Secret 属于敏感字段，领域层持有明文，存储层负责加解密。
 type Sink struct {
-	ID           int64
-	Type         string // wecom_bot | wecom_app | webhook | ...
-	Name         string
-	Enabled      bool
-	Config       map[string]any
-	Secret       []byte
-	Capabilities Capabilities
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID            int64
+	Type          string // wecom_bot | wecom_app | webhook | ...
+	Name          string
+	Enabled       bool
+	Config        map[string]any
+	Secret        []byte
+	Capabilities  Capabilities
+	Observability Observability
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// Observability 是 Sink 在管理后台展示的运行观测摘要。
+type Observability struct {
+	LastTestAt         *time.Time
+	LastTestSuccess    bool
+	LastTestError      string
+	RecentFailure      string
+	DeliveryTotal24h   int64
+	DeliverySuccess24h int64
+	SuccessRate24h     float64
+}
+
+// DeliveryStats 是 Sink 维度投递统计。
+type DeliveryStats struct {
+	Total       int64
+	Success     int64
+	LastFailure string
 }
 
 // Repository 是渠道仓储接口。
@@ -55,4 +74,5 @@ type Repository interface {
 	GetByID(ctx context.Context, id int64) (*Sink, error)
 	List(ctx context.Context) ([]*Sink, error)
 	Delete(ctx context.Context, id int64) error
+	UpdateTestResult(ctx context.Context, id int64, at time.Time, success bool, errText string) error
 }

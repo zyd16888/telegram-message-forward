@@ -90,6 +90,28 @@ function mediaSummary(caps: Capabilities): string {
   return legacy.join(' / ') || '文本降级'
 }
 
+function formatRuntimeTime(value?: string): string {
+  if (!value) return ''
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function successRate(row: Sink): string {
+  const total = row.observability?.delivery_total_24h ?? 0
+  if (!total) return '24h 无投递'
+  return `${Math.round((row.observability.success_rate_24h ?? 0) * 100)}% (${row.observability.delivery_success_24h}/${total})`
+}
+
+function lastTestLabel(row: Sink): string {
+  const obs = row.observability
+  if (!obs?.last_test_at) return '未测试'
+  return `${obs.last_test_success ? '测试成功' : '测试失败'} ${formatRuntimeTime(obs.last_test_at)}`
+}
+
 async function toggle(row: Sink, value: boolean) {
   try {
     await sinksApi.update(row.id, { enabled: value })
@@ -154,6 +176,33 @@ const columns: DataTableColumns<Sink> = [
       })
     },
   },
+  {
+    title: '观测',
+    key: 'observability',
+    width: 230,
+    render: (row) =>
+      h('div', { class: 'observability-cell' }, [
+        h(
+          NTag,
+          {
+            size: 'small',
+            type: row.observability?.last_test_at
+              ? row.observability.last_test_success
+                ? 'success'
+                : 'error'
+              : 'default',
+            bordered: false,
+          },
+          { default: () => lastTestLabel(row) },
+        ),
+        h(NText, { depth: 2 }, { default: () => `成功率：${successRate(row)}` }),
+        h(
+          NText,
+          { depth: row.observability?.recent_failure ? 1 : 3 },
+          { default: () => row.observability?.recent_failure || row.observability?.last_test_error || '无最近失败' },
+        ),
+      ]),
+  },
   { title: '含密钥', key: 'has_secret', width: 90, render: (row) => (row.has_secret ? '是' : '否') },
   {
     title: '关联规则',
@@ -214,3 +263,10 @@ onMounted(load)
     <SinkFormModal v-model:show="showForm" :descriptors="descriptors" :sink="editingSink" @saved="load" />
   </NSpace>
 </template>
+
+<style scoped>
+.observability-cell {
+  display: grid;
+  gap: 4px;
+}
+</style>

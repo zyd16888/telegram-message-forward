@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -79,6 +80,19 @@ func (r *SinkRepository) Delete(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.Sink{}, id).Error
 }
 
+// UpdateTestResult 更新渠道最近一次连通性测试结果。
+func (r *SinkRepository) UpdateTestResult(ctx context.Context, id int64, at time.Time, success bool, errText string) error {
+	return r.db.WithContext(ctx).
+		Model(&model.Sink{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"last_test_at":      at,
+			"last_test_success": success,
+			"last_test_error":   errText,
+			"updated_at":        time.Now(),
+		}).Error
+}
+
 func (r *SinkRepository) toModel(s *domainsink.Sink) (*model.Sink, error) {
 	cfg, err := marshalJSONMap(s.Config)
 	if err != nil {
@@ -100,6 +114,9 @@ func (r *SinkRepository) toModel(s *domainsink.Sink) (*model.Sink, error) {
 		Config:          cfg,
 		SecretEncrypted: secretEnc,
 		Capabilities:    datatypes.JSON(caps),
+		LastTestAt:      s.Observability.LastTestAt,
+		LastTestSuccess: s.Observability.LastTestSuccess,
+		LastTestError:   s.Observability.LastTestError,
 		CreatedAt:       s.CreatedAt,
 		UpdatedAt:       s.UpdatedAt,
 	}, nil
@@ -128,7 +145,12 @@ func (r *SinkRepository) toDomain(m *model.Sink) (*domainsink.Sink, error) {
 		Config:       cfg,
 		Secret:       secret,
 		Capabilities: caps,
-		CreatedAt:    m.CreatedAt,
-		UpdatedAt:    m.UpdatedAt,
+		Observability: domainsink.Observability{
+			LastTestAt:      m.LastTestAt,
+			LastTestSuccess: m.LastTestSuccess,
+			LastTestError:   m.LastTestError,
+		},
+		CreatedAt: m.CreatedAt,
+		UpdatedAt: m.UpdatedAt,
 	}, nil
 }

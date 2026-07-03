@@ -113,6 +113,15 @@ export interface Sink {
   enabled: boolean
   config: Record<string, unknown>
   capabilities: Capabilities
+  observability: {
+    last_test_at?: string
+    last_test_success: boolean
+    last_test_error?: string
+    recent_failure?: string
+    delivery_total_24h: number
+    delivery_success_24h: number
+    success_rate_24h: number
+  }
   has_secret: boolean
   created_at: string
   updated_at: string

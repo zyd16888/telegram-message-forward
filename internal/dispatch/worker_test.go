@@ -76,6 +76,9 @@ func (r fakeSinkRepo) GetByID(context.Context, int64) (*domainsink.Sink, error) 
 }
 func (r fakeSinkRepo) List(context.Context) ([]*domainsink.Sink, error) { return nil, nil }
 func (r fakeSinkRepo) Delete(context.Context, int64) error              { return nil }
+func (r fakeSinkRepo) UpdateTestResult(context.Context, int64, time.Time, bool, string) error {
+	return nil
+}
 
 type fakeTemplateRepo struct {
 	tpl *domaintemplate.Template

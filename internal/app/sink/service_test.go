@@ -8,13 +8,15 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	domainsink "telegram-message-forward/internal/domain/sink"
 	_ "telegram-message-forward/internal/plugin/sink/webhook"
 )
 
 type fakeSinkRepo struct {
-	item *domainsink.Sink
+	item            *domainsink.Sink
+	lastTestUpdated bool
 }
 
 func (r *fakeSinkRepo) Create(_ context.Context, s *domainsink.Sink) error {
@@ -40,6 +42,14 @@ func (r *fakeSinkRepo) List(context.Context) ([]*domainsink.Sink, error) {
 
 func (r *fakeSinkRepo) Delete(context.Context, int64) error {
 	r.item = nil
+	return nil
+}
+
+func (r *fakeSinkRepo) UpdateTestResult(_ context.Context, _ int64, at time.Time, success bool, errText string) error {
+	r.lastTestUpdated = true
+	r.item.Observability.LastTestAt = &at
+	r.item.Observability.LastTestSuccess = success
+	r.item.Observability.LastTestError = errText
 	return nil
 }
 
@@ -79,12 +89,13 @@ func TestServiceTestExistingKeepsSecret(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := NewService(&fakeSinkRepo{item: &domainsink.Sink{
+	repo := &fakeSinkRepo{item: &domainsink.Sink{
 		ID:     1,
 		Type:   "webhook",
 		Config: map[string]any{"url": srv.URL},
 		Secret: []byte("old-token"),
-	}})
+	}}
+	svc := NewService(repo)
 	result, err := svc.Test(context.Background(), TestInput{ID: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -95,5 +106,8 @@ func TestServiceTestExistingKeepsSecret(t *testing.T) {
 	auth, _ := gotAuth.Load().(string)
 	if auth != "Bearer old-token" {
 		t.Fatalf("应复用已有密钥，实际 Authorization=%q", auth)
+	}
+	if !repo.lastTestUpdated || !repo.item.Observability.LastTestSuccess {
+		t.Fatalf("应记录最近测试成功: %+v", repo.item.Observability)
 	}
 }

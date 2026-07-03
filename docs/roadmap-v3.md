@@ -317,7 +317,7 @@ v3 优先完成六条主线：
   - 最近消息时间
   - 最近错误
   - 当前订阅 source 数
-- [ ] Sink 观测：
+- [x] Sink 观测：
   - 最近测试结果
   - 最近投递失败原因
   - 成功率统计
@@ -332,7 +332,7 @@ v3 优先完成六条主线：
 - Dashboard 能看到近 24 小时投递概况。
 - Source 掉线/未授权能在 UI 中看到。
 
-进度说明（2026-07-03）：Delivery、Source 运行状态与 Dashboard 时间窗口统计已完成并验证 `go test ./...`、`go vet ./...`、`go build ./...`、`cd web && npm run build`。Delivery 列表支持 status/rule/source/sink/时间窗口过滤，支持批量重试 dead；详情弹窗展示 message snapshot 和 attempts。Source 列表展示 runner 状态、订阅数、最近消息时间与最近错误。Dashboard 展示近 24 小时投递状态、队列状态和失败 Top sink/rule/source。Sink 最近测试结果仍待后续阶段完成。
+进度说明（2026-07-03）：Delivery、Source 运行状态、Sink 观测与 Dashboard 时间窗口统计已完成并验证 `go test ./...`、`go vet ./...`、`go build ./...`、`cd web && npm run build`。Delivery 列表支持 status/rule/source/sink/时间窗口过滤，支持批量重试 dead；详情弹窗展示 message snapshot 和 attempts。Source 列表展示 runner 状态、订阅数、最近消息时间与最近错误。Sink 列表展示最近测试结果、近 24 小时成功率和最近投递失败原因。Dashboard 展示近 24 小时投递状态、队列状态和失败 Top sink/rule/source。
 
 ## 3. 历史补拉待办
 

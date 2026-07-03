@@ -127,6 +127,9 @@ type Sink struct {
 	Config          datatypes.JSON
 	SecretEncrypted []byte
 	Capabilities    datatypes.JSON
+	LastTestAt      *time.Time
+	LastTestSuccess bool
+	LastTestError   string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
