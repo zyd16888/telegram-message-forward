@@ -42,7 +42,7 @@ v3 优先完成六条主线：
 
 目标：先把“哪些渠道支持哪些消息形态”定成系统契约，再改具体发送逻辑。
 
-- [ ] 新增 `docs/media-capability-matrix.md`，调研并记录以下渠道能力：
+- [x] 新增 `docs/media-capability-matrix.md`，调研并记录以下渠道能力：
   - Webhook
   - 企业微信群机器人
   - 企业微信应用消息
@@ -52,7 +52,7 @@ v3 优先完成六条主线：
   - Bark
   - ntfy
   - Gotify
-- [ ] 矩阵至少包含：
+- [x] 矩阵至少包含：
   - text
   - markdown
   - html
@@ -66,14 +66,16 @@ v3 优先完成六条主线：
   - 是否需要先上传媒体
   - 是否支持二进制直传
   - 不支持时推荐降级方式
-- [ ] 扩展 `domain/sink.Capabilities`，从粗粒度 `SupportsImage/SupportsFile` 升级为可执行的媒体能力描述。
-- [ ] 扩展 Sink descriptor，让后台配置页能展示“此渠道支持/不支持”的格式能力。
-- [ ] 更新现有 Sink capabilities：
+- [x] 扩展 `domain/sink.Capabilities`，从粗粒度 `SupportsImage/SupportsFile` 升级为可执行的媒体能力描述。
+- [x] 扩展 Sink descriptor，让后台配置页能展示“此渠道支持/不支持”的格式能力。
+- [x] 更新现有 Sink capabilities：
   - `webhook`
   - `wecom_bot`
   - `wecom_app`
   - `dingtalk_bot`
-- [ ] UI 配置渠道时展示 capability，不让用户猜渠道能否发图、发文件或发 markdown。
+- [x] UI 配置渠道时展示 capability，不让用户猜渠道能否发图、发文件或发 markdown。
+
+进度说明（2026-07-03）：V3-1 已完成并验证 `go test ./...`、`go vet ./...`、`go build ./...`、`cd web && npm run build`。真实外部渠道能力按官方文档建模，V3-2/V3-3 再落实际媒体下载和发送路径。
 
 验收：
 
