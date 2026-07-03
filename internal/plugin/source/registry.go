@@ -35,6 +35,7 @@ type SyncedPeer struct {
 	IsSupergroup bool
 	IsForum      bool
 	Flags        []string
+	Cached       bool
 }
 
 // SyncPeerHandler 接收同步过程中的单个 peer。

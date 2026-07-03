@@ -124,6 +124,7 @@ export interface SyncedPeer {
   is_supergroup: boolean
   is_forum: boolean
   flags?: string[]
+  cached?: boolean
 }
 
 export interface Template {

@@ -73,6 +73,8 @@ const selectedAddablePeers = computed(() => {
   return visiblePeers.value.filter((peer) => selected.has(peerRowKey(peer)) && !existingKeys.value.has(peerRowKey(peer)))
 })
 
+const cachedCount = computed(() => syncedPeers.value.filter((peer) => peer.cached).length)
+
 function peerKey(accountId: number, peerType: string, peerId: number): string {
   return `${accountId}:${peerType}:${peerId}`
 }
@@ -83,6 +85,24 @@ function peerRowKey(peer: SyncedPeer): string {
 
 function isAdded(peer: SyncedPeer): boolean {
   return existingKeys.value.has(peerRowKey(peer))
+}
+
+function mergePeers(existing: SyncedPeer[], incoming: SyncedPeer[]): SyncedPeer[] {
+  const byKey = new Map<string, SyncedPeer>()
+  const order: string[] = []
+  for (const peer of existing) {
+    const key = peerRowKey(peer)
+    byKey.set(key, peer)
+    order.push(key)
+  }
+  for (const peer of incoming) {
+    const key = peerRowKey(peer)
+    if (!byKey.has(key)) {
+      order.push(key)
+    }
+    byKey.set(key, peer)
+  }
+  return order.map((key) => byKey.get(key)).filter(Boolean) as SyncedPeer[]
 }
 
 async function doSync() {
@@ -100,7 +120,7 @@ async function doSync() {
     await sourcesApi.syncStream(
       syncAccountId.value,
       (peers) => {
-        syncedPeers.value = [...syncedPeers.value, ...peers]
+        syncedPeers.value = mergePeers(syncedPeers.value, peers)
       },
       controller.signal,
     )
@@ -177,7 +197,11 @@ const columns: DataTableColumns<SyncedPeer> = [
     title: '状态',
     key: 'status',
     width: 90,
-    render: (row) => h(NTag, { size: 'small', type: isAdded(row) ? 'success' : 'default' }, { default: () => (isAdded(row) ? '已添加' : '未添加') }),
+    render: (row) => {
+      if (isAdded(row)) return h(NTag, { size: 'small', type: 'success' }, { default: () => '已添加' })
+      if (row.cached) return h(NTag, { size: 'small', type: 'warning' }, { default: () => '缓存' })
+      return h(NTag, { size: 'small' }, { default: () => '未添加' })
+    },
   },
   {
     title: '操作',
@@ -201,7 +225,11 @@ const columns: DataTableColumns<SyncedPeer> = [
         />
         <NButton type="primary" :loading="syncing" @click="doSync">同步</NButton>
         <NButton v-if="syncing" @click="stopSync">停止</NButton>
-        <NText v-if="syncing || syncedPeers.length" depth="3">已加载 {{ syncedPeers.length }} 个，当前显示 {{ visiblePeers.length }} 个</NText>
+        <NText v-if="syncing || syncedPeers.length" depth="3">
+          已加载 {{ syncedPeers.length }} 个，当前显示 {{ visiblePeers.length }} 个
+          <template v-if="cachedCount">，缓存 {{ cachedCount }} 个</template>
+          <template v-if="syncing">，刷新中</template>
+        </NText>
       </NSpace>
 
       <NSpace v-if="syncedPeers.length" align="center">

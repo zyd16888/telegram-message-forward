@@ -204,6 +204,7 @@ func newSyncedPeerDTO(p pluginsource.SyncedPeer) dto.SyncedPeerDTO {
 		IsSupergroup: p.IsSupergroup,
 		IsForum:      p.IsForum,
 		Flags:        p.Flags,
+		Cached:       p.Cached,
 	}
 }
 

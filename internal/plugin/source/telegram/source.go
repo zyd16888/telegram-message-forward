@@ -79,12 +79,21 @@ func (p *Plugin) buildClient(acc *domainaccount.Account, update telegram.UpdateH
 
 // SyncSources 拉取账号可见的 chats/channels/users 并返回同步结果。
 func (p *Plugin) SyncSources(ctx context.Context, acc *domainaccount.Account) ([]pluginsource.SyncedPeer, error) {
-	var peers []pluginsource.SyncedPeer
+	byKey := map[string]pluginsource.SyncedPeer{}
+	var order []string
 	if err := p.SyncSourcesStream(ctx, acc, func(peer pluginsource.SyncedPeer) error {
-		peers = append(peers, peer)
+		key := syncedPeerKey(peer.PeerType, peer.PeerID)
+		if _, ok := byKey[key]; !ok {
+			order = append(order, key)
+		}
+		byKey[key] = peer
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+	peers := make([]pluginsource.SyncedPeer, 0, len(order))
+	for _, key := range order {
+		peers = append(peers, byKey[key])
 	}
 	return peers, nil
 }
@@ -94,6 +103,10 @@ func (p *Plugin) SyncSources(ctx context.Context, acc *domainaccount.Account) ([
 // 这里只同步 Telegram 客户端左侧会话列表里的 user/chat/channel，不拉群成员、不拉历史消息。
 // messages.getDialogs 响应会附带顶部消息用于分页 offset，但不会展开加载每个会话内部消息。
 func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Account, emit pluginsource.SyncPeerHandler) error {
+	if err := p.emitCachedPeers(ctx, acc.ID, emit); err != nil {
+		return err
+	}
+
 	client, err := p.buildClient(acc, nil)
 	if err != nil {
 		return err
@@ -123,7 +136,7 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 			if err != nil {
 				return err
 			}
-			if err := p.emitDialogPeers(dialogs, chats, users, seen, emit); err != nil {
+			if err := p.emitDialogPeers(ctx, acc.ID, dialogs, chats, users, seen, emit); err != nil {
 				return err
 			}
 			if !hasMore || len(dialogs) == 0 {
@@ -154,11 +167,28 @@ func unpackDialogs(res tg.MessagesDialogsClass) ([]tg.DialogClass, []tg.MessageC
 	}
 }
 
+func (p *Plugin) emitCachedPeers(ctx context.Context, accountID int64, emit pluginsource.SyncPeerHandler) error {
+	if p.deps.Peers == nil {
+		return nil
+	}
+	peers, err := p.deps.Peers.ListByAccount(ctx, accountID)
+	if err != nil {
+		return fmt.Errorf("读取 Telegram peer 缓存失败: %w", err)
+	}
+	for _, peer := range peers {
+		if err := emit(cachedPeerToSynced(peer)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // emitDialogPeers 只返回 dialogs 中真实存在的会话 peer。
 //
 // messages.getDialogs 响应里的 users 可能包含顶部消息相关用户；不能直接全量返回 users，
 // 否则会把非私聊会话的人混进“可监听 peer”列表。
-func (p *Plugin) emitDialogPeers(dialogs []tg.DialogClass, chats []tg.ChatClass, users []tg.UserClass, seen map[string]struct{}, emit pluginsource.SyncPeerHandler) error {
+func (p *Plugin) emitDialogPeers(ctx context.Context, accountID int64, dialogs []tg.DialogClass, chats []tg.ChatClass, users []tg.UserClass, seen map[string]struct{}, emit pluginsource.SyncPeerHandler) error {
+	cachePeers := make([]*domainpeer.Peer, 0, len(dialogs))
 	for _, d := range dialogs {
 		switch peer := d.GetPeer().(type) {
 		case *tg.PeerChannel:
@@ -181,6 +211,14 @@ func (p *Plugin) emitDialogPeers(dialogs []tg.DialogClass, chats []tg.ChatClass,
 			}); err != nil {
 				return err
 			}
+			cachePeers = append(cachePeers, &domainpeer.Peer{
+				AccountID:  accountID,
+				PeerType:   domainpeer.TypeChannel,
+				PeerID:     ch.ID,
+				AccessHash: ch.AccessHash,
+				Username:   ch.Username,
+				Title:      ch.Title,
+			})
 		case *tg.PeerChat:
 			ch := findChat(chats, peer.ChatID)
 			if ch == nil || !markSeen(seen, domainpeer.TypeChat, ch.ID) {
@@ -196,6 +234,12 @@ func (p *Plugin) emitDialogPeers(dialogs []tg.DialogClass, chats []tg.ChatClass,
 			}); err != nil {
 				return err
 			}
+			cachePeers = append(cachePeers, &domainpeer.Peer{
+				AccountID: accountID,
+				PeerType:  domainpeer.TypeChat,
+				PeerID:    ch.ID,
+				Title:     ch.Title,
+			})
 		case *tg.PeerUser:
 			user := findUser(users, peer.UserID)
 			if user == nil || !markSeen(seen, domainpeer.TypeUser, user.ID) {
@@ -214,18 +258,70 @@ func (p *Plugin) emitDialogPeers(dialogs []tg.DialogClass, chats []tg.ChatClass,
 			}); err != nil {
 				return err
 			}
+			cachePeers = append(cachePeers, &domainpeer.Peer{
+				AccountID:  accountID,
+				PeerType:   domainpeer.TypeUser,
+				PeerID:     user.ID,
+				AccessHash: user.AccessHash,
+				Username:   user.Username,
+				Title:      userDisplayName(user),
+			})
+		}
+	}
+	if p.deps.Peers != nil {
+		if err := p.deps.Peers.BulkUpsert(ctx, cachePeers); err != nil {
+			return fmt.Errorf("写入 Telegram peer 缓存失败: %w", err)
 		}
 	}
 	return nil
 }
 
+func cachedPeerToSynced(peer *domainpeer.Peer) pluginsource.SyncedPeer {
+	out := pluginsource.SyncedPeer{
+		PeerID:   peer.PeerID,
+		Name:     peer.Title,
+		Username: peer.Username,
+		Cached:   true,
+	}
+	switch peer.PeerType {
+	case domainpeer.TypeUser:
+		out.PeerType = domainsource.PeerUser
+		out.PeerKind = "private_user"
+		out.DisplayType = "用户"
+	case domainpeer.TypeChat:
+		out.PeerType = domainsource.PeerChat
+		out.PeerKind = "basic_group"
+		out.DisplayType = "普通群"
+	case domainpeer.TypeChannel:
+		out.PeerType = domainsource.PeerChannel
+		out.PeerKind = "channel_like"
+		out.DisplayType = "频道/超级群"
+	default:
+		out.PeerType = domainsource.PeerType(peer.PeerType)
+		out.PeerKind = string(peer.PeerType)
+		out.DisplayType = string(peer.PeerType)
+	}
+	if out.Name == "" {
+		if out.Username != "" {
+			out.Name = "@" + out.Username
+		} else {
+			out.Name = fmt.Sprintf("%d", out.PeerID)
+		}
+	}
+	return out
+}
+
 func markSeen(seen map[string]struct{}, t domainpeer.Type, id int64) bool {
-	key := fmt.Sprintf("%s:%d", t, id)
+	key := syncedPeerKey(domainsource.PeerType(t), id)
 	if _, ok := seen[key]; ok {
 		return false
 	}
 	seen[key] = struct{}{}
 	return true
+}
+
+func syncedPeerKey(t domainsource.PeerType, id int64) string {
+	return fmt.Sprintf("%s:%d", t, id)
 }
 
 func userDisplay(user *tg.User) (string, string, []string) {

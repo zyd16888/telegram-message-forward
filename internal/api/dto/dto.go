@@ -332,6 +332,7 @@ type SyncedPeerDTO struct {
 	IsSupergroup bool     `json:"is_supergroup"`
 	IsForum      bool     `json:"is_forum"`
 	Flags        []string `json:"flags,omitempty"`
+	Cached       bool     `json:"cached,omitempty"`
 }
 
 // --- Template ---
