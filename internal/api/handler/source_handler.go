@@ -114,14 +114,17 @@ func (h *SourceHandler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// Sync POST /sources/sync?account_id=N — 拉取账号可见 peer 列表。
+// Sync POST /sources/sync?account_id=N&force=true — 拉取账号可见 peer 列表。
+//
+// force=true 时强制走全量网络拉取；否则若距上次全量同步不足冷却窗口，只返回缓存。
 func (h *SourceHandler) Sync(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Query("account_id"), 10, 64)
 	if err != nil || accountID <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少或非法 account_id"})
 		return
 	}
-	peers, err := h.svc.Sync(c.Request.Context(), accountID)
+	force := c.Query("force") == "true"
+	peers, err := h.svc.Sync(c.Request.Context(), accountID, force)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -133,13 +136,17 @@ func (h *SourceHandler) Sync(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
-// SyncStream GET /sources/sync/stream?account_id=N — 流式拉取账号可见 peer 列表。
+// SyncStream GET /sources/sync/stream?account_id=N&force=true — 流式拉取账号可见 peer 列表。
+//
+// force=true 时强制走全量网络拉取；否则若距上次全量同步不足冷却窗口，只回放缓存（done 事件
+// 里 used_cache=true），避免短时间内重复触发耗时的 Telegram 分页拉取。
 func (h *SourceHandler) SyncStream(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Query("account_id"), 10, 64)
 	if err != nil || accountID <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少或非法 account_id"})
 		return
 	}
+	force := c.Query("force") == "true"
 
 	w := c.Writer
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -173,7 +180,7 @@ func (h *SourceHandler) SyncStream(c *gin.Context) {
 		batch = batch[:0]
 		return nil
 	}
-	err = h.svc.SyncStream(c.Request.Context(), accountID, func(p pluginsource.SyncedPeer) error {
+	usedCache, err := h.svc.SyncStream(c.Request.Context(), accountID, force, func(p pluginsource.SyncedPeer) error {
 		count++
 		batch = append(batch, newSyncedPeerDTO(p))
 		if len(batch) >= syncStreamPeerBatchSize {
@@ -188,7 +195,7 @@ func (h *SourceHandler) SyncStream(c *gin.Context) {
 	if err := flushBatch(); err != nil {
 		return
 	}
-	_ = writeEvent("done", gin.H{"count": count})
+	_ = writeEvent("done", gin.H{"count": count, "used_cache": usedCache})
 }
 
 func newSyncedPeerDTO(p pluginsource.SyncedPeer) dto.SyncedPeerDTO {

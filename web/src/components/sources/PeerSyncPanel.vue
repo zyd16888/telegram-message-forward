@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, shallowRef } from 'vue'
-import { NButton, NSpace, NTag, useMessage, type DataTableColumns, type DataTableRowKey } from 'naive-ui'
+import { NButton, NCheckbox, NSpace, NTag, useMessage, type DataTableColumns, type DataTableRowKey } from 'naive-ui'
 import { sourcesApi } from '@/api/client'
 import type { Account, Source, SyncedPeer } from '@/types'
 import { errText } from '@/utils/error'
@@ -19,6 +19,7 @@ const message = useMessage()
 const syncAccountId = shallowRef<number | null>(null)
 const syncedPeers = shallowRef<SyncedPeer[]>([])
 const syncing = shallowRef(false)
+const forceSync = shallowRef(false)
 const query = shallowRef('')
 const peerKindFilter = shallowRef<string | null>(null)
 const addedFilter = shallowRef<'all' | 'new' | 'added'>('new')
@@ -117,14 +118,19 @@ async function doSync() {
   checkedRowKeys.value = []
   syncing.value = true
   try {
-    await sourcesApi.syncStream(
+    const result = await sourcesApi.syncStream(
       syncAccountId.value,
       (peers) => {
         syncedPeers.value = mergePeers(syncedPeers.value, peers)
       },
       controller.signal,
+      forceSync.value,
     )
-    message.success(`同步完成，共 ${syncedPeers.value.length} 个可监听 peer`)
+    if (result?.usedCache) {
+      message.info(`距上次全量同步不足 15 分钟，已使用缓存数据（共 ${syncedPeers.value.length} 个）；如需最新数据请勾选「强制刷新」`)
+    } else {
+      message.success(`同步完成，共 ${syncedPeers.value.length} 个可监听 peer`)
+    }
   } catch (e) {
     if (controller.signal.aborted) {
       message.warning('已停止同步')
@@ -225,6 +231,9 @@ const columns: DataTableColumns<SyncedPeer> = [
         />
         <NButton type="primary" :loading="syncing" @click="doSync">同步</NButton>
         <NButton v-if="syncing" @click="stopSync">停止</NButton>
+        <NCheckbox v-model:checked="forceSync" :disabled="syncing">
+          强制刷新（忽略 15 分钟缓存冷却，重新拉取全量会话列表）
+        </NCheckbox>
         <NText v-if="syncing || syncedPeers.length" depth="3">
           已加载 {{ syncedPeers.length }} 个，当前显示 {{ visiblePeers.length }} 个
           <template v-if="cachedCount">，缓存 {{ cachedCount }} 个</template>

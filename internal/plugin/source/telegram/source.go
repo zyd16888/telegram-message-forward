@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
@@ -99,6 +100,13 @@ func (p *Plugin) SyncSources(ctx context.Context, acc *domainaccount.Account) ([
 	return peers, nil
 }
 
+// SyncCachedPeers 只回放本地缓存的 peer，不发起任何 Telegram 网络请求。
+//
+// 供上层在全量同步冷却窗口内使用，避免短时间内重复触发耗时的 messages.getDialogs 分页拉取。
+func (p *Plugin) SyncCachedPeers(ctx context.Context, acc *domainaccount.Account, emit pluginsource.SyncPeerHandler) error {
+	return p.emitCachedPeers(ctx, acc.ID, emit)
+}
+
 // SyncSourcesStream 轻量拉取账号会话列表，并把 peer 增量返回给调用方。
 //
 // 这里只同步 Telegram 客户端左侧会话列表里的 user/chat/channel，不拉群成员、不拉历史消息。
@@ -121,8 +129,12 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 		offsetID := 0
 		offsetDate := 0
 		seen := map[string]struct{}{}
+		page := 0
+		started := time.Now()
 
 		for {
+			page++
+			pageStarted := time.Now()
 			res, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
 				ExcludePinned: offsetID != 0,
 				Limit:         syncDialogsPageSize,
@@ -137,6 +149,9 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 			if err != nil {
 				return err
 			}
+			p.deps.Log.Info("同步会话列表分页完成",
+				"account", acc.ID, "page", page, "dialogs", len(dialogs),
+				"page_cost", time.Since(pageStarted), "total_cost", time.Since(started))
 			if err := p.emitDialogPeers(ctx, acc.ID, dialogs, chats, users, seen, emit); err != nil {
 				return err
 			}
@@ -149,6 +164,7 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 			}
 			offsetPeer, offsetID, offsetDate = nextPeer, nextID, nextDate
 		}
+		p.deps.Log.Info("同步会话列表完成", "account", acc.ID, "pages", page, "total_cost", time.Since(started))
 		return nil
 	})
 	if runErr != nil {

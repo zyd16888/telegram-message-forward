@@ -156,13 +156,18 @@ export const sourcesApi = {
     http
       .post<ApiList<SyncedPeer>>(`/sources/sync?account_id=${accountId}`, undefined, { timeout: 120000 })
       .then((r) => r.data.data),
-  syncStream: async (accountId: number, onPeers: (peers: SyncedPeer[]) => void, signal?: AbortSignal) => {
+  syncStream: async (
+    accountId: number,
+    onPeers: (peers: SyncedPeer[]) => void,
+    signal?: AbortSignal,
+    force = false,
+  ) => {
     const headers = new Headers()
     const token = getToken()
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }
-    const resp = await fetch(`/api/v1/sources/sync/stream?account_id=${accountId}`, {
+    const resp = await fetch(`/api/v1/sources/sync/stream?account_id=${accountId}&force=${force}`, {
       method: 'GET',
       headers,
       signal,
@@ -178,6 +183,7 @@ export const sourcesApi = {
     const decoder = new TextDecoder()
     let buffer = ''
     let doneEvent = false
+    let usedCache = false
 
     const handleEvent = (raw: string) => {
       let event = 'message'
@@ -192,7 +198,11 @@ export const sourcesApi = {
         }
       }
       if (data.length === 0) return
-      const payload = JSON.parse(data.join('\n')) as SyncedPeer | SyncedPeer[] | { error?: string }
+      const payload = JSON.parse(data.join('\n')) as
+        | SyncedPeer
+        | SyncedPeer[]
+        | { error?: string }
+        | { count?: number; used_cache?: boolean }
       if (event === 'peer') {
         onPeers([payload as SyncedPeer])
         return
@@ -205,6 +215,7 @@ export const sourcesApi = {
         throw new Error((payload as { error?: string }).error ?? '同步失败')
       }
       if (event === 'done') {
+        usedCache = Boolean((payload as { used_cache?: boolean }).used_cache)
         doneEvent = true
       }
     }
@@ -226,6 +237,7 @@ export const sourcesApi = {
     if (buffer.trim()) {
       handleEvent(buffer)
     }
+    return { usedCache }
   },
   start: (id: number) => http.post(`/sources/${id}/start`),
   stop: (id: number) => http.post(`/sources/${id}/stop`),
