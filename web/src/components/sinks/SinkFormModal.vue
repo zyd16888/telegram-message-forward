@@ -165,7 +165,13 @@ async function submit() {
 </script>
 
 <template>
-  <NModal v-model:show="show" preset="card" :title="editing ? '编辑渠道' : '新建渠道'" class="sink-modal">
+  <NModal
+    v-model:show="show"
+    preset="card"
+    :title="editing ? '编辑渠道' : '新建渠道'"
+    class="sink-modal"
+    :style="{ width: 'min(600px, calc(100vw - 32px))' }"
+  >
     <div class="modal-body">
       <NForm label-placement="top">
         <section class="form-section">
@@ -221,10 +227,6 @@ async function submit() {
 </template>
 
 <style scoped>
-.sink-modal {
-  width: min(620px, calc(100vw - 32px));
-}
-
 .modal-body {
   max-height: min(68vh, 680px);
   overflow: auto;

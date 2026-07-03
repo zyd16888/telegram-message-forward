@@ -21,6 +21,7 @@ const themeOverrides = computed(() => (dark.value ? clayDark : clayLight))
 const isLoginRoute = computed(() => route.name === 'login')
 const activeKey = computed(() => route.name as string)
 const currentTitle = computed(() => (route.meta.title as string) ?? '')
+const showTopTitle = computed(() => route.name === 'dashboard')
 
 const authTag = computed(() => {
   if (auth.devNoAuth) return { text: '开发免鉴权', dot: '#ef9a4c' }
@@ -128,7 +129,7 @@ async function logout() {
                 <button class="nav-toggle" type="button" aria-label="切换导航" @click="toggleNav">
                   <ClayIcon name="menu" :size="20" />
                 </button>
-                <div class="route-heading">
+                <div v-if="showTopTitle" class="route-heading">
                   <span class="route-title">{{ currentTitle }}</span>
                 </div>
               </div>

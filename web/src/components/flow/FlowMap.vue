@@ -1,172 +1,211 @@
 <script setup lang="ts">
 import ClayIcon from '@/components/ClayIcon.vue'
-import type { FlowSourceNode } from '@/composables/useForwardingGraph'
+import type { FlowRuleGraphNode, FlowTargetNode } from '@/composables/useForwardingGraph'
+import type { ConditionConfig, ProcessorConfig } from '@/types'
 
 defineProps<{
-  nodes: FlowSourceNode[]
+  nodes: FlowRuleGraphNode[]
   selectedId?: number | null
 }>()
 
 const emit = defineEmits<{
-  select: [node: FlowSourceNode]
+  select: [node: FlowRuleGraphNode]
 }>()
 
-function targetLabel(target: FlowSourceNode['rules'][number]['targets'][number]): string {
+function targetLabel(target: FlowTargetNode): string {
   const sink = target.sink?.name ?? `渠道 #${target.sinkId}`
   const template = target.template ? ` / ${target.template.name}` : ' / 原文'
   return `${sink}${template}`
 }
+
+function itemLabel(item: ConditionConfig | ProcessorConfig): string {
+  return item.type
+}
 </script>
 
 <template>
-  <div class="flow-map">
+  <div class="rule-flow-list">
     <button
       v-for="node in nodes"
-      :key="node.source.id"
+      :key="node.rule.id"
       type="button"
-      class="flow-row"
-      :class="{ selected: selectedId === node.source.id, warning: node.warnings.length > 0 }"
+      class="rule-card"
+      :class="{ selected: selectedId === node.rule.id, warning: node.warnings.length > 0 }"
       @click="emit('select', node)"
     >
-      <section class="flow-cell source-cell">
-        <span class="node-icon source-icon"><ClayIcon name="sources" :size="18" /></span>
-        <span class="node-main">
-          <span class="node-title">{{ node.source.name }}</span>
-          <span class="node-meta">{{ node.account?.name ?? `账号 #${node.source.account_id}` }}</span>
-        </span>
-      </section>
-
-      <span class="flow-arrow">→</span>
-
-      <section class="flow-cell rules-cell">
-        <span class="node-icon rule-icon"><ClayIcon name="rules" :size="18" /></span>
-        <span v-if="node.rules.length" class="rule-stack">
-          <span v-for="item in node.rules" :key="item.rule.id" class="rule-chip" :class="{ off: !item.rule.enabled }">
-            {{ item.rule.name }}
+      <header class="rule-head">
+        <span class="rule-icon"><ClayIcon name="rules" :size="18" /></span>
+        <span class="rule-title-wrap">
+          <span class="rule-title">{{ node.rule.name }}</span>
+          <span class="rule-meta">
+            优先级 {{ node.rule.priority }} · {{ node.rule.enabled ? '启用' : '停用' }}
+            <template v-if="node.rule.stop_on_match"> · 命中即停</template>
           </span>
         </span>
-        <span v-else class="empty-text">未关联规则</span>
-      </section>
+        <span v-if="node.warnings.length" class="warn-count">{{ node.warnings.length }}</span>
+      </header>
 
-      <span class="flow-arrow">→</span>
+      <div class="rule-pipeline">
+        <section class="flow-cell">
+          <div class="cell-label">来源</div>
+          <div v-if="node.sources.length" class="chip-stack">
+            <span v-for="source in node.sources" :key="source.sourceId" class="flow-chip">
+              {{ source.source?.name ?? `来源 #${source.sourceId}` }}
+              <span class="chip-muted">{{ source.account?.name ?? '' }}</span>
+            </span>
+          </div>
+          <span v-else class="empty-text">未指定来源</span>
+        </section>
 
-      <section class="flow-cell target-cell">
-        <span class="node-icon sink-icon"><ClayIcon name="sinks" :size="18" /></span>
-        <span v-if="node.rules.some((item) => item.targets.length)" class="target-stack">
-          <template v-for="item in node.rules" :key="item.rule.id">
-            <span v-for="target in item.targets" :key="`${item.rule.id}-${target.sinkId}-${target.templateId ?? 0}`" class="target-chip">
+        <section class="flow-cell">
+          <div class="cell-label">匹配条件</div>
+          <div v-if="node.rule.conditions.length" class="chip-stack">
+            <span v-for="(condition, index) in node.rule.conditions" :key="`${condition.type}-${index}`" class="flow-chip">
+              {{ itemLabel(condition) }}
+            </span>
+          </div>
+          <span v-else class="empty-text">直接匹配</span>
+        </section>
+
+        <section class="flow-cell">
+          <div class="cell-label">处理器</div>
+          <div v-if="node.rule.processors.length" class="chip-stack">
+            <span v-for="(processor, index) in node.rule.processors" :key="`${processor.type}-${index}`" class="flow-chip">
+              {{ itemLabel(processor) }}
+            </span>
+          </div>
+          <span v-else class="empty-text">不处理</span>
+        </section>
+
+        <section class="flow-cell target-cell">
+          <div class="cell-label">目标</div>
+          <div v-if="node.targets.length" class="chip-stack">
+            <span v-for="target in node.targets" :key="`${target.sinkId}-${target.templateId ?? 0}`" class="flow-chip target-chip">
               {{ targetLabel(target) }}
             </span>
-          </template>
-        </span>
-        <span v-else class="empty-text">未配置目标</span>
-      </section>
-
-      <span v-if="node.warnings.length" class="warn-count">{{ node.warnings.length }}</span>
+          </div>
+          <span v-else class="empty-text">未配置目标</span>
+        </section>
+      </div>
     </button>
   </div>
 </template>
 
 <style scoped>
-.flow-map {
+.rule-flow-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
-.flow-row {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1.1fr) auto minmax(240px, 1.2fr);
-  align-items: stretch;
-  gap: 12px;
+.rule-card {
   width: 100%;
-  min-height: 86px;
-  padding: 12px;
   border: 1px solid var(--clay-border);
   border-radius: 10px;
+  padding: 14px;
   color: inherit;
   background: var(--clay-surface);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.flow-row:hover,
-.flow-row:focus-visible,
-.flow-row.selected {
+.rule-card:hover,
+.rule-card:focus-visible,
+.rule-card.selected {
   border-color: color-mix(in srgb, var(--clay-primary) 45%, var(--clay-border));
   box-shadow: var(--clay-hover);
   outline: none;
 }
 
-.flow-row.selected {
+.rule-card.selected {
   background: color-mix(in srgb, var(--clay-primary-soft) 45%, var(--clay-surface));
 }
 
-.flow-cell {
+.rule-head {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--clay-border);
-  border-radius: 8px;
-  background: var(--clay-surface-2);
+  margin-bottom: 12px;
 }
 
-.node-icon {
+.rule-icon {
   width: 34px;
   height: 34px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
   border-radius: 8px;
-}
-
-.source-icon {
-  color: var(--clay-primary);
-  background: var(--clay-primary-soft);
-}
-
-.rule-icon {
   color: #8b5cf6;
   background: rgba(139, 92, 246, 0.1);
 }
 
-.sink-icon {
-  color: #2fb896;
-  background: var(--clay-success-soft);
-}
-
-.node-main,
-.rule-stack,
-.target-stack {
+.rule-title-wrap {
   display: flex;
   flex-direction: column;
-  gap: 6px;
   min-width: 0;
 }
 
-.node-title {
+.rule-title {
   color: var(--clay-text);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 800;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.node-meta,
-.empty-text {
+.rule-meta {
+  margin-top: 2px;
   color: var(--clay-text-3);
   font-size: 12px;
 }
 
-.rule-chip,
-.target-chip {
+.warn-count {
+  min-width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #b45309;
+  background: var(--clay-warning-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.rule-pipeline {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.8fr) minmax(160px, 0.8fr) minmax(220px, 1.2fr);
+  gap: 10px;
+}
+
+.flow-cell {
+  min-width: 0;
+  min-height: 78px;
+  padding: 10px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  background: var(--clay-surface-2);
+}
+
+.cell-label {
+  margin-bottom: 8px;
+  color: var(--clay-text-3);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chip-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.flow-chip {
   max-width: 100%;
-  width: fit-content;
-  padding: 3px 8px;
+  padding: 4px 8px;
   border: 1px solid var(--clay-border);
   border-radius: 999px;
   color: var(--clay-text-2);
@@ -178,41 +217,30 @@ function targetLabel(target: FlowSourceNode['rules'][number]['targets'][number])
   white-space: nowrap;
 }
 
-.rule-chip.off {
-  color: var(--clay-text-3);
-  background: var(--clay-sunken);
+.target-chip {
+  border-radius: 8px;
 }
 
-.flow-arrow {
-  display: grid;
-  place-items: center;
+.chip-muted {
+  margin-left: 4px;
   color: var(--clay-text-3);
-  font-size: 18px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
-.warn-count {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  min-width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  color: #b45309;
-  background: var(--clay-warning-soft);
+.empty-text {
+  color: var(--clay-text-3);
   font-size: 12px;
-  font-weight: 800;
 }
 
-@media (max-width: 1100px) {
-  .flow-row {
-    grid-template-columns: 1fr;
+@media (max-width: 1180px) {
+  .rule-pipeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
 
-  .flow-arrow {
-    display: none;
+@media (max-width: 720px) {
+  .rule-pipeline {
+    grid-template-columns: 1fr;
   }
 }
 </style>

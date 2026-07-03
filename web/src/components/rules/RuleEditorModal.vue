@@ -212,7 +212,13 @@ async function submit() {
 </script>
 
 <template>
-  <NModal v-model:show="show" preset="card" :title="editing ? '编辑规则' : '新建规则'" class="rule-modal">
+  <NModal
+    v-model:show="show"
+    preset="card"
+    :title="editing ? '编辑规则' : '新建规则'"
+    class="rule-modal"
+    :style="{ width: 'min(840px, calc(100vw - 32px))' }"
+  >
     <div class="modal-body">
       <NForm label-placement="top">
         <section class="form-section">
@@ -329,10 +335,6 @@ async function submit() {
 </template>
 
 <style scoped>
-.rule-modal {
-  width: min(840px, calc(100vw - 32px));
-}
-
 .modal-body {
   max-height: min(70vh, 720px);
   overflow: auto;

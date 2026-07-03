@@ -21,6 +21,19 @@ export interface FlowSourceNode {
   warnings: string[]
 }
 
+export interface FlowRuleSourceNode {
+  source: Source | null
+  account: Account | null
+  sourceId: number
+}
+
+export interface FlowRuleGraphNode {
+  rule: Rule
+  sources: FlowRuleSourceNode[]
+  targets: FlowTargetNode[]
+  warnings: string[]
+}
+
 export function useForwardingGraph() {
   const accounts = shallowRef<Account[]>([])
   const sources = shallowRef<Source[]>([])
@@ -57,6 +70,33 @@ export function useForwardingGraph() {
     }),
   )
 
+  const ruleNodes = computed<FlowRuleGraphNode[]>(() =>
+    rules.value
+      .map((rule) => {
+        const ruleSources = rule.source_ids.map((sourceId) => {
+          const source = sources.value.find((item) => item.id === sourceId) ?? null
+          return {
+            sourceId,
+            source,
+            account: source ? accountMap.value.get(source.account_id) ?? null : null,
+          }
+        })
+        const targets = rule.targets.map((target) => ({
+          sinkId: target.sink_id,
+          templateId: target.template_id,
+          sink: sinkMap.value.get(target.sink_id) ?? null,
+          template: target.template_id ? templateMap.value.get(target.template_id) ?? null : null,
+        }))
+        return {
+          rule,
+          sources: ruleSources,
+          targets,
+          warnings: warningsForRule(rule, ruleSources, targets),
+        }
+      })
+      .sort((a, b) => b.rule.priority - a.rule.priority),
+  )
+
   const orphanRules = computed(() => rules.value.filter((rule) => rule.source_ids.length === 0))
 
   const stats = computed(() => {
@@ -64,9 +104,11 @@ export function useForwardingGraph() {
     const enabledRules = rules.value.filter((rule) => rule.enabled).length
     const enabledSinks = sinks.value.filter((sink) => sink.enabled).length
     const warningSources = sourceNodes.value.filter((node) => node.warnings.length > 0).length
+    const warningRules = ruleNodes.value.filter((node) => node.warnings.length > 0).length
     return {
       linkedSources,
       warningSources,
+      warningRules,
       enabledRules,
       enabledSinks,
       totalSources: sources.value.length,
@@ -109,6 +151,29 @@ export function useForwardingGraph() {
     return [...new Set(warnings)]
   }
 
+  function warningsForRule(
+    rule: Rule,
+    ruleSources: FlowRuleSourceNode[],
+    targets: FlowTargetNode[],
+  ): string[] {
+    const warnings: string[] = []
+    if (!rule.enabled) warnings.push('规则已停用')
+    if (ruleSources.length === 0) warnings.push('未指定监听来源')
+    for (const source of ruleSources) {
+      if (!source.source) warnings.push(`引用了不存在的来源 #${source.sourceId}`)
+      else if (!source.source.enabled) warnings.push(`来源「${source.source.name}」已停用`)
+    }
+    if (targets.length === 0) warnings.push('未配置目标渠道')
+    for (const target of targets) {
+      if (!target.sink) warnings.push(`引用了不存在的渠道 #${target.sinkId}`)
+      else if (!target.sink.enabled) warnings.push(`渠道「${target.sink.name}」已停用`)
+      if (target.templateId && !target.template) {
+        warnings.push(`引用了不存在的模板 #${target.templateId}`)
+      }
+    }
+    return [...new Set(warnings)]
+  }
+
   return {
     accounts,
     sources,
@@ -116,6 +181,7 @@ export function useForwardingGraph() {
     sinks,
     templates,
     loading,
+    ruleNodes,
     sourceNodes,
     orphanRules,
     stats,

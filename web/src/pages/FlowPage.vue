@@ -5,16 +5,16 @@ import { useMessage } from 'naive-ui'
 import ClayIcon from '@/components/ClayIcon.vue'
 import FlowDetailDrawer from '@/components/flow/FlowDetailDrawer.vue'
 import FlowMap from '@/components/flow/FlowMap.vue'
-import { useForwardingGraph, type FlowSourceNode } from '@/composables/useForwardingGraph'
+import { useForwardingGraph, type FlowRuleGraphNode } from '@/composables/useForwardingGraph'
 import { errText } from '@/utils/error'
 
 const router = useRouter()
 const route = useRoute()
 const message = useMessage()
 
-const { accounts, loading, orphanRules, sourceNodes, stats, load } = useForwardingGraph()
+const { accounts, loading, ruleNodes, stats, load } = useForwardingGraph()
 
-const selectedNode = shallowRef<FlowSourceNode | null>(null)
+const selectedNode = shallowRef<FlowRuleGraphNode | null>(null)
 const detailOpen = shallowRef(false)
 const keyword = shallowRef('')
 const onlyWarnings = shallowRef(false)
@@ -37,17 +37,19 @@ const hasRelationFilter = computed(() =>
 
 const visibleNodes = computed(() => {
   const q = keyword.value.trim().toLowerCase()
-  return sourceNodes.value.filter((node) => {
+  return ruleNodes.value.filter((node) => {
     if (!matchRelationFilter(node)) return false
     if (onlyWarnings.value && node.warnings.length === 0) return false
     if (!q) return true
     return [
-      node.source.name,
-      node.source.username,
-      node.account?.name,
-      ...node.rules.map((item) => item.rule.name),
-      ...node.rules.flatMap((item) => item.targets.map((target) => target.sink?.name ?? '')),
-      ...node.rules.flatMap((item) => item.targets.map((target) => target.template?.name ?? '')),
+      node.rule.name,
+      ...node.sources.map((item) => item.source?.name ?? ''),
+      ...node.sources.map((item) => item.source?.username ?? ''),
+      ...node.sources.map((item) => item.account?.name ?? ''),
+      ...node.rule.conditions.map((item) => item.type),
+      ...node.rule.processors.map((item) => item.type),
+      ...node.targets.map((target) => target.sink?.name ?? ''),
+      ...node.targets.map((target) => target.template?.name ?? ''),
     ]
       .filter(Boolean)
       .some((item) => String(item).toLowerCase().includes(q))
@@ -62,18 +64,11 @@ const checklist = computed(() => [
   { label: '关联规则', done: stats.value.enabledRules > 0 && stats.value.linkedSources > 0, route: 'rules' },
 ])
 
-function matchRelationFilter(node: FlowSourceNode): boolean {
-  if (querySourceId.value && node.source.id !== querySourceId.value) return false
-  if (queryRuleId.value && !node.rules.some((item) => item.rule.id === queryRuleId.value)) return false
-  if (querySinkId.value && !node.rules.some((item) => item.targets.some((target) => target.sinkId === querySinkId.value))) {
-    return false
-  }
-  if (
-    queryTemplateId.value &&
-    !node.rules.some((item) => item.targets.some((target) => target.templateId === queryTemplateId.value))
-  ) {
-    return false
-  }
+function matchRelationFilter(node: FlowRuleGraphNode): boolean {
+  if (querySourceId.value && !node.sources.some((item) => item.sourceId === querySourceId.value)) return false
+  if (queryRuleId.value && node.rule.id !== queryRuleId.value) return false
+  if (querySinkId.value && !node.targets.some((target) => target.sinkId === querySinkId.value)) return false
+  if (queryTemplateId.value && !node.targets.some((target) => target.templateId === queryTemplateId.value)) return false
   return true
 }
 
@@ -85,7 +80,7 @@ async function refresh() {
   }
 }
 
-function selectNode(node: FlowSourceNode) {
+function selectNode(node: FlowRuleGraphNode) {
   selectedNode.value = node
   detailOpen.value = true
 }
@@ -103,13 +98,17 @@ function clearRelationFilter() {
 
 function createRuleFromSelected() {
   const query: Record<string, string> = { create: '1' }
-  if (selectedNode.value) query.source_id = String(selectedNode.value.source.id)
+  if (querySourceId.value) query.source_id = String(querySourceId.value)
+  if (querySinkId.value) query.sink_id = String(querySinkId.value)
+  if (!query.source_id && selectedNode.value?.sources[0]) {
+    query.source_id = String(selectedNode.value.sources[0].sourceId)
+  }
   go('rules', query)
 }
 
-function createRuleForSource(sourceId: number) {
+function createRuleFromContext() {
   detailOpen.value = false
-  go('rules', { create: '1', source_id: String(sourceId) })
+  createRuleFromSelected()
 }
 
 function editSource(id: number) {
@@ -156,13 +155,13 @@ onMounted(refresh)
         <div class="hero-icon"><ClayIcon name="flow" :size="24" /></div>
         <div class="hero-copy">
           <h1>转发编排</h1>
-          <p>从监听账号和来源出发，检查消息会命中哪些规则、套用哪个模板、最终投递到哪个渠道。</p>
+          <p>以规则为中心查看来源、匹配条件、处理器和目标渠道，确认一条消息会如何被转发。</p>
         </div>
       </div>
       <div class="hero-actions">
         <NButton type="primary" @click="createRuleFromSelected">
           <template #icon><ClayIcon name="plus" :size="16" /></template>
-          {{ selectedNode ? '为当前来源建规则' : '新建规则' }}
+          {{ querySourceId || selectedNode ? '沿当前上下文建规则' : '新建规则' }}
         </NButton>
         <NButton secondary :loading="loading" @click="refresh">
           <template #icon><ClayIcon name="refresh" :size="16" /></template>
@@ -201,24 +200,20 @@ onMounted(refresh)
         <span class="stat-value">{{ stats.enabledSinks }}/{{ stats.totalSinks }}</span>
         <span class="stat-label">启用渠道</span>
       </div>
-      <div class="stat-card" :class="{ warn: stats.warningSources > 0 }">
-        <span class="stat-value">{{ stats.warningSources }}</span>
-        <span class="stat-label">需要处理的来源</span>
+      <div class="stat-card" :class="{ warn: stats.warningRules > 0 }">
+        <span class="stat-value">{{ stats.warningRules }}</span>
+        <span class="stat-label">需要处理的规则</span>
       </div>
     </div>
-
-    <NAlert v-if="orphanRules.length" type="warning" title="存在没有来源的规则">
-      {{ orphanRules.map((rule) => rule.name).join('、') }}
-    </NAlert>
 
     <section class="map-panel">
       <div class="map-toolbar">
         <div>
           <h2>转发关系</h2>
-          <p>点击任意一行查看详细链路和编辑入口。</p>
+          <p>每张卡片就是一条规则，横向展开它绑定的来源、条件、处理器和最终目标。</p>
         </div>
         <div class="map-filters">
-          <NInput v-model:value="keyword" clearable class="search-input" placeholder="搜索来源、规则、模板、渠道" />
+          <NInput v-model:value="keyword" clearable class="search-input" placeholder="搜索规则、来源、条件、渠道" />
           <NCheckbox v-model:checked="onlyWarnings">只看异常</NCheckbox>
           <NButton v-if="hasRelationFilter" size="small" text type="primary" @click="clearRelationFilter">
             清除定位
@@ -230,7 +225,7 @@ onMounted(refresh)
         <FlowMap
           v-if="visibleNodes.length"
           :nodes="visibleNodes"
-          :selected-id="selectedNode?.source.id"
+          :selected-id="selectedNode?.rule.id"
           @select="selectNode"
         />
         <NEmpty v-else description="还没有可展示的转发关系">
@@ -250,7 +245,7 @@ onMounted(refresh)
       @edit-source="editSource"
       @edit-rule="editRule"
       @edit-sink="editSink"
-      @create-rule="createRuleForSource"
+      @create-rule="createRuleFromContext"
     />
   </NSpace>
 </template>

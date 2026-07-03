@@ -111,7 +111,13 @@ async function submit() {
 </script>
 
 <template>
-  <NModal v-model:show="show" preset="card" :title="template ? '编辑模板' : '新建模板'" class="template-modal">
+  <NModal
+    v-model:show="show"
+    preset="card"
+    :title="template ? '编辑模板' : '新建模板'"
+    class="template-modal"
+    :style="{ width: 'min(680px, calc(100vw - 32px))' }"
+  >
     <NForm label-placement="left" label-width="72">
       <NFormItem label="名称" required>
         <NInput v-model:value="form.name" />
@@ -145,7 +151,8 @@ async function submit() {
 </template>
 
 <style scoped>
-.template-modal {
-  width: min(720px, calc(100vw - 32px));
+.template-modal :deep(.n-card__content) {
+  max-height: min(68vh, 680px);
+  overflow: auto;
 }
 </style>

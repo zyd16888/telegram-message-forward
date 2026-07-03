@@ -1,32 +1,32 @@
 <script setup lang="ts">
-import type { FlowSourceNode } from '@/composables/useForwardingGraph'
+import type { FlowRuleGraphNode } from '@/composables/useForwardingGraph'
 
 const show = defineModel<boolean>('show', { required: true })
 
 defineProps<{
-  node?: FlowSourceNode | null
+  node?: FlowRuleGraphNode | null
 }>()
 
 const emit = defineEmits<{
-  editSource: [id: number]
   editRule: [id: number]
+  editSource: [id: number]
   editSink: [id: number]
-  createRule: [sourceId: number]
+  createRule: []
 }>()
 </script>
 
 <template>
-  <NDrawer v-model:show="show" :width="460" placement="right">
-    <NDrawerContent :title="node?.source.name ?? '关系详情'" :native-scrollbar="false">
+  <NDrawer v-model:show="show" :width="500" placement="right">
+    <NDrawerContent :title="node?.rule.name ?? '规则详情'" :native-scrollbar="false">
       <template v-if="node">
         <NSpace vertical size="large">
           <section class="detail-section">
-            <div class="section-title">监听来源</div>
+            <div class="section-title">规则</div>
             <NDescriptions :column="1" size="small" bordered>
-              <NDescriptionsItem label="来源">{{ node.source.name }}</NDescriptionsItem>
-              <NDescriptionsItem label="账号">{{ node.account?.name ?? `#${node.source.account_id}` }}</NDescriptionsItem>
-              <NDescriptionsItem label="Peer ID">{{ node.source.peer_id }}</NDescriptionsItem>
-              <NDescriptionsItem label="状态">{{ node.source.enabled ? '启用' : '停用' }}</NDescriptionsItem>
+              <NDescriptionsItem label="名称">{{ node.rule.name }}</NDescriptionsItem>
+              <NDescriptionsItem label="优先级">{{ node.rule.priority }}</NDescriptionsItem>
+              <NDescriptionsItem label="状态">{{ node.rule.enabled ? '启用' : '停用' }}</NDescriptionsItem>
+              <NDescriptionsItem label="命中即停">{{ node.rule.stop_on_match ? '是' : '否' }}</NDescriptionsItem>
             </NDescriptions>
           </section>
 
@@ -37,42 +37,65 @@ const emit = defineEmits<{
           </NAlert>
 
           <section class="detail-section">
-            <div class="section-title">规则链路</div>
-            <div v-if="node.rules.length" class="rule-list">
-              <article v-for="item in node.rules" :key="item.rule.id" class="rule-card">
-                <div class="rule-head">
-                  <div>
-                    <div class="rule-name">{{ item.rule.name }}</div>
-                    <div class="rule-meta">
-                      优先级 {{ item.rule.priority }} · {{ item.rule.enabled ? '启用' : '停用' }}
-                    </div>
-                  </div>
-                  <NButton size="small" text type="primary" @click="emit('editRule', item.rule.id)">
-                    编辑
-                  </NButton>
-                </div>
-                <div class="target-list">
-                  <div v-if="!item.targets.length" class="empty-line">没有目标渠道</div>
-                  <div v-for="target in item.targets" :key="`${item.rule.id}-${target.sinkId}-${target.templateId ?? 0}`" class="target-line">
-                    <span>{{ target.sink?.name ?? `渠道 #${target.sinkId}` }}</span>
-                    <span class="muted">{{ target.template?.name ?? '原文' }}</span>
-                  </div>
-                </div>
-              </article>
+            <div class="section-title">来源</div>
+            <div v-if="node.sources.length" class="line-list">
+              <button
+                v-for="source in node.sources"
+                :key="source.sourceId"
+                type="button"
+                class="line-item"
+                @click="source.source && emit('editSource', source.source.id)"
+              >
+                <span>{{ source.source?.name ?? `来源 #${source.sourceId}` }}</span>
+                <span class="muted">{{ source.account?.name ?? '账号未知' }}</span>
+              </button>
             </div>
-            <NEmpty v-else description="这个来源还没有进入任何规则">
-              <template #extra>
-                <NButton type="primary" @click="emit('createRule', node.source.id)">为此来源建规则</NButton>
-              </template>
-            </NEmpty>
+            <NEmpty v-else size="small" description="未指定来源" />
+          </section>
+
+          <section class="detail-section">
+            <div class="section-title">匹配条件</div>
+            <div v-if="node.rule.conditions.length" class="line-list">
+              <div v-for="(condition, index) in node.rule.conditions" :key="`${condition.type}-${index}`" class="line-item static">
+                <span>{{ condition.type }}</span>
+              </div>
+            </div>
+            <NEmpty v-else size="small" description="无条件，来源消息直接匹配" />
+          </section>
+
+          <section class="detail-section">
+            <div class="section-title">处理器</div>
+            <div v-if="node.rule.processors.length" class="line-list">
+              <div v-for="(processor, index) in node.rule.processors" :key="`${processor.type}-${index}`" class="line-item static">
+                <span>{{ processor.type }}</span>
+              </div>
+            </div>
+            <NEmpty v-else size="small" description="不做额外处理" />
+          </section>
+
+          <section class="detail-section">
+            <div class="section-title">目标</div>
+            <div v-if="node.targets.length" class="line-list">
+              <button
+                v-for="target in node.targets"
+                :key="`${target.sinkId}-${target.templateId ?? 0}`"
+                type="button"
+                class="line-item"
+                @click="target.sink && emit('editSink', target.sink.id)"
+              >
+                <span>{{ target.sink?.name ?? `渠道 #${target.sinkId}` }}</span>
+                <span class="muted">{{ target.template?.name ?? '原文' }}</span>
+              </button>
+            </div>
+            <NEmpty v-else size="small" description="未配置目标渠道" />
           </section>
         </NSpace>
       </template>
 
       <template #footer>
         <NSpace justify="end">
-          <NButton v-if="node" @click="emit('editSource', node.source.id)">查看来源</NButton>
-          <NButton v-if="node" type="primary" @click="emit('createRule', node.source.id)">新建规则</NButton>
+          <NButton v-if="node" @click="emit('editRule', node.rule.id)">编辑规则</NButton>
+          <NButton type="primary" @click="emit('createRule')">新建规则</NButton>
           <NButton @click="show = false">关闭</NButton>
         </NSpace>
       </template>
@@ -97,50 +120,41 @@ const emit = defineEmits<{
   padding-left: 18px;
 }
 
-.rule-list {
+.line-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
-.rule-card {
-  border: 1px solid var(--clay-border);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--clay-surface);
-}
-
-.rule-head {
+.line-item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  color: var(--clay-text);
+  background: var(--clay-surface);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
 }
 
-.rule-name {
-  font-weight: 700;
+.line-item.static {
+  cursor: default;
 }
 
-.rule-meta,
-.muted,
-.empty-line {
+.line-item:not(.static):hover,
+.line-item:not(.static):focus-visible {
+  border-color: var(--clay-border-strong);
+  outline: none;
+}
+
+.muted {
   color: var(--clay-text-3);
   font-size: 12px;
-}
-
-.target-list {
-  display: grid;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.target-line {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-  padding: 7px 9px;
-  border-radius: 7px;
-  background: var(--clay-surface-2);
-  font-size: 13px;
+  white-space: nowrap;
 }
 </style>
