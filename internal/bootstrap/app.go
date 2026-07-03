@@ -31,6 +31,7 @@ import (
 	"telegram-message-forward/internal/infra/logger"
 	infratelegram "telegram-message-forward/internal/infra/telegram"
 	pluginsource "telegram-message-forward/internal/plugin/source"
+	rsssource "telegram-message-forward/internal/plugin/source/rss"
 	tgsource "telegram-message-forward/internal/plugin/source/telegram"
 	"telegram-message-forward/internal/ruleengine"
 	"telegram-message-forward/internal/security"
@@ -163,7 +164,9 @@ func Build(cfg *config.Config) (*App, error) {
 		},
 	})
 	pluginsource.Register("telegram", func() (pluginsource.Plugin, error) { return tgPlugin, nil })
+	rssPlugin := rsssource.New()
 	srcManager := appsource.NewManager(accounts, sources, tgPlugin, ingestSvc, log)
+	srcManager.RegisterPlugin("rss", rssPlugin)
 
 	// worker 装配。
 	workerCount := cfg.Dispatch.WorkerCount
@@ -199,6 +202,7 @@ func Build(cfg *config.Config) (*App, error) {
 	templateSvc := apptemplate.NewService(templates)
 	ruleSvc := apprule.NewService(rules, apprule.ValidatorDeps{Sinks: sinks, Templates: templates})
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)
+	sourceSvc.RegisterPlugin("rss", rssPlugin)
 	tokenSvc := apptoken.NewService(apiTokens)
 	authSvc := appauth.NewService(admins, apiTokens, tokenSvc, cfg.Security.AuthEnabled)
 	tgConfigSvc := apptelegramconfig.NewService(telegramApps, proxies)

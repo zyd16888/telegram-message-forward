@@ -120,6 +120,7 @@ export interface Sink {
 
 export interface Source {
   id: number
+  type: string
   account_id: number
   peer_type: string
   peer_id: number

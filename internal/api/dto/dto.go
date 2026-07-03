@@ -254,6 +254,7 @@ type SinkTestDTO struct {
 // SourceDTO 是监听源响应。
 type SourceDTO struct {
 	ID                    int64          `json:"id"`
+	Type                  string         `json:"type"`
 	AccountID             int64          `json:"account_id"`
 	PeerType              string         `json:"peer_type"`
 	PeerID                int64          `json:"peer_id"`
@@ -279,6 +280,7 @@ func NewSourceDTO(s *domainsource.Source) SourceDTO {
 	}
 	return SourceDTO{
 		ID:            s.ID,
+		Type:          sourceType(s.Type),
 		AccountID:     s.AccountID,
 		PeerType:      string(s.PeerType),
 		PeerID:        s.PeerID,
@@ -305,13 +307,21 @@ func NewSourceDTOWithRuntime(s *domainsource.Source, status string, subscription
 
 // SourceCreateRequest 是创建监听源请求。
 type SourceCreateRequest struct {
-	AccountID int64          `json:"account_id" binding:"required"`
-	PeerType  string         `json:"peer_type" binding:"required"`
-	PeerID    int64          `json:"peer_id" binding:"required"`
+	Type      string         `json:"type,omitempty"`
+	AccountID int64          `json:"account_id,omitempty"`
+	PeerType  string         `json:"peer_type,omitempty"`
+	PeerID    int64          `json:"peer_id,omitempty"`
 	Name      string         `json:"name" binding:"required"`
 	Username  string         `json:"username"`
 	Enabled   *bool          `json:"enabled,omitempty"`
 	Config    map[string]any `json:"config"`
+}
+
+func sourceType(t string) string {
+	if t == "" {
+		return "telegram"
+	}
+	return t
 }
 
 // SourceUpdateRequest 是更新监听源请求。

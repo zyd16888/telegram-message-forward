@@ -101,8 +101,9 @@ func (TelegramPeer) TableName() string { return "telegram_peers" }
 
 // Source 对应 sources 表。
 type Source struct {
-	ID            int64 `gorm:"primaryKey"`
-	AccountID     int64
+	ID            int64  `gorm:"primaryKey"`
+	Type          string `gorm:"column:source_type"`
+	AccountID     *int64
 	PeerType      string
 	PeerID        int64
 	Name          string

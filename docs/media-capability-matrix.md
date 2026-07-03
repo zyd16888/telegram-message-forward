@@ -53,6 +53,15 @@
 - Telegram 下载到本地的图片不能直接发给钉钉；如果没有公网可访问 URL，必须降级。
 - 文件、音频、视频不走伪成功，统一文本降级。
 
+## 当前内置 Source 契约
+
+### RSS Source
+
+- 支持 RSS 2.0 和 Atom 常见字段。
+- 条目会标准化为内部 `NormalizedMessage`：标题与摘要进入文本，链接进入 `links/original_url`，enclosure 的 image/audio/video 进入 `media[]` 的远程 URL 描述。
+- RSS Source 不下载二进制媒体，不保存正文外的大字段；是否能投递媒体继续由目标 Sink capability 决定。
+- `feed_url` 必填，`poll_interval_seconds` 默认 300 秒，`max_items` 默认 20 条；重复条目通过稳定 external message id 交给消息入库幂等处理。
+
 ## 后续实现要求
 
 - Telegram 下载产物不得直接通过 API 暴露本地路径。

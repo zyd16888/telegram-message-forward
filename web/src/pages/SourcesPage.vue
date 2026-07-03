@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, shallowRef } from 'vue'
+import { computed, h, onMounted, reactive, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSpace, NSwitch, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import PeerSyncPanel from '@/components/sources/PeerSyncPanel.vue'
@@ -20,6 +20,14 @@ const rules = shallowRef<Rule[]>([])
 const loading = shallowRef(false)
 const sourceSearch = shallowRef('')
 const sourceKindFilter = shallowRef<string | null>(null)
+const rssSubmitting = shallowRef(false)
+const rssForm = reactive({
+  name: '',
+  feed_url: '',
+  poll_interval_seconds: 300,
+  max_items: 20,
+  enabled: true,
+})
 
 const accountNameById = computed(() => new Map(accounts.value.map((a) => [a.id, a.name])))
 
@@ -39,7 +47,7 @@ const visibleSources = computed(() => {
     const kind = sourceDisplayType(source)
     if (sourceKindFilter.value && kind !== sourceKindFilter.value) return false
     if (!keyword) return true
-    return [String(source.id), source.name, source.username, String(source.peer_id), kind, source.peer_type]
+    return [String(source.id), source.name, source.username, String(source.peer_id), source.type, kind, source.peer_type, source.config?.feed_url]
       .filter(Boolean)
       .some((item) => String(item).toLowerCase().includes(keyword))
   })
@@ -69,6 +77,7 @@ async function load() {
 }
 
 function sourceDisplayType(source: Source): string {
+  if (source.type === 'rss') return 'RSS Feed'
   const displayType = source.config?.display_type
   if (typeof displayType === 'string' && displayType) return displayType
   if (source.peer_type === 'user') return '用户'
@@ -77,6 +86,7 @@ function sourceDisplayType(source: Source): string {
 }
 
 function accountName(source: Source): string {
+  if (source.type === 'rss') return '-'
   return accountNameById.value.get(source.account_id) ?? `#${source.account_id}`
 }
 
@@ -109,6 +119,44 @@ async function toggle(row: Source, value: boolean) {
     sources.value = sources.value.map((s) => (s.id === row.id ? { ...s, enabled: value } : s))
   } catch (e) {
     message.error('更新失败：' + errText(e))
+  }
+}
+
+async function addRSSSource() {
+  const feedURL = rssForm.feed_url.trim()
+  const name = rssForm.name.trim()
+  if (!feedURL || !name) {
+    message.warning('请填写名称和 Feed URL')
+    return
+  }
+  rssSubmitting.value = true
+  try {
+    await sourcesApi.create({
+      type: 'rss',
+      account_id: 0,
+      peer_type: 'feed',
+      peer_id: 0,
+      name,
+      username: '',
+      enabled: rssForm.enabled,
+      config: {
+        feed_url: feedURL,
+        poll_interval_seconds: rssForm.poll_interval_seconds,
+        max_items: rssForm.max_items,
+        display_type: 'RSS Feed',
+      },
+    })
+    rssForm.name = ''
+    rssForm.feed_url = ''
+    rssForm.poll_interval_seconds = 300
+    rssForm.max_items = 20
+    rssForm.enabled = true
+    message.success('RSS 订阅源已添加')
+    await load()
+  } catch (e) {
+    message.error('添加 RSS 失败：' + errText(e))
+  } finally {
+    rssSubmitting.value = false
   }
 }
 
@@ -224,6 +272,32 @@ onMounted(() => {
 
     <PeerSyncPanel :accounts="accounts" :sources="sources" @added="load" />
 
+    <NCard title="添加 RSS 订阅源">
+      <NForm label-placement="left" label-width="96" class="rss-form">
+        <NFormItem label="名称">
+          <NInput v-model:value="rssForm.name" placeholder="例如：项目发布订阅" />
+        </NFormItem>
+        <NFormItem label="Feed URL">
+          <NInput v-model:value="rssForm.feed_url" placeholder="https://example.com/feed.xml" />
+        </NFormItem>
+        <NFormItem label="轮询秒数">
+          <NInputNumber v-model:value="rssForm.poll_interval_seconds" :min="30" :step="60" />
+        </NFormItem>
+        <NFormItem label="每次条数">
+          <NInputNumber v-model:value="rssForm.max_items" :min="1" :max="100" />
+        </NFormItem>
+        <NFormItem label="启用">
+          <NSwitch v-model:value="rssForm.enabled" />
+        </NFormItem>
+        <NFormItem label=" ">
+          <NButton type="primary" :loading="rssSubmitting" @click="addRSSSource">
+            <template #icon><ClayIcon name="plus" :size="16" /></template>
+            添加 RSS
+          </NButton>
+        </NFormItem>
+      </NForm>
+    </NCard>
+
     <div class="list-toolbar">
       <NText strong class="list-title">已配置监听源</NText>
       <div class="list-filters">
@@ -269,6 +343,16 @@ onMounted(() => {
   width: 150px;
 }
 
+.rss-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 2px 18px;
+}
+
+.rss-form :deep(.n-form-item:last-child) {
+  grid-column: 1 / -1;
+}
+
 .runtime-cell {
   display: grid;
   gap: 4px;
@@ -285,6 +369,9 @@ onMounted(() => {
   .source-kind {
     flex: 1;
     width: auto;
+  }
+  .rss-form {
+    grid-template-columns: 1fr;
   }
 }
 </style>

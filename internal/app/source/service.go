@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"sync"
 	"time"
 
@@ -22,7 +23,7 @@ const minFullSyncInterval = 15 * time.Minute
 type Service struct {
 	sources  domainsource.Repository
 	accounts domainaccount.Repository
-	plugin   pluginsource.Plugin
+	plugins  map[string]pluginsource.Plugin
 	manager  *Manager
 
 	syncMu       sync.Mutex
@@ -46,10 +47,18 @@ func NewService(
 	return &Service{
 		sources:      sources,
 		accounts:     accounts,
-		plugin:       plugin,
+		plugins:      map[string]pluginsource.Plugin{"telegram": plugin},
 		manager:      manager,
 		lastFullSync: map[int64]time.Time{},
 	}
+}
+
+// RegisterPlugin 注册非 Telegram Source 插件。
+func (s *Service) RegisterPlugin(name string, plugin pluginsource.Plugin) {
+	if s.plugins == nil {
+		s.plugins = map[string]pluginsource.Plugin{}
+	}
+	s.plugins[name] = plugin
 }
 
 // List 返回全部监听源。
@@ -59,20 +68,22 @@ func (s *Service) List(ctx context.Context) ([]*domainsource.Source, error) {
 
 // RuntimeStatusBySource 返回当前插件 runner 映射到 source 的运行状态。
 func (s *Service) RuntimeStatusBySource() map[int64]RuntimeStatus {
-	provider, ok := s.plugin.(pluginsource.RunnerStatusProvider)
-	if !ok {
-		return nil
-	}
 	out := map[int64]RuntimeStatus{}
-	for _, status := range provider.RunnerStatuses() {
-		mapped := RuntimeStatus{
-			Status:            status.Status,
-			SubscriptionCount: status.SubscriptionCount,
-			RecentMessageAt:   status.RecentMessageAt,
-			LastError:         status.LastError,
+	for _, plugin := range s.plugins {
+		provider, ok := plugin.(pluginsource.RunnerStatusProvider)
+		if !ok {
+			continue
 		}
-		for _, sourceID := range status.SourceIDs {
-			out[sourceID] = mapped
+		for _, status := range provider.RunnerStatuses() {
+			mapped := RuntimeStatus{
+				Status:            status.Status,
+				SubscriptionCount: status.SubscriptionCount,
+				RecentMessageAt:   status.RecentMessageAt,
+				LastError:         status.LastError,
+			}
+			for _, sourceID := range status.SourceIDs {
+				out[sourceID] = mapped
+			}
 		}
 	}
 	return out
@@ -85,6 +96,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*domainsource.Source, erro
 
 // CreateInput 是创建监听源的输入。
 type CreateInput struct {
+	Type      string
 	AccountID int64
 	PeerType  string
 	PeerID    int64
@@ -96,7 +108,26 @@ type CreateInput struct {
 
 // Create 创建监听源。
 func (s *Service) Create(ctx context.Context, in CreateInput) (*domainsource.Source, error) {
+	sourceType := normalizeSourceType(in.Type)
+	if sourceType == "rss" {
+		if in.PeerType == "" {
+			in.PeerType = "feed"
+		}
+		if in.PeerID == 0 {
+			in.PeerID = stablePositiveID(configString(in.Config, "feed_url"))
+		}
+	}
+	if sourceType == "telegram" && in.AccountID <= 0 {
+		return nil, fmt.Errorf("telegram source 缺少 account_id")
+	}
+	if sourceType == "telegram" && in.PeerType == "" {
+		return nil, fmt.Errorf("telegram source 缺少 peer_type")
+	}
+	if sourceType == "telegram" && in.PeerID == 0 {
+		return nil, fmt.Errorf("telegram source 缺少 peer_id")
+	}
 	src := &domainsource.Source{
+		Type:      sourceType,
 		AccountID: in.AccountID,
 		PeerType:  domainsource.PeerType(in.PeerType),
 		PeerID:    in.PeerID,
@@ -104,6 +135,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domainsource.Sou
 		Username:  in.Username,
 		Enabled:   in.Enabled,
 		Config:    in.Config,
+	}
+	plugin, err := s.pluginForSource(src)
+	if err != nil {
+		return nil, err
+	}
+	if err := plugin.ValidateConfig(src.Config); err != nil {
+		return nil, err
 	}
 	if err := s.sources.Create(ctx, src); err != nil {
 		return nil, err
@@ -152,7 +190,9 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*domain
 func (s *Service) Delete(ctx context.Context, id int64) error {
 	src, err := s.sources.GetByID(ctx, id)
 	if err == nil && src != nil {
-		_ = s.plugin.Stop(ctx, src)
+		if plugin, perr := s.pluginForSource(src); perr == nil {
+			_ = plugin.Stop(ctx, src)
+		}
 	}
 	return s.sources.Delete(ctx, id)
 }
@@ -183,14 +223,16 @@ func (s *Service) SyncStream(ctx context.Context, accountID int64, force bool, e
 	}
 
 	if !force && s.withinFullSyncCooldown(accountID) {
-		if cacher, ok := s.plugin.(interface {
+		telegramPlugin := s.plugins["telegram"]
+		if cacher, ok := telegramPlugin.(interface {
 			SyncCachedPeers(context.Context, *domainaccount.Account, pluginsource.SyncPeerHandler) error
 		}); ok {
 			return true, cacher.SyncCachedPeers(ctx, acc, emit)
 		}
 	}
 
-	if streaming, ok := s.plugin.(interface {
+	telegramPlugin := s.plugins["telegram"]
+	if streaming, ok := telegramPlugin.(interface {
 		SyncSourcesStream(context.Context, *domainaccount.Account, pluginsource.SyncPeerHandler) error
 	}); ok {
 		if err := streaming.SyncSourcesStream(ctx, acc, emit); err != nil {
@@ -200,7 +242,7 @@ func (s *Service) SyncStream(ctx context.Context, accountID int64, force bool, e
 		return false, nil
 	}
 
-	peers, err := s.plugin.SyncSources(ctx, acc)
+	peers, err := telegramPlugin.SyncSources(ctx, acc)
 	if err != nil {
 		return false, err
 	}
@@ -232,14 +274,21 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	acc, err := s.accounts.GetByID(ctx, src.AccountID)
+	plugin, err := s.pluginForSource(src)
 	if err != nil {
 		return err
 	}
-	if acc.Status != domainaccount.StatusActive {
-		return fmt.Errorf("账号未登录，无法启动监听（当前状态 %s）", acc.Status)
+	var acc *domainaccount.Account
+	if sourceRequiresAccount(src) {
+		acc, err = s.accounts.GetByID(ctx, src.AccountID)
+		if err != nil {
+			return err
+		}
+		if acc.Status != domainaccount.StatusActive {
+			return fmt.Errorf("账号未登录，无法启动监听（当前状态 %s）", acc.Status)
+		}
 	}
-	return s.plugin.Start(ctx, acc, src, s.manager.ingest.Ingest)
+	return plugin.Start(ctx, acc, src, s.manager.ingest.Ingest)
 }
 
 // Stop 停止某监听源。
@@ -248,5 +297,40 @@ func (s *Service) Stop(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	return s.plugin.Stop(ctx, src)
+	plugin, err := s.pluginForSource(src)
+	if err != nil {
+		return err
+	}
+	return plugin.Stop(ctx, src)
+}
+
+func (s *Service) pluginForSource(src *domainsource.Source) (pluginsource.Plugin, error) {
+	sourceType := normalizeSourceType(src.Type)
+	plugin, ok := s.plugins[sourceType]
+	if !ok {
+		return nil, fmt.Errorf("未注册的 source 插件: %s", sourceType)
+	}
+	return plugin, nil
+}
+
+func normalizeSourceType(t string) string {
+	if t == "" {
+		return "telegram"
+	}
+	return t
+}
+
+func sourceRequiresAccount(src *domainsource.Source) bool {
+	return normalizeSourceType(src.Type) == "telegram"
+}
+
+func configString(config map[string]any, key string) string {
+	v, _ := config[key].(string)
+	return v
+}
+
+func stablePositiveID(value string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(value))
+	return int64(h.Sum64() & 0x7fffffffffffffff)
 }

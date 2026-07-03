@@ -5,6 +5,7 @@ package source
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	appingest "telegram-message-forward/internal/app/ingest"
@@ -17,7 +18,7 @@ import (
 type Manager struct {
 	accounts domainaccount.Repository
 	sources  domainsource.Repository
-	plugin   pluginsource.Plugin
+	plugins  map[string]pluginsource.Plugin
 	ingest   *appingest.Service
 	log      *slog.Logger
 }
@@ -30,7 +31,15 @@ func NewManager(
 	ingest *appingest.Service,
 	log *slog.Logger,
 ) *Manager {
-	return &Manager{accounts: accounts, sources: sources, plugin: plugin, ingest: ingest, log: log}
+	return &Manager{accounts: accounts, sources: sources, plugins: map[string]pluginsource.Plugin{"telegram": plugin}, ingest: ingest, log: log}
+}
+
+// RegisterPlugin 注册非 Telegram Source 插件。
+func (m *Manager) RegisterPlugin(name string, plugin pluginsource.Plugin) {
+	if m.plugins == nil {
+		m.plugins = map[string]pluginsource.Plugin{}
+	}
+	m.plugins[name] = plugin
 }
 
 // StartAll 启动全部「已启用且账号处于 active」的监听源。
@@ -42,38 +51,32 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		return err
 	}
 	started := 0
-	byAccount := groupSourcesByAccount(srcs)
-	for accountID, group := range byAccount {
-		acc, err := m.accounts.GetByID(ctx, accountID)
+	for _, src := range srcs {
+		plugin, err := m.pluginForSource(src)
 		if err != nil {
-			m.log.Warn("跳过账号下全部 source：账号查询失败", "account", accountID, "sources", len(group), "err", err)
+			m.log.Warn("跳过 source：插件未注册", "source", src.ID, "type", sourceType(src), "err", err)
 			continue
 		}
-		if acc.Status != domainaccount.StatusActive {
-			m.log.Info("跳过账号下全部 source：账号未登录", "account", acc.ID, "sources", len(group), "status", acc.Status)
-			continue
-		}
-		for _, src := range group {
-			if err := m.plugin.Start(ctx, acc, src, m.ingest.Ingest); err != nil {
-				m.log.Error("启动 source 监听失败", "source", src.ID, "account", acc.ID, "err", err)
+		var acc *domainaccount.Account
+		if sourceRequiresAccount(src) {
+			acc, err = m.accounts.GetByID(ctx, src.AccountID)
+			if err != nil {
+				m.log.Warn("跳过 source：账号查询失败", "source", src.ID, "account", src.AccountID, "err", err)
 				continue
 			}
-			started++
+			if acc.Status != domainaccount.StatusActive {
+				m.log.Info("跳过 source：账号未登录", "source", src.ID, "account", acc.ID, "status", acc.Status)
+				continue
+			}
 		}
-	}
-	m.log.Info("Source 监听已启动", "count", started, "total", len(srcs), "accounts", len(byAccount))
-	return nil
-}
-
-func groupSourcesByAccount(srcs []*domainsource.Source) map[int64][]*domainsource.Source {
-	out := make(map[int64][]*domainsource.Source)
-	for _, src := range srcs {
-		if src == nil {
+		if err := plugin.Start(ctx, acc, src, m.ingest.Ingest); err != nil {
+			m.log.Error("启动 source 监听失败", "source", src.ID, "type", sourceType(src), "err", err)
 			continue
 		}
-		out[src.AccountID] = append(out[src.AccountID], src)
+		started++
 	}
-	return out
+	m.log.Info("Source 监听已启动", "count", started, "total", len(srcs))
+	return nil
 }
 
 // StopAll 停止全部监听源。
@@ -84,8 +87,29 @@ func (m *Manager) StopAll(ctx context.Context) {
 		return
 	}
 	for _, src := range srcs {
-		if err := m.plugin.Stop(ctx, src); err != nil {
+		plugin, err := m.pluginForSource(src)
+		if err != nil {
+			m.log.Warn("停止 source 时插件未注册", "source", src.ID, "type", sourceType(src), "err", err)
+			continue
+		}
+		if err := plugin.Stop(ctx, src); err != nil {
 			m.log.Warn("停止 source 失败", "source", src.ID, "err", err)
 		}
 	}
+}
+
+func (m *Manager) pluginForSource(src *domainsource.Source) (pluginsource.Plugin, error) {
+	sourceType := sourceType(src)
+	plugin, ok := m.plugins[sourceType]
+	if !ok {
+		return nil, fmt.Errorf("未注册的 source 插件: %s", sourceType)
+	}
+	return plugin, nil
+}
+
+func sourceType(src *domainsource.Source) string {
+	if src == nil || src.Type == "" {
+		return "telegram"
+	}
+	return src.Type
 }

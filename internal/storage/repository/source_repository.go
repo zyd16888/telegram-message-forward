@@ -104,9 +104,18 @@ func toSourceModel(s *domainsource.Source) (*model.Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("序列化 source config 失败: %w", err)
 	}
+	sourceType := s.Type
+	if sourceType == "" {
+		sourceType = "telegram"
+	}
+	var accountID *int64
+	if s.AccountID > 0 {
+		accountID = &s.AccountID
+	}
 	return &model.Source{
 		ID:            s.ID,
-		AccountID:     s.AccountID,
+		Type:          sourceType,
+		AccountID:     accountID,
 		PeerType:      string(s.PeerType),
 		PeerID:        s.PeerID,
 		Name:          s.Name,
@@ -125,9 +134,18 @@ func toSourceDomain(m *model.Source) (*domainsource.Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("解析 source config 失败: %w", err)
 	}
+	sourceType := m.Type
+	if sourceType == "" {
+		sourceType = "telegram"
+	}
+	accountID := int64(0)
+	if m.AccountID != nil {
+		accountID = *m.AccountID
+	}
 	return &domainsource.Source{
 		ID:            m.ID,
-		AccountID:     m.AccountID,
+		Type:          sourceType,
+		AccountID:     accountID,
 		PeerType:      domainsource.PeerType(m.PeerType),
 		PeerID:        m.PeerID,
 		Name:          m.Name,

@@ -18,6 +18,7 @@ const (
 // Source 是一个监听源，指向某账号下的一个 peer。
 type Source struct {
 	ID            int64
+	Type          string
 	AccountID     int64
 	PeerType      PeerType
 	PeerID        int64

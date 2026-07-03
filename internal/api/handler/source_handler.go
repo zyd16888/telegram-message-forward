@@ -66,6 +66,7 @@ func (h *SourceHandler) Create(c *gin.Context) {
 		enabled = *req.Enabled
 	}
 	s, err := h.svc.Create(c.Request.Context(), appsource.CreateInput{
+		Type:      req.Type,
 		AccountID: req.AccountID,
 		PeerType:  req.PeerType,
 		PeerID:    req.PeerID,
