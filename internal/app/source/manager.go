@@ -42,24 +42,38 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		return err
 	}
 	started := 0
-	for _, src := range srcs {
-		acc, err := m.accounts.GetByID(ctx, src.AccountID)
+	byAccount := groupSourcesByAccount(srcs)
+	for accountID, group := range byAccount {
+		acc, err := m.accounts.GetByID(ctx, accountID)
 		if err != nil {
-			m.log.Warn("跳过 source：账号查询失败", "source", src.ID, "err", err)
+			m.log.Warn("跳过账号下全部 source：账号查询失败", "account", accountID, "sources", len(group), "err", err)
 			continue
 		}
 		if acc.Status != domainaccount.StatusActive {
-			m.log.Info("跳过 source：账号未登录", "source", src.ID, "account", acc.ID, "status", acc.Status)
+			m.log.Info("跳过账号下全部 source：账号未登录", "account", acc.ID, "sources", len(group), "status", acc.Status)
 			continue
 		}
-		if err := m.plugin.Start(ctx, acc, src, m.ingest.Ingest); err != nil {
-			m.log.Error("启动 source 监听失败", "source", src.ID, "err", err)
-			continue
+		for _, src := range group {
+			if err := m.plugin.Start(ctx, acc, src, m.ingest.Ingest); err != nil {
+				m.log.Error("启动 source 监听失败", "source", src.ID, "account", acc.ID, "err", err)
+				continue
+			}
+			started++
 		}
-		started++
 	}
-	m.log.Info("Source 监听已启动", "count", started, "total", len(srcs))
+	m.log.Info("Source 监听已启动", "count", started, "total", len(srcs), "accounts", len(byAccount))
 	return nil
+}
+
+func groupSourcesByAccount(srcs []*domainsource.Source) map[int64][]*domainsource.Source {
+	out := make(map[int64][]*domainsource.Source)
+	for _, src := range srcs {
+		if src == nil {
+			continue
+		}
+		out[src.AccountID] = append(out[src.AccountID], src)
+	}
+	return out
 }
 
 // StopAll 停止全部监听源。

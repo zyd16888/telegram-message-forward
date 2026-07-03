@@ -163,25 +163,27 @@ v3 优先完成六条主线：
 
 目标：Telegram Source 从“每 source 一个 client”改为“每 account 一个 runner，多 source 订阅分发”。
 
-- [ ] 新增 account runner 概念：
+- [x] 新增 account runner 概念：
   - 每个 active account 最多一个 Telegram client/update loop。
   - runner 内维护 source 订阅表。
   - source 启停只增删订阅，不重复建 client。
-- [ ] 更新 `app/source.Manager`：
+- [x] 更新 `app/source.Manager`：
   - 按 account 分组启动。
   - 支持动态启停 source。
   - StopAll 能正确取消所有 account runner。
-- [ ] 更新 Telegram plugin：
+- [x] 更新 Telegram plugin：
   - update 到来后根据 peer 匹配多个 source。
   - 一个消息只投递给对应 source。
   - 账号掉线、未授权、Flood Wait 等错误要进入可观测状态。
-- [ ] 为后续媒体下载复用同一个 account client 留接口。
+- [x] 为后续媒体下载复用同一个 account client 留接口。
 
 验收：
 
 - 同一账号 3 个 source 只启动一个 Telegram client。
 - 启停单个 source 不影响同账号其它 source。
 - `go test ./...` 通过。
+
+进度说明（2026-07-03）：V3-4 已完成。Telegram Source 插件内部改为 `account_id -> runner`，同账号 source 作为订阅注册到同一个 update loop；停止单个 source 只删除订阅，最后一个订阅停止时才取消 runner。媒体下载复用 runner 持有的 Telegram client。无真实 Telegram 凭证时通过 runner 订阅/分发单测验证核心语义。
 
 ### V3-5 规则能力扩展
 

@@ -33,12 +33,12 @@ type Deps struct {
 
 // Plugin 实现 source.Plugin。
 //
-// 注意：Telegram 客户端本质是「每账号一个」；本实现按 source 粒度 Start 一个客户端并按 peer 过滤，
-// 适合 v1 单账号少量 source。多 source 共账号的连接复用后置到 SourceManager。
+// Telegram 客户端本质是「每账号一个」；插件内部按 account 维护 runner，
+// 多个 source 只注册为同一个 runner 的订阅，避免重复启动 Telegram client。
 type Plugin struct {
 	deps    Deps
 	mu      sync.Mutex
-	running map[int64]context.CancelFunc // source_id -> cancel
+	runners map[int64]*accountRunner // account_id -> runner
 }
 
 // NewPlugin 创建 Telegram Source 插件。
@@ -46,7 +46,7 @@ func NewPlugin(deps Deps) *Plugin {
 	if deps.Log == nil {
 		deps.Log = slog.Default()
 	}
-	return &Plugin{deps: deps, running: map[int64]context.CancelFunc{}}
+	return &Plugin{deps: deps, runners: map[int64]*accountRunner{}}
 }
 
 var _ pluginsource.Plugin = (*Plugin)(nil)
@@ -544,35 +544,71 @@ func messageDate(messages []tg.MessageClass, id int) int {
 	return 0
 }
 
-// Start 为一个 source 启动监听：连接账号客户端，过滤该 source 的消息并回调 handler。
+type sourceSubscription struct {
+	source  domainsource.Source
+	handler pluginsource.Handler
+}
+
+type accountRunner struct {
+	accountID int64
+	client    *telegram.Client
+	cancel    context.CancelFunc
+	sources   map[int64]sourceSubscription // source_id -> subscription
+}
+
+func newAccountRunner(accountID int64, client *telegram.Client, cancel context.CancelFunc) *accountRunner {
+	return &accountRunner{
+		accountID: accountID,
+		client:    client,
+		cancel:    cancel,
+		sources:   map[int64]sourceSubscription{},
+	}
+}
+
+func (r *accountRunner) setSource(src *domainsource.Source, handler pluginsource.Handler) {
+	if src == nil {
+		return
+	}
+	r.sources[src.ID] = sourceSubscription{source: *src, handler: handler}
+}
+
+func (r *accountRunner) removeSource(sourceID int64) bool {
+	delete(r.sources, sourceID)
+	return len(r.sources) == 0
+}
+
+func (r *accountRunner) matchingSubscriptions(msg *tg.Message) []sourceSubscription {
+	out := make([]sourceSubscription, 0, len(r.sources))
+	for _, sub := range r.sources {
+		if matchesSource(msg, &sub.source) {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+// Start 为一个 source 启动监听：同账号复用一个 runner，只增删 source 订阅。
 func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domainsource.Source, handler pluginsource.Handler) error {
+	p.mu.Lock()
+	if r, exists := p.runners[acc.ID]; exists {
+		r.setSource(src, handler)
+		count := len(r.sources)
+		p.mu.Unlock()
+		p.deps.Log.Info("Telegram source 已加入账号 runner", "account", acc.ID, "source", src.ID, "subscriptions", count)
+		return nil
+	}
+	p.mu.Unlock()
+
 	runCtx, cancel := context.WithCancel(context.Background())
 
 	var client *telegram.Client
-	forward := func(runCtx context.Context, e tg.Entities, m tg.MessageClass) {
-		msg, ok := m.(*tg.Message)
-		if !ok || !matchesSource(msg, src) {
-			return
-		}
-		nm := Normalize(src.ID, msg, e)
-		nm.Media = downloadMessageImages(runCtx, client, src.ID, msg, nm.Media)
-		for _, media := range nm.Media {
-			if media.DownloadStatus == "failed" {
-				p.deps.Log.Warn("Telegram 媒体下载失败，按降级文本继续处理", "source", src.ID, "message_id", msg.ID, "media_type", media.Type, "err", media.DownloadError)
-			}
-		}
-		if err := handler(runCtx, nm); err != nil {
-			p.deps.Log.Error("处理 Telegram 消息失败", "source", src.ID, "err", err)
-		}
-	}
-
 	dispatcher := tg.NewUpdateDispatcher()
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
-		forward(runCtx, e, u.Message)
+		p.forwardToSubscriptions(runCtx, acc.ID, client, e, u.Message)
 		return nil
 	})
 	dispatcher.OnNewMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewMessage) error {
-		forward(runCtx, e, u.Message)
+		p.forwardToSubscriptions(runCtx, acc.ID, client, e, u.Message)
 		return nil
 	})
 
@@ -583,11 +619,19 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 		return err
 	}
 
+	runner := newAccountRunner(acc.ID, client, cancel)
+	runner.setSource(src, handler)
+
 	p.mu.Lock()
-	if old, exists := p.running[src.ID]; exists {
-		old()
+	if old, exists := p.runners[acc.ID]; exists {
+		old.setSource(src, handler)
+		count := len(old.sources)
+		p.mu.Unlock()
+		cancel()
+		p.deps.Log.Info("Telegram source 已加入账号 runner", "account", acc.ID, "source", src.ID, "subscriptions", count)
+		return nil
 	}
-	p.running[src.ID] = cancel
+	p.runners[acc.ID] = runner
 	p.mu.Unlock()
 
 	go func() {
@@ -595,13 +639,18 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 			if err := p.ensureAuthorized(ctx, client); err != nil {
 				return err
 			}
-			p.deps.Log.Info("Telegram source 监听中", "source", src.ID, "peer", src.PeerID)
+			p.deps.Log.Info("Telegram account runner 监听中", "account", acc.ID)
 			<-ctx.Done()
 			return ctx.Err()
 		})
 		if err != nil && !errors.Is(err, context.Canceled) {
-			p.deps.Log.Error("Telegram source 运行退出", "source", src.ID, "err", err)
+			p.deps.Log.Error("Telegram account runner 运行退出", "account", acc.ID, "err", err)
 		}
+		p.mu.Lock()
+		if p.runners[acc.ID] == runner {
+			delete(p.runners, acc.ID)
+		}
+		p.mu.Unlock()
 	}()
 
 	return nil
@@ -610,12 +659,48 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 // Stop 停止某 source 的监听。
 func (p *Plugin) Stop(_ context.Context, src *domainsource.Source) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if cancel, ok := p.running[src.ID]; ok {
-		cancel()
-		delete(p.running, src.ID)
+	runner, ok := p.runners[src.AccountID]
+	if !ok {
+		p.mu.Unlock()
+		return nil
+	}
+	empty := runner.removeSource(src.ID)
+	if empty {
+		delete(p.runners, src.AccountID)
+	}
+	p.mu.Unlock()
+	if empty {
+		runner.cancel()
 	}
 	return nil
+}
+
+func (p *Plugin) forwardToSubscriptions(runCtx context.Context, accountID int64, client *telegram.Client, e tg.Entities, m tg.MessageClass) {
+	msg, ok := m.(*tg.Message)
+	if !ok {
+		return
+	}
+
+	p.mu.Lock()
+	runner := p.runners[accountID]
+	var subs []sourceSubscription
+	if runner != nil {
+		subs = runner.matchingSubscriptions(msg)
+	}
+	p.mu.Unlock()
+
+	for _, sub := range subs {
+		nm := Normalize(sub.source.ID, msg, e)
+		nm.Media = downloadMessageImages(runCtx, client, sub.source.ID, msg, nm.Media)
+		for _, media := range nm.Media {
+			if media.DownloadStatus == "failed" {
+				p.deps.Log.Warn("Telegram 媒体下载失败，按降级文本继续处理", "source", sub.source.ID, "message_id", msg.ID, "media_type", media.Type, "err", media.DownloadError)
+			}
+		}
+		if err := sub.handler(runCtx, nm); err != nil {
+			p.deps.Log.Error("处理 Telegram 消息失败", "source", sub.source.ID, "err", err)
+		}
+	}
 }
 
 func (p *Plugin) ensureAuthorized(ctx context.Context, client *telegram.Client) error {
