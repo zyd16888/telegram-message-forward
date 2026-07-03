@@ -522,7 +522,7 @@ v1 使用简单重试策略：
 
 ## 10. 数据模型（v1 全新设计）
 
-v1 使用 PostgreSQL 作为主存储，GORM 作为数据访问层，goose SQL migration 作为唯一 schema 演进机制。本节为全新设计，不沿用 `legacy/initial-poc` 的 SQLite 表结构。
+v1 使用 PostgreSQL 作为主存储，GORM 作为数据访问层，goose SQL migration 作为唯一 schema 演进机制。本节为全新设计，不沿用旧 PoC 的 SQLite 表结构；旧 PoC 已移除，历史实现可从 git 历史查看。
 
 通用约定：
 
@@ -893,7 +893,7 @@ web
   package.json
 ```
 
-以旧项目为参考，在当前仓库内渐进式重建新架构；新代码基于 Go 1.26，保持每个功能阶段可编译、可构建，等新主链路完成后移除旧实现。
+当前仓库已完成从旧 PoC 到新架构的迁移，旧实现已移除；新代码基于 Go 1.26，后续保持每个功能阶段可编译、可构建。
 
 ### 13.1 依赖方向
 
@@ -1138,7 +1138,7 @@ web
 
 ### 13.9 渐进迁移策略
 
-当前旧项目已归档到 `legacy/initial-poc/`，后续按以下顺序迁移：
+旧 PoC 已从仓库移除，历史实现可从 git 历史查看。当前架构已按以下顺序完成主线迁移：
 
 0. 先做端到端 walking skeleton（见 Phase 0）：单账号 CLI 登录（raw gotd/td）→ 监听单个 source → Normalizer → 一条硬编码规则 → 一个 Webhook/WeCom Sink，把一条文本消息端到端转出，验证 gotd/td 适配层、NormalizedMessage、Sink 抽象三者对齐。
 1. 骨架跑通后，再新建完整目标目录结构。
@@ -1220,7 +1220,7 @@ web
 - UI 第一版以管理后台为主。
 - MVP 优先保证文本消息稳定转发和投递可观测。
 - 图片消息作为 v1 后半段能力，文件和复杂媒体后置。
-- 数据库 schema 全新设计，不沿用 legacy POC 的 SQLite 结构。
+- 数据库 schema 全新设计，不沿用旧 PoC 的 SQLite 结构。
 - 敏感数据加密落库（session/secret/proxy/app_hash），API 用 token 哈希鉴权。
 - peer 的 access_hash 持久化缓存（`telegram_peers`）。
 - 模板绑定在 `rule_targets`（规则-渠道关系）上，而非 Rule 本体，以匹配各 Sink 格式能力。
