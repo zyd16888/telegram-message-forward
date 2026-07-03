@@ -4,10 +4,13 @@ package rule
 import (
 	"context"
 	"fmt"
+	"time"
 
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domaintemplate "telegram-message-forward/internal/domain/template"
+	"telegram-message-forward/internal/ruleengine"
 	"telegram-message-forward/internal/ruleengine/condition"
 	"telegram-message-forward/internal/ruleengine/processor"
 )
@@ -55,6 +58,35 @@ type Input struct {
 	StopOnMatch bool
 	SourceIDs   []int64
 	Targets     []domainrule.Target
+}
+
+type PreviewMessage struct {
+	SourceID       int64
+	MessageType    string
+	SenderPeerType string
+	SenderID       int64
+	SenderName     string
+	Text           string
+	Media          []domainmessage.Media
+	OriginalURL    string
+	ReceivedAt     time.Time
+}
+
+type PreviewInput struct {
+	Rule    Input
+	Message PreviewMessage
+}
+
+type PreviewTarget struct {
+	SinkID     int64
+	TemplateID *int64
+}
+
+type PreviewResult struct {
+	Matched       bool
+	ProcessedText string
+	Media         []domainmessage.Media
+	Targets       []PreviewTarget
 }
 
 // Create 创建规则及其来源/目标关联。
@@ -105,6 +137,53 @@ func (s *Service) ConditionDescriptors() []condition.Descriptor {
 // ProcessorDescriptors 返回已注册处理器的后台配置元数据。
 func (s *Service) ProcessorDescriptors() []processor.Descriptor {
 	return processor.Descriptors()
+}
+
+// Preview 用一条手工样例消息预演当前规则草稿，不要求规则先落库。
+func (s *Service) Preview(ctx context.Context, in PreviewInput) (*PreviewResult, error) {
+	r := toRule(0, in.Rule)
+	r.Enabled = true
+	if err := s.validateRuleConfig(r); err != nil {
+		return nil, err
+	}
+	if err := s.validateTargets(ctx, r.Targets); err != nil {
+		return nil, err
+	}
+	msg := &domainmessage.NormalizedMessage{
+		SourceID:       in.Message.SourceID,
+		MessageType:    in.Message.MessageType,
+		SenderPeerType: in.Message.SenderPeerType,
+		SenderID:       in.Message.SenderID,
+		SenderName:     in.Message.SenderName,
+		Text:           in.Message.Text,
+		Media:          in.Message.Media,
+		OriginalURL:    in.Message.OriginalURL,
+		ReceivedAt:     in.Message.ReceivedAt,
+	}
+	if msg.MessageType == "" {
+		msg.MessageType = "text"
+	}
+	if msg.ReceivedAt.IsZero() {
+		msg.ReceivedAt = time.Now()
+	}
+	matches, err := ruleengine.NewEngine().Evaluate(ctx, msg, []*domainrule.Rule{r})
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return &PreviewResult{Matched: false, ProcessedText: msg.Text, Media: msg.Media}, nil
+	}
+	match := matches[0]
+	targets := make([]PreviewTarget, 0, len(match.Targets))
+	for _, target := range match.Targets {
+		targets = append(targets, PreviewTarget{SinkID: target.SinkID, TemplateID: target.TemplateID})
+	}
+	return &PreviewResult{
+		Matched:       true,
+		ProcessedText: match.Message.Text,
+		Media:         match.Message.Media,
+		Targets:       targets,
+	}, nil
 }
 
 func toRule(id int64, in Input) *domainrule.Rule {

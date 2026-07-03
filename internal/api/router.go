@@ -124,6 +124,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		{
 			rules.GET("", deps.Rule.List)
 			rules.GET("/meta", deps.Rule.Meta)
+			rules.POST("/preview", deps.Rule.Preview)
 			rules.POST("", deps.Rule.Create)
 			rules.GET("/:id", deps.Rule.Get)
 			rules.PUT("/:id", deps.Rule.Update)

@@ -434,6 +434,34 @@ type RuleRequest struct {
 	Targets     []RuleTargetDTO              `json:"targets"`
 }
 
+type RulePreviewMessageRequest struct {
+	SourceID       int64                 `json:"source_id"`
+	MessageType    string                `json:"message_type"`
+	SenderPeerType string                `json:"sender_peer_type"`
+	SenderID       int64                 `json:"sender_id"`
+	SenderName     string                `json:"sender_name"`
+	Text           string                `json:"text"`
+	Media          []domainmessage.Media `json:"media,omitempty"`
+	OriginalURL    string                `json:"original_url,omitempty"`
+}
+
+type RulePreviewRequest struct {
+	Rule    RuleRequest               `json:"rule" binding:"required"`
+	Message RulePreviewMessageRequest `json:"message" binding:"required"`
+}
+
+type RulePreviewTargetDTO struct {
+	SinkID     int64  `json:"sink_id"`
+	TemplateID *int64 `json:"template_id,omitempty"`
+}
+
+type RulePreviewDTO struct {
+	Matched       bool                   `json:"matched"`
+	ProcessedText string                 `json:"processed_text"`
+	Media         []domainmessage.Media  `json:"media,omitempty"`
+	Targets       []RulePreviewTargetDTO `json:"targets"`
+}
+
 // TargetsToDomain 转换目标列表。
 func (r *RuleRequest) TargetsToDomain() []domainrule.Target {
 	out := make([]domainrule.Target, 0, len(r.Targets))

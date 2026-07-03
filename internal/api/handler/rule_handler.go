@@ -41,6 +41,41 @@ func (h *RuleHandler) Meta(c *gin.Context) {
 	}})
 }
 
+// Preview POST /rules/preview
+func (h *RuleHandler) Preview(c *gin.Context) {
+	var req dto.RulePreviewRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	result, err := h.svc.Preview(c.Request.Context(), apprule.PreviewInput{
+		Rule: toRuleInput(req.Rule),
+		Message: apprule.PreviewMessage{
+			SourceID:       req.Message.SourceID,
+			MessageType:    req.Message.MessageType,
+			SenderPeerType: req.Message.SenderPeerType,
+			SenderID:       req.Message.SenderID,
+			SenderName:     req.Message.SenderName,
+			Text:           req.Message.Text,
+			Media:          req.Message.Media,
+			OriginalURL:    req.Message.OriginalURL,
+		},
+	})
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	targets := make([]dto.RulePreviewTargetDTO, 0, len(result.Targets))
+	for _, target := range result.Targets {
+		targets = append(targets, dto.RulePreviewTargetDTO{SinkID: target.SinkID, TemplateID: target.TemplateID})
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.RulePreviewDTO{
+		Matched:       result.Matched,
+		ProcessedText: result.ProcessedText,
+		Media:         result.Media,
+		Targets:       targets,
+	}})
+}
+
 // Get GET /rules/:id
 func (h *RuleHandler) Get(c *gin.Context) {
 	id, ok := parseID(c)
