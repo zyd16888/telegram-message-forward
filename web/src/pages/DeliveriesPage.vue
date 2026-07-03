@@ -12,9 +12,15 @@ const message = useMessage()
 const deliveries = shallowRef<Delivery[]>([])
 const loading = shallowRef(false)
 const status = shallowRef('')
+const ruleId = shallowRef<number | null>(null)
+const sourceId = shallowRef<number | null>(null)
+const sinkId = shallowRef<number | null>(null)
 const page = shallowRef(1)
 const pageSize = shallowRef(20)
 const total = shallowRef(0)
+const detailShow = shallowRef(false)
+const detailLoading = shallowRef(false)
+const detail = shallowRef<Delivery | null>(null)
 
 const statusOptions = [
   { label: '全部', value: '' },
@@ -83,7 +89,7 @@ const pagination = computed<PaginationProps>(() => ({
 async function load() {
   loading.value = true
   try {
-    const result = await deliveriesApi.page(status.value, pageSize.value, (page.value - 1) * pageSize.value)
+    const result = await deliveriesApi.page(status.value, pageSize.value, (page.value - 1) * pageSize.value, deliveryFilters())
     deliveries.value = result.data
     total.value = result.total
   } catch (e) {
@@ -91,6 +97,14 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function deliveryFilters(): Record<string, number> {
+  const out: Record<string, number> = {}
+  if (ruleId.value) out.rule_id = ruleId.value
+  if (sourceId.value) out.source_id = sourceId.value
+  if (sinkId.value) out.sink_id = sinkId.value
+  return out
 }
 
 async function reloadFromFirstPage() {
@@ -105,6 +119,29 @@ async function retry(row: Delivery) {
     await load()
   } catch (e) {
     message.error('重试失败：' + errText(e))
+  }
+}
+
+async function retryDeadBatch() {
+  try {
+    const result = await deliveriesApi.retryDead()
+    message.success(`已重新入队 ${result.requeued} 条 dead 任务`)
+    await reloadFromFirstPage()
+  } catch (e) {
+    message.error('批量重试失败：' + errText(e))
+  }
+}
+
+async function openDetail(row: Delivery) {
+  detailShow.value = true
+  detailLoading.value = true
+  detail.value = null
+  try {
+    detail.value = await deliveriesApi.get(row.id)
+  } catch (e) {
+    message.error('加载详情失败：' + errText(e))
+  } finally {
+    detailLoading.value = false
   }
 }
 
@@ -167,6 +204,11 @@ function renderMessage(row: Delivery) {
   )
 }
 
+function jsonText(value: unknown): string {
+  if (value === undefined || value === null || value === '') return ''
+  return JSON.stringify(value, null, 2)
+}
+
 const columns: DataTableColumns<Delivery> = [
   {
     title: '来源',
@@ -205,17 +247,20 @@ const columns: DataTableColumns<Delivery> = [
   {
     title: '操作',
     key: 'actions',
-    width: 90,
+    width: 150,
     render: (r) =>
-      h(
-        NButton,
-        {
-          size: 'small',
-          disabled: !['dead', 'failed'].includes(r.status),
-          onClick: () => retry(r),
-        },
-        { default: () => '重试' },
-      ),
+      h('div', { class: 'action-row' }, [
+        h(NButton, { size: 'small', secondary: true, onClick: () => openDetail(r) }, { default: () => '详情' }),
+        h(
+          NButton,
+          {
+            size: 'small',
+            disabled: !['dead', 'failed'].includes(r.status),
+            onClick: () => retry(r),
+          },
+          { default: () => '重试' },
+        ),
+      ]),
   },
 ]
 
@@ -226,6 +271,27 @@ onMounted(load)
   <n-space vertical size="large">
     <PageHeader title="投递记录" desc="查看消息投递结果，失败可重新入队" icon="deliveries">
       <template #actions>
+        <n-input-number
+          v-model:value="sourceId"
+          class="id-filter"
+          clearable
+          placeholder="Source ID"
+          @update:value="reloadFromFirstPage"
+        />
+        <n-input-number
+          v-model:value="ruleId"
+          class="id-filter"
+          clearable
+          placeholder="Rule ID"
+          @update:value="reloadFromFirstPage"
+        />
+        <n-input-number
+          v-model:value="sinkId"
+          class="id-filter"
+          clearable
+          placeholder="Sink ID"
+          @update:value="reloadFromFirstPage"
+        />
         <n-select
           v-model:value="status"
           class="status-filter"
@@ -236,6 +302,7 @@ onMounted(load)
           <template #icon><ClayIcon name="refresh" :size="16" /></template>
           刷新
         </n-button>
+        <n-button secondary type="warning" @click="retryDeadBatch">批量重试 dead</n-button>
       </template>
     </PageHeader>
     <n-data-table
@@ -247,12 +314,45 @@ onMounted(load)
       :pagination="pagination"
       :scroll-x="1200"
     />
+    <n-modal v-model:show="detailShow" preset="card" title="投递详情" class="delivery-modal" :style="{ width: 'min(760px, calc(100vw - 32px))' }">
+      <n-spin :show="detailLoading">
+        <n-empty v-if="!detail" description="暂无详情" />
+        <div v-else class="detail-stack">
+          <div class="detail-grid">
+            <div><span>状态</span><strong>{{ statusLabel[detail.status] ?? detail.status }}</strong></div>
+            <div><span>任务</span><strong>#{{ detail.id }}</strong></div>
+            <div><span>来源</span><strong>{{ detail.source_name || `#${detail.message_id}` }}</strong></div>
+            <div><span>目标</span><strong>{{ detail.sink_name || `#${detail.sink_id}` }}</strong></div>
+          </div>
+          <section>
+            <div class="section-title">消息快照</div>
+            <div class="detail-text">{{ messageText(detail) }}</div>
+          </section>
+          <section>
+            <div class="section-title">Attempts</div>
+            <n-empty v-if="!detail.attempts?.length" size="small" description="暂无尝试记录" />
+            <div v-for="attempt in detail.attempts" :key="attempt.id" class="attempt-item">
+              <div class="attempt-head">
+                <n-tag size="small" :type="attempt.status === 'success' ? 'success' : 'error'">#{{ attempt.attempt_no }} {{ attempt.status }}</n-tag>
+                <n-text depth="3">{{ formatTime(attempt.finished_at || attempt.created_at) }}</n-text>
+              </div>
+              <n-text v-if="attempt.error" type="error">{{ attempt.error }}</n-text>
+              <n-code v-if="jsonText(attempt.response_summary)" :code="jsonText(attempt.response_summary)" language="json" />
+            </div>
+          </section>
+        </div>
+      </n-spin>
+    </n-modal>
   </n-space>
 </template>
 
 <style scoped>
 .status-filter {
   width: 170px;
+}
+
+.id-filter {
+  width: 130px;
 }
 
 .cell-stack {
@@ -294,10 +394,78 @@ onMounted(load)
   word-break: break-word;
 }
 
+.action-row {
+  display: flex;
+  gap: 8px;
+}
+
+.detail-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  background: var(--clay-surface-2);
+}
+
+.detail-grid span {
+  color: var(--clay-muted);
+  font-size: 12px;
+}
+
+.section-title {
+  margin-bottom: 8px;
+  color: var(--clay-text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.detail-text {
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  white-space: pre-wrap;
+}
+
+.attempt-item {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--clay-border);
+}
+
+.attempt-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 @media (max-width: 640px) {
   .status-filter {
     flex: 1;
     width: auto;
+  }
+
+  .id-filter {
+    flex: 1;
+    width: auto;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

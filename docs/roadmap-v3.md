@@ -268,13 +268,13 @@ v3 优先完成六条主线：
 
 目标：让用户能解释“为什么没收到、发到哪了、为什么失败、下一次什么时候重试”。
 
-- [ ] Delivery 详情页：
+- [x] Delivery 详情页：
   - task 基本信息
   - message snapshot
   - rule/sink/template
   - attempts 列表
   - 每次 attempt 的 started_at/finished_at/status/error/response_summary
-- [ ] Delivery 列表增强：
+- [x] Delivery 列表增强：
   - 支持 rule/source/sink 过滤。
   - 支持 dead/retrying 快速筛选。
   - 支持批量重试 dead。
@@ -297,6 +297,8 @@ v3 优先完成六条主线：
 - 排查一条失败投递不需要查数据库。
 - Dashboard 能看到近 24 小时投递概况。
 - Source 掉线/未授权能在 UI 中看到。
+
+进度说明（2026-07-03）：Delivery 可观测性已完成并验证 `go test ./...`、`go vet ./...`、`go build ./...`、`cd web && npm run build`。Delivery 列表支持 status/rule/source/sink 过滤，支持批量重试 dead；详情弹窗展示 message snapshot 和 attempts。Source runner 状态、Sink 最近测试结果、Dashboard 时间窗口统计仍待后续阶段完成。
 
 ## 3. 历史补拉待办
 

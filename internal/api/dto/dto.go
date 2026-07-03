@@ -475,28 +475,42 @@ func (r *RuleRequest) TargetsToDomain() []domainrule.Target {
 
 // DeliveryDTO 是投递任务响应。
 type DeliveryDTO struct {
-	ID             int64      `json:"id"`
-	MessageID      int64      `json:"message_id"`
-	RuleID         int64      `json:"rule_id"`
-	SinkID         int64      `json:"sink_id"`
-	TemplateID     *int64     `json:"template_id,omitempty"`
-	Status         string     `json:"status"`
-	AttemptCount   int        `json:"attempt_count"`
-	MaxAttempts    int        `json:"max_attempts"`
-	NextRetryAt    *time.Time `json:"next_retry_at,omitempty"`
-	LastError      string     `json:"last_error,omitempty"`
-	MessageText    string     `json:"message_text,omitempty"`
-	MessageType    string     `json:"message_type,omitempty"`
-	SenderName     string     `json:"sender_name,omitempty"`
-	SourceName     string     `json:"source_name,omitempty"`
-	SourceUsername string     `json:"source_username,omitempty"`
-	SourcePeerType string     `json:"source_peer_type,omitempty"`
-	SinkName       string     `json:"sink_name,omitempty"`
-	SinkType       string     `json:"sink_type,omitempty"`
-	RuleName       string     `json:"rule_name,omitempty"`
-	TemplateName   string     `json:"template_name,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID             int64                `json:"id"`
+	MessageID      int64                `json:"message_id"`
+	RuleID         int64                `json:"rule_id"`
+	SinkID         int64                `json:"sink_id"`
+	TemplateID     *int64               `json:"template_id,omitempty"`
+	Status         string               `json:"status"`
+	AttemptCount   int                  `json:"attempt_count"`
+	MaxAttempts    int                  `json:"max_attempts"`
+	NextRetryAt    *time.Time           `json:"next_retry_at,omitempty"`
+	LastError      string               `json:"last_error,omitempty"`
+	MessageText    string               `json:"message_text,omitempty"`
+	MessageType    string               `json:"message_type,omitempty"`
+	SenderName     string               `json:"sender_name,omitempty"`
+	SourceName     string               `json:"source_name,omitempty"`
+	SourceUsername string               `json:"source_username,omitempty"`
+	SourcePeerType string               `json:"source_peer_type,omitempty"`
+	SinkName       string               `json:"sink_name,omitempty"`
+	SinkType       string               `json:"sink_type,omitempty"`
+	RuleName       string               `json:"rule_name,omitempty"`
+	TemplateName   string               `json:"template_name,omitempty"`
+	Attempts       []DeliveryAttemptDTO `json:"attempts,omitempty"`
+	CreatedAt      time.Time            `json:"created_at"`
+	UpdatedAt      time.Time            `json:"updated_at"`
+}
+
+type DeliveryAttemptDTO struct {
+	ID              int64           `json:"id"`
+	DeliveryTaskID  int64           `json:"delivery_task_id"`
+	AttemptNo       int             `json:"attempt_no"`
+	Status          string          `json:"status"`
+	RequestSummary  json.RawMessage `json:"request_summary,omitempty"`
+	ResponseSummary json.RawMessage `json:"response_summary,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	StartedAt       *time.Time      `json:"started_at,omitempty"`
+	FinishedAt      *time.Time      `json:"finished_at,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
 }
 
 // NewDeliveryDTO 从 domain 投递任务构造 DTO。
@@ -520,6 +534,7 @@ func NewDeliveryDTO(t *domaindelivery.Task) DeliveryDTO {
 // NewDeliveryViewDTO 从投递任务及其关联数据构造页面友好的 DTO。
 func NewDeliveryViewDTO(
 	t *domaindelivery.Task,
+	attempts []*domaindelivery.Attempt,
 	msg *domainmessage.NormalizedMessage,
 	src *domainsource.Source,
 	sink *domainsink.Sink,
@@ -527,6 +542,12 @@ func NewDeliveryViewDTO(
 	tpl *domaintemplate.Template,
 ) DeliveryDTO {
 	out := NewDeliveryDTO(t)
+	if len(attempts) > 0 {
+		out.Attempts = make([]DeliveryAttemptDTO, 0, len(attempts))
+		for _, attempt := range attempts {
+			out.Attempts = append(out.Attempts, NewDeliveryAttemptDTO(attempt))
+		}
+	}
 	if msg != nil {
 		out.MessageText = msg.Text
 		out.MessageType = msg.MessageType
@@ -548,6 +569,21 @@ func NewDeliveryViewDTO(
 		out.TemplateName = tpl.Name
 	}
 	return out
+}
+
+func NewDeliveryAttemptDTO(a *domaindelivery.Attempt) DeliveryAttemptDTO {
+	return DeliveryAttemptDTO{
+		ID:              a.ID,
+		DeliveryTaskID:  a.DeliveryTaskID,
+		AttemptNo:       a.AttemptNo,
+		Status:          string(a.Status),
+		RequestSummary:  json.RawMessage(a.RequestSummary),
+		ResponseSummary: json.RawMessage(a.ResponseSummary),
+		Error:           a.Error,
+		StartedAt:       a.StartedAt,
+		FinishedAt:      a.FinishedAt,
+		CreatedAt:       a.CreatedAt,
+	}
 }
 
 // --- API Token ---

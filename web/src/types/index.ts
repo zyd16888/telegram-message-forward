@@ -243,8 +243,22 @@ export interface Delivery {
   sink_type?: string
   rule_name?: string
   template_name?: string
+  attempts?: DeliveryAttempt[]
   created_at: string
   updated_at: string
+}
+
+export interface DeliveryAttempt {
+  id: number
+  delivery_task_id: number
+  attempt_no: number
+  status: string
+  request_summary?: unknown
+  response_summary?: unknown
+  error?: string
+  started_at?: string
+  finished_at?: string
+  created_at: string
 }
 
 export interface ApiToken {

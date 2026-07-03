@@ -134,6 +134,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		deliveries := v1.Group("/deliveries")
 		{
 			deliveries.GET("", deps.Delivery.List)
+			deliveries.POST("/retry-dead", deps.Delivery.RetryDeadBatch)
 			deliveries.GET("/:id", deps.Delivery.Get)
 			deliveries.POST("/:id/retry", deps.Delivery.Retry)
 		}

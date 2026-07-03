@@ -273,15 +273,17 @@ export const rulesApi = {
 
 // --- Deliveries ---
 export const deliveriesApi = {
-  list: (status = '', limit = 50, offset = 0) =>
+  list: (status = '', limit = 50, offset = 0, filters: Record<string, unknown> = {}) =>
     http
-      .get<ApiList<Delivery>>('/deliveries', { params: { status, limit, offset } })
+      .get<ApiList<Delivery>>('/deliveries', { params: { status, limit, offset, ...filters } })
       .then((r) => r.data.data),
-  page: (status = '', limit = 50, offset = 0) =>
+  page: (status = '', limit = 50, offset = 0, filters: Record<string, unknown> = {}) =>
     http
-      .get<ApiPage<Delivery>>('/deliveries', { params: { status, limit, offset } })
+      .get<ApiPage<Delivery>>('/deliveries', { params: { status, limit, offset, ...filters } })
       .then((r) => ({ data: r.data.data, total: r.data.total ?? r.data.data.length })),
+  get: (id: number) => http.get<ApiItem<Delivery>>(`/deliveries/${id}`).then((r) => r.data.data),
   retry: (id: number) => http.post(`/deliveries/${id}/retry`),
+  retryDead: () => http.post<{ requeued: number }>('/deliveries/retry-dead').then((r) => r.data),
 }
 
 // --- Tokens ---

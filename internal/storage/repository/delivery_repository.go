@@ -141,6 +141,26 @@ func (r *DeliveryRepository) Requeue(ctx context.Context, id int64) error {
 		}).Error
 }
 
+// RequeueByStatus 将指定终态的一批任务重置为 pending，返回影响行数。
+func (r *DeliveryRepository) RequeueByStatus(ctx context.Context, status domaindelivery.Status) (int64, error) {
+	if status == "" {
+		status = domaindelivery.StatusDead
+	}
+	res := r.db.WithContext(ctx).
+		Model(&model.DeliveryTask{}).
+		Where("status = ?", string(status)).
+		Updates(map[string]any{
+			"status":        string(domaindelivery.StatusPending),
+			"attempt_count": 0,
+			"next_retry_at": nil,
+			"locked_at":     nil,
+			"locked_by":     "",
+			"last_error":    "",
+			"updated_at":    time.Now(),
+		})
+	return res.RowsAffected, res.Error
+}
+
 // AddAttempt 追加一次投递尝试记录。
 func (r *DeliveryRepository) AddAttempt(ctx context.Context, a *domaindelivery.Attempt) error {
 	m := &model.DeliveryAttempt{
@@ -158,6 +178,22 @@ func (r *DeliveryRepository) AddAttempt(ctx context.Context, a *domaindelivery.A
 	}
 	a.ID = m.ID
 	return nil
+}
+
+// ListAttempts 查询某投递任务的全部尝试记录。
+func (r *DeliveryRepository) ListAttempts(ctx context.Context, taskID int64) ([]*domaindelivery.Attempt, error) {
+	var ms []model.DeliveryAttempt
+	if err := r.db.WithContext(ctx).
+		Where("delivery_task_id = ?", taskID).
+		Order("attempt_no ASC, id ASC").
+		Find(&ms).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domaindelivery.Attempt, 0, len(ms))
+	for i := range ms {
+		out = append(out, toAttemptDomain(&ms[i]))
+	}
+	return out, nil
 }
 
 // GetByID 按 id 查询投递任务。
@@ -197,12 +233,55 @@ func (r *DeliveryRepository) Count(ctx context.Context, status domaindelivery.St
 	return count, err
 }
 
+// ListByQuery 按复合条件分页查询投递任务。
+func (r *DeliveryRepository) ListByQuery(ctx context.Context, q domaindelivery.Query) ([]*domaindelivery.Task, error) {
+	if q.Limit <= 0 {
+		q.Limit = 50
+	}
+	var ms []model.DeliveryTask
+	db := r.deliveryQuery(ctx, q)
+	if err := db.Order("delivery_tasks.id DESC").Limit(q.Limit).Offset(q.Offset).Find(&ms).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domaindelivery.Task, 0, len(ms))
+	for i := range ms {
+		task, err := toDeliveryDomain(&ms[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, task)
+	}
+	return out, nil
+}
+
+// CountByQuery 按复合条件统计投递任务。
+func (r *DeliveryRepository) CountByQuery(ctx context.Context, q domaindelivery.Query) (int64, error) {
+	var count int64
+	err := r.deliveryQuery(ctx, q).Count(&count).Error
+	return count, err
+}
+
 func (r *DeliveryRepository) deliveryStatusQuery(ctx context.Context, status domaindelivery.Status) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&model.DeliveryTask{})
 	if status != "" {
 		return q.Where("status = ?", string(status))
 	}
 	return q.Where("status <> ?", string(domaindelivery.StatusCancelled))
+}
+
+func (r *DeliveryRepository) deliveryQuery(ctx context.Context, q domaindelivery.Query) *gorm.DB {
+	db := r.deliveryStatusQuery(ctx, q.Status)
+	if q.RuleID > 0 {
+		db = db.Where("delivery_tasks.rule_id = ?", q.RuleID)
+	}
+	if q.SinkID > 0 {
+		db = db.Where("delivery_tasks.sink_id = ?", q.SinkID)
+	}
+	if q.SourceID > 0 {
+		db = db.Joins("JOIN messages ON messages.id = delivery_tasks.message_id").
+			Where("messages.source_id = ?", q.SourceID)
+	}
+	return db
 }
 
 func toDeliveryModel(t *domaindelivery.Task) (*model.DeliveryTask, error) {
@@ -251,6 +330,21 @@ func toDeliveryDomain(m *model.DeliveryTask) (*domaindelivery.Task, error) {
 		CreatedAt:       m.CreatedAt,
 		UpdatedAt:       m.UpdatedAt,
 	}, nil
+}
+
+func toAttemptDomain(m *model.DeliveryAttempt) *domaindelivery.Attempt {
+	return &domaindelivery.Attempt{
+		ID:              m.ID,
+		DeliveryTaskID:  m.DeliveryTaskID,
+		AttemptNo:       m.AttemptNo,
+		Status:          domaindelivery.AttemptStatus(m.Status),
+		RequestSummary:  m.RequestSummary,
+		ResponseSummary: m.ResponseSummary,
+		Error:           m.Error,
+		StartedAt:       m.StartedAt,
+		FinishedAt:      m.FinishedAt,
+		CreatedAt:       m.CreatedAt,
+	}
 }
 
 func marshalMessageSnapshot(m *domainmessage.NormalizedMessage) (datatypes.JSON, error) {

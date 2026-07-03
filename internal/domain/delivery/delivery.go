@@ -63,6 +63,16 @@ type Attempt struct {
 	CreatedAt       time.Time
 }
 
+// Query 是投递列表过滤条件。0 值表示不过滤。
+type Query struct {
+	Status   Status
+	RuleID   int64
+	SourceID int64
+	SinkID   int64
+	Limit    int
+	Offset   int
+}
+
 // Repository 是投递任务仓储接口。
 type Repository interface {
 	// Create 需按 (message_id, rule_id, sink_id) 幂等。

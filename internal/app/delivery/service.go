@@ -35,11 +35,25 @@ type DisplayDeps struct {
 // View 是投递记录及其展示关联数据。
 type View struct {
 	Task     *domaindelivery.Task
+	Attempts []*domaindelivery.Attempt
 	Message  *domainmessage.NormalizedMessage
 	Source   *domainsource.Source
 	Sink     *domainsink.Sink
 	Rule     *domainrule.Rule
 	Template *domaintemplate.Template
+}
+
+type queryRepository interface {
+	ListByQuery(ctx context.Context, q domaindelivery.Query) ([]*domaindelivery.Task, error)
+	CountByQuery(ctx context.Context, q domaindelivery.Query) (int64, error)
+}
+
+type attemptRepository interface {
+	ListAttempts(ctx context.Context, taskID int64) ([]*domaindelivery.Attempt, error)
+}
+
+type bulkRequeueRepository interface {
+	RequeueByStatus(ctx context.Context, status domaindelivery.Status) (int64, error)
 }
 
 // NewService 创建投递服务。
@@ -60,14 +74,35 @@ func (s *Service) List(ctx context.Context, status domaindelivery.Status, limit,
 	return s.tasks.List(ctx, status, limit, offset)
 }
 
+// ListByQuery 按复合条件分页查询投递任务。
+func (s *Service) ListByQuery(ctx context.Context, q domaindelivery.Query) ([]*domaindelivery.Task, error) {
+	if repo, ok := s.tasks.(queryRepository); ok {
+		return repo.ListByQuery(ctx, q)
+	}
+	return s.tasks.List(ctx, q.Status, q.Limit, q.Offset)
+}
+
 // Count 统计投递任务数量。
 func (s *Service) Count(ctx context.Context, status domaindelivery.Status) (int64, error) {
 	return s.tasks.Count(ctx, status)
 }
 
+// CountByQuery 按复合条件统计投递任务。
+func (s *Service) CountByQuery(ctx context.Context, q domaindelivery.Query) (int64, error) {
+	if repo, ok := s.tasks.(queryRepository); ok {
+		return repo.CountByQuery(ctx, q)
+	}
+	return s.tasks.Count(ctx, q.Status)
+}
+
 // ListViews 按状态分页查询投递任务，并补齐页面展示所需的关联名称与消息内容。
 func (s *Service) ListViews(ctx context.Context, status domaindelivery.Status, limit, offset int) ([]*View, error) {
-	tasks, err := s.List(ctx, status, limit, offset)
+	return s.ListViewsByQuery(ctx, domaindelivery.Query{Status: status, Limit: limit, Offset: offset})
+}
+
+// ListViewsByQuery 按复合条件分页查询投递任务，并补齐页面展示所需关联数据。
+func (s *Service) ListViewsByQuery(ctx context.Context, q domaindelivery.Query) ([]*View, error) {
+	tasks, err := s.ListByQuery(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +133,13 @@ func (s *Service) GetView(ctx context.Context, id int64) (*View, error) {
 
 func (s *Service) enrich(ctx context.Context, task *domaindelivery.Task) (*View, error) {
 	view := &View{Task: task}
+	if repo, ok := s.tasks.(attemptRepository); ok {
+		attempts, err := repo.ListAttempts(ctx, task.ID)
+		if err != nil {
+			return nil, fmt.Errorf("查询投递尝试失败 task_id=%d: %w", task.ID, err)
+		}
+		view.Attempts = attempts
+	}
 
 	if task.MessageSnapshot != nil {
 		view.Message = task.MessageSnapshot
@@ -158,4 +200,12 @@ func (s *Service) RetryDead(ctx context.Context, id int64) error {
 	default:
 		return fmt.Errorf("任务状态 %s 不可手动重试（仅 dead/failed/cancelled 可重试）", task.Status)
 	}
+}
+
+// RetryDeadBatch 批量重试 dead 任务。
+func (s *Service) RetryDeadBatch(ctx context.Context) (int64, error) {
+	if repo, ok := s.tasks.(bulkRequeueRepository); ok {
+		return repo.RequeueByStatus(ctx, domaindelivery.StatusDead)
+	}
+	return 0, fmt.Errorf("当前存储实现不支持批量重试")
 }

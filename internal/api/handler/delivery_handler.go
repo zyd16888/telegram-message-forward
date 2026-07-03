@@ -23,23 +23,28 @@ func NewDeliveryHandler(svc *appdelivery.Service) *DeliveryHandler {
 
 // List GET /deliveries?status=&limit=&offset=
 func (h *DeliveryHandler) List(c *gin.Context) {
-	status := domaindelivery.Status(c.Query("status"))
-	limit := parseIntDefault(c.Query("limit"), 50)
-	offset := parseIntDefault(c.Query("offset"), 0)
+	query := domaindelivery.Query{
+		Status:   domaindelivery.Status(c.Query("status")),
+		RuleID:   parseInt64Default(c.Query("rule_id"), 0),
+		SourceID: parseInt64Default(c.Query("source_id"), 0),
+		SinkID:   parseInt64Default(c.Query("sink_id"), 0),
+		Limit:    parseIntDefault(c.Query("limit"), 50),
+		Offset:   parseIntDefault(c.Query("offset"), 0),
+	}
 
-	views, err := h.svc.ListViews(c.Request.Context(), status, limit, offset)
+	views, err := h.svc.ListViewsByQuery(c.Request.Context(), query)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	total, err := h.svc.Count(c.Request.Context(), status)
+	total, err := h.svc.CountByQuery(c.Request.Context(), query)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
 	out := make([]dto.DeliveryDTO, 0, len(views))
 	for _, v := range views {
-		out = append(out, dto.NewDeliveryViewDTO(v.Task, v.Message, v.Source, v.Sink, v.Rule, v.Template))
+		out = append(out, dto.NewDeliveryViewDTO(v.Task, v.Attempts, v.Message, v.Source, v.Sink, v.Rule, v.Template))
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out, "total": total})
 }
@@ -55,7 +60,7 @@ func (h *DeliveryHandler) Get(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": dto.NewDeliveryViewDTO(v.Task, v.Message, v.Source, v.Sink, v.Rule, v.Template)})
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewDeliveryViewDTO(v.Task, v.Attempts, v.Message, v.Source, v.Sink, v.Rule, v.Template)})
 }
 
 // Retry POST /deliveries/:id/retry — 手动重试终态任务。
@@ -71,11 +76,32 @@ func (h *DeliveryHandler) Retry(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "requeued"})
 }
 
+// RetryDeadBatch POST /deliveries/retry-dead — 批量重试 dead 任务。
+func (h *DeliveryHandler) RetryDeadBatch(c *gin.Context) {
+	count, err := h.svc.RetryDeadBatch(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"requeued": count})
+}
+
 func parseIntDefault(s string, def int) int {
 	if s == "" {
 		return def
 	}
 	v, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+func parseInt64Default(s string, def int64) int64 {
+	if s == "" {
+		return def
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return def
 	}
