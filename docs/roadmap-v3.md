@@ -232,7 +232,7 @@ v3 优先完成六条主线：
 推荐顺序：
 
 1. 飞书 Sink（已完成自定义机器人 webhook）
-2. 邮件 Sink
+2. 邮件 Sink（已完成 SMTP）
 3. ntfy Sink
 4. Bark Sink
 5. Gotify Sink
@@ -248,6 +248,13 @@ v3 优先完成六条主线：
 - [x] 飞书 Sink 连通性测试。
 - [x] 飞书 Sink 单测。
 - [x] 飞书 Sink 文档矩阵更新。
+- [x] 邮件 Sink 插件实现。
+- [x] 邮件 Sink capability 声明。
+- [x] 邮件 Sink descriptor 表单元数据。
+- [x] 邮件 Sink 配置校验。
+- [x] 邮件 Sink 连通性测试。
+- [x] 邮件 Sink 单测。
+- [x] 邮件 Sink 文档矩阵更新。
 
 每个 Source 必须包含：
 
