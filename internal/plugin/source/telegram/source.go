@@ -74,6 +74,7 @@ func (p *Plugin) buildClient(acc *domainaccount.Account, update telegram.UpdateH
 		Proxy:         acc.Proxy,
 		SessionStore:  store,
 		UpdateHandler: update,
+		Log:           p.deps.Log,
 	})
 }
 

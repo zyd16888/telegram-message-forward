@@ -1,9 +1,9 @@
 package telegram
 
 import (
+	"log/slog"
 	"time"
 
-	"github.com/gotd/contrib/middleware/floodwait"
 	"github.com/gotd/contrib/middleware/ratelimit"
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
@@ -27,6 +27,9 @@ type ClientConfig struct {
 	// RateLimit / RateBurst 控制对 Telegram 的请求速率，零值使用保守默认。
 	RateLimit rate.Limit
 	RateBurst int
+
+	// Log 用于记录 FLOOD_WAIT 等待事件；为空则使用 slog.Default()。
+	Log *slog.Logger
 }
 
 // NewClient 按配置构建 gotd 客户端（含 FLOOD_WAIT 处理与限流 middleware）。
@@ -48,7 +51,7 @@ func NewClient(cfg ClientConfig) (*telegram.Client, error) {
 	opts := telegram.Options{
 		SessionStorage: cfg.SessionStore,
 		Middlewares: []telegram.Middleware{
-			floodwait.NewSimpleWaiter(),
+			newFloodWaitMiddleware(cfg.Log),
 			ratelimit.New(limit, burst),
 		},
 		Device: telegram.DeviceConfig{
