@@ -11,6 +11,7 @@ import type {
   Me,
   Rule,
   RuleMeta,
+  RulePreviewResult,
   SharedProxy,
   Sink,
   SinkDescriptor,
@@ -265,6 +266,8 @@ export const rulesApi = {
     http.post<ApiItem<Rule>>('/rules', body).then((r) => r.data.data),
   update: (id: number, body: Record<string, unknown>) =>
     http.put<ApiItem<Rule>>(`/rules/${id}`, body).then((r) => r.data.data),
+  preview: (body: Record<string, unknown>) =>
+    http.post<ApiItem<RulePreviewResult>>('/rules/preview', body).then((r) => r.data.data),
   remove: (id: number) => http.delete(`/rules/${id}`),
 }
 

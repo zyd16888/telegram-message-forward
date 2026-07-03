@@ -9,6 +9,7 @@ import type {
   Rule,
   RuleInitialDraft,
   RuleItemDescriptor,
+  RulePreviewResult,
   RuleTarget,
   Sink,
   Source,
@@ -44,12 +45,35 @@ const form = reactive({
   source_ids: [] as number[],
   targets: [] as RuleTarget[],
 })
+const preview = reactive({
+  loading: false,
+  source_id: null as number | null,
+  message_type: 'text',
+  sender_peer_type: 'channel',
+  sender_id: null as number | null,
+  sender_name: '',
+  text: '这是一条规则预演消息',
+  result: null as RulePreviewResult | null,
+  error: '',
+})
 
 const editing = computed(() => Boolean(props.rule))
 const sourceOptions = computed(() => props.sources.map((source) => ({ label: `${source.name} (#${source.id})`, value: source.id })))
 const sinkOptions = computed(() => props.sinks.map((sink) => ({ label: `${sink.name} (${sink.type})`, value: sink.id })))
 const conditionOptions = computed(() => props.conditionDescriptors.map((item) => ({ label: item.label, value: item.type })))
 const processorOptions = computed(() => props.processorDescriptors.map((item) => ({ label: item.label, value: item.type })))
+const messageTypeOptions = [
+  { label: '文本', value: 'text' },
+  { label: '图片', value: 'photo' },
+  { label: '图片文件', value: 'image' },
+  { label: '文档', value: 'document' },
+  { label: '视频', value: 'video' },
+]
+const senderTypeOptions = [
+  { label: '用户', value: 'user' },
+  { label: '普通群', value: 'chat' },
+  { label: '频道/超级群', value: 'channel' },
+]
 
 watch(
   () => [show.value, props.rule, props.initialDraft] as const,
@@ -70,6 +94,7 @@ function resetForm() {
     form.processors = props.rule.processors.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } }))
     form.source_ids = [...props.rule.source_ids]
     form.targets = props.rule.targets.map((item) => ({ ...item }))
+    resetPreview()
     return
   }
   const draft = props.initialDraft
@@ -81,6 +106,19 @@ function resetForm() {
   form.processors = []
   form.source_ids = [...(draft?.source_ids ?? [])]
   form.targets = (draft?.targets ?? []).map((item) => ({ ...item }))
+  resetPreview()
+}
+
+function resetPreview() {
+  preview.loading = false
+  preview.source_id = form.source_ids[0] ?? null
+  preview.message_type = 'text'
+  preview.sender_peer_type = 'channel'
+  preview.sender_id = null
+  preview.sender_name = ''
+  preview.text = '这是一条规则预演消息'
+  preview.result = null
+  preview.error = ''
 }
 
 function defaultsFor(desc?: RuleItemDescriptor): Record<string, unknown> {
@@ -184,10 +222,9 @@ function validate(): boolean {
   return true
 }
 
-async function submit() {
-  if (!validate()) return
-  const body = {
-    name: form.name,
+function ruleBody() {
+  return {
+    name: form.name || '预演规则',
     enabled: form.enabled,
     priority: form.priority,
     stop_on_match: form.stop_on_match,
@@ -196,6 +233,11 @@ async function submit() {
     source_ids: form.source_ids,
     targets: form.targets,
   }
+}
+
+async function submit() {
+  if (!validate()) return
+  const body = ruleBody()
   try {
     if (props.rule) {
       await rulesApi.update(props.rule.id, body)
@@ -208,6 +250,43 @@ async function submit() {
   } catch (e) {
     message.error('保存失败：' + errText(e))
   }
+}
+
+async function runPreview() {
+  if (!form.targets.length) {
+    message.warning('请先添加至少一个目标渠道')
+    return
+  }
+  preview.loading = true
+  preview.error = ''
+  preview.result = null
+  try {
+    preview.result = await rulesApi.preview({
+      rule: ruleBody(),
+      message: {
+        source_id: preview.source_id ?? form.source_ids[0] ?? 0,
+        message_type: preview.message_type,
+        sender_peer_type: preview.sender_peer_type,
+        sender_id: preview.sender_id ?? 0,
+        sender_name: preview.sender_name,
+        text: preview.text,
+        media:
+          preview.message_type === 'photo' || preview.message_type === 'image'
+            ? [{ type: preview.message_type, file_name: 'preview.jpg', caption: preview.text }]
+            : [],
+      },
+    })
+  } catch (e) {
+    preview.error = errText(e)
+  } finally {
+    preview.loading = false
+  }
+}
+
+function previewTargetLabel(target: RuleTarget): string {
+  const sink = props.sinks.find((item) => item.id === target.sink_id)
+  const template = target.template_id ? props.templates.find((item) => item.id === target.template_id) : null
+  return `${sink?.name ?? `#${target.sink_id}`}${template ? ` / ${template.name}` : ' / 纯文本'}`
 }
 </script>
 
@@ -323,6 +402,52 @@ async function submit() {
           </div>
           <NEmpty v-if="!form.targets.length" size="small" description="未添加目标渠道" />
         </section>
+
+        <section class="form-section">
+          <div class="section-head">
+            <div>
+              <div class="section-title">规则预演</div>
+              <div class="section-desc">用样例消息检查条件、处理器和目标渠道。</div>
+            </div>
+            <NButton size="small" :loading="preview.loading" @click="runPreview">运行预演</NButton>
+          </div>
+          <div class="preview-grid">
+            <NFormItem label="Source ID">
+              <NInputNumber v-model:value="preview.source_id" class="full-input" clearable />
+            </NFormItem>
+            <NFormItem label="消息类型">
+              <NSelect v-model:value="preview.message_type" :options="messageTypeOptions" />
+            </NFormItem>
+            <NFormItem label="发送者类型">
+              <NSelect v-model:value="preview.sender_peer_type" :options="senderTypeOptions" />
+            </NFormItem>
+            <NFormItem label="发送者 ID">
+              <NInputNumber v-model:value="preview.sender_id" class="full-input" clearable />
+            </NFormItem>
+          </div>
+          <NFormItem label="发送者名称">
+            <NInput v-model:value="preview.sender_name" />
+          </NFormItem>
+          <NFormItem label="样例文本">
+            <NInput v-model:value="preview.text" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+          </NFormItem>
+          <NAlert v-if="preview.error" type="error" title="预演失败" class="preview-result">
+            {{ preview.error }}
+          </NAlert>
+          <NAlert
+            v-else-if="preview.result"
+            :type="preview.result.matched ? 'success' : 'warning'"
+            :title="preview.result.matched ? '规则命中' : '规则未命中'"
+            class="preview-result"
+          >
+            <NSpace vertical size="small">
+              <NText>{{ preview.result.processed_text || '无文本内容' }}</NText>
+              <NText v-if="preview.result.targets.length" depth="3">
+                目标：{{ preview.result.targets.map(previewTargetLabel).join('，') }}
+              </NText>
+            </NSpace>
+          </NAlert>
+        </section>
       </NForm>
     </div>
     <template #footer>
@@ -407,9 +532,21 @@ async function submit() {
   width: 100%;
 }
 
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.preview-result {
+  margin-top: 10px;
+}
+
 @media (max-width: 760px) {
   .base-grid,
-  .target-row {
+  .target-row,
+  .preview-grid {
     grid-template-columns: 1fr;
   }
 

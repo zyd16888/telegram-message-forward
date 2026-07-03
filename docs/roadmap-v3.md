@@ -189,29 +189,29 @@ v3 优先完成六条主线：
 
 目标：把规则从基础关键词过滤扩展为常用自动化能力，并保持 UI 表单化。
 
-- [ ] 新增 Condition：
+- [x] 新增 Condition：
   - `source`
   - `sender`
   - `time_window`
   - `has_media`
   - `media_type`
   - `message_length`
-- [ ] 新增 Processor：
+- [x] 新增 Processor：
   - `preserve_links`
   - `media_fallback_text`
   - `mask_sensitive`
   - `dedupe`
   - `quiet_hours`
   - `batch_digest`
-- [ ] 扩展规则 UI：
+- [x] 扩展规则 UI：
   - 所有新 condition/processor 都通过 descriptor 渲染表单。
   - 不退回 JSON 编辑。
-- [ ] 新增规则预演能力：
+- [x] 新增规则预演能力：
   - 选择或构造一条消息。
   - 返回命中的规则。
   - 返回处理后的文本/媒体摘要。
   - 返回将投递到哪些 Sink。
-- [ ] 规则错误要可解释：
+- [x] 规则错误要可解释：
   - 正则错误
   - 模板不兼容
   - Sink 不支持媒体
@@ -222,6 +222,8 @@ v3 优先完成六条主线：
 - 每个 condition/processor 有单测。
 - 规则 UI 能配置所有新增项。
 - 规则预演至少支持用手工样例消息测试。
+
+进度说明（2026-07-03）：V3-5 已完成并验证 `go test ./...`、`go vet ./...`、`go build ./...`、`cd web && npm run build`。新增 source/sender/time_window/has_media/media_type/message_length 条件和 preserve_links/media_fallback_text/mask_sensitive/dedupe/quiet_hours/batch_digest 处理器；规则编辑器继续基于 descriptor 表单渲染，并增加手工样例消息预演。`quiet_hours` 与 `batch_digest` 在当前阶段提供可解释标记/摘要格式化，不引入延迟投递或跨消息聚合队列。
 
 ### V3-6 插件扩展
 

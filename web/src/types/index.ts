@@ -189,6 +189,19 @@ export interface RuleTarget {
   template_id?: number
 }
 
+export interface RulePreviewResult {
+  matched: boolean
+  processed_text: string
+  media?: Array<{
+    type: string
+    file_name?: string
+    mime_type?: string
+    size?: number
+    caption?: string
+  }>
+  targets: RuleTarget[]
+}
+
 export interface Rule {
   id: number
   name: string
