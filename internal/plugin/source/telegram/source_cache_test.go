@@ -78,7 +78,7 @@ func TestEmitDialogPeersUpsertsCache(t *testing.T) {
 	}
 
 	var emitted []domainsource.PeerType
-	err := plugin.emitDialogPeers(context.Background(), 7, dialogs, chats, users, map[string]struct{}{}, func(peer pluginsource.SyncedPeer) error {
+	newCount, err := plugin.emitDialogPeers(context.Background(), 7, dialogs, chats, users, map[string]struct{}{}, func(peer pluginsource.SyncedPeer) error {
 		emitted = append(emitted, peer.PeerType)
 		if peer.Cached {
 			t.Fatal("远端刷新 peer 不应带 cached 标记")
@@ -87,6 +87,9 @@ func TestEmitDialogPeersUpsertsCache(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if newCount != 3 {
+		t.Fatalf("应返回 3 个新增 peer，实际 %d", newCount)
 	}
 	if len(emitted) != 3 {
 		t.Fatalf("应发射 3 个 peer，实际 %d", len(emitted))

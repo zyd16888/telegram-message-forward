@@ -129,7 +129,9 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 		offsetID := 0
 		offsetDate := 0
 		seen := map[string]struct{}{}
+		seenCursors := map[string]struct{}{}
 		page := 0
+		staleStreak := 0
 		started := time.Now()
 
 		for {
@@ -149,12 +151,13 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 			if err != nil {
 				return err
 			}
-			p.deps.Log.Info("同步会话列表分页完成",
-				"account", acc.ID, "page", page, "dialogs", len(dialogs),
-				"page_cost", time.Since(pageStarted), "total_cost", time.Since(started))
-			if err := p.emitDialogPeers(ctx, acc.ID, dialogs, chats, users, seen, emit); err != nil {
+			newCount, err := p.emitDialogPeers(ctx, acc.ID, dialogs, chats, users, seen, emit)
+			if err != nil {
 				return err
 			}
+			p.deps.Log.Info("同步会话列表分页完成",
+				"account", acc.ID, "page", page, "dialogs", len(dialogs), "new_peers", newCount,
+				"page_cost", time.Since(pageStarted), "total_cost", time.Since(started))
 			if !hasMore || len(dialogs) == 0 {
 				break
 			}
@@ -162,6 +165,29 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 			if nextPeer == nil || nextID == 0 {
 				break
 			}
+
+			// 分页游标必须严格前进；同一游标重复出现说明 offset 没有推进，
+			// 会导致对同一批 dialog 无限重复请求（每次都触发 FLOOD_WAIT 却毫无进展）。
+			cursorKey := fmt.Sprintf("%s:%d:%d", inputPeerKey(nextPeer), nextID, nextDate)
+			if _, dup := seenCursors[cursorKey]; dup {
+				p.deps.Log.Warn("同步会话列表分页游标未推进，提前终止", "account", acc.ID, "page", page, "cursor", cursorKey)
+				break
+			}
+			seenCursors[cursorKey] = struct{}{}
+
+			// 连续多页都没有新增 peer，说明后面大概率是重复/陈旧数据，没必要继续为一批
+			// 已经见过的 dialog 反复承受 FLOOD_WAIT。
+			if newCount == 0 {
+				staleStreak++
+			} else {
+				staleStreak = 0
+			}
+			if staleStreak >= 3 {
+				p.deps.Log.Warn("同步会话列表连续多页无新增 peer，提前终止",
+					"account", acc.ID, "page", page, "stale_streak", staleStreak)
+				break
+			}
+
 			offsetPeer, offsetID, offsetDate = nextPeer, nextID, nextDate
 		}
 		p.deps.Log.Info("同步会话列表完成", "account", acc.ID, "pages", page, "total_cost", time.Since(started))
@@ -200,11 +226,11 @@ func (p *Plugin) emitCachedPeers(ctx context.Context, accountID int64, emit plug
 	return nil
 }
 
-// emitDialogPeers 只返回 dialogs 中真实存在的会话 peer。
+// emitDialogPeers 只返回 dialogs 中真实存在的会话 peer，返回值为本页新增（此前未见过）的 peer 数。
 //
 // messages.getDialogs 响应里的 users 可能包含顶部消息相关用户；不能直接全量返回 users，
 // 否则会把非私聊会话的人混进“可监听 peer”列表。
-func (p *Plugin) emitDialogPeers(ctx context.Context, accountID int64, dialogs []tg.DialogClass, chats []tg.ChatClass, users []tg.UserClass, seen map[string]struct{}, emit pluginsource.SyncPeerHandler) error {
+func (p *Plugin) emitDialogPeers(ctx context.Context, accountID int64, dialogs []tg.DialogClass, chats []tg.ChatClass, users []tg.UserClass, seen map[string]struct{}, emit pluginsource.SyncPeerHandler) (int, error) {
 	cachePeers := make([]*domainpeer.Peer, 0, len(dialogs))
 	for _, d := range dialogs {
 		switch peer := d.GetPeer().(type) {
@@ -226,7 +252,7 @@ func (p *Plugin) emitDialogPeers(ctx context.Context, accountID int64, dialogs [
 				IsForum:      ch.Forum,
 				Flags:        flags,
 			}); err != nil {
-				return err
+				return 0, err
 			}
 			cachePeers = append(cachePeers, &domainpeer.Peer{
 				AccountID:  accountID,
@@ -249,7 +275,7 @@ func (p *Plugin) emitDialogPeers(ctx context.Context, accountID int64, dialogs [
 				DisplayType: "普通群",
 				Flags:       chatFlags(ch),
 			}); err != nil {
-				return err
+				return 0, err
 			}
 			cachePeers = append(cachePeers, &domainpeer.Peer{
 				AccountID: accountID,
@@ -273,7 +299,7 @@ func (p *Plugin) emitDialogPeers(ctx context.Context, accountID int64, dialogs [
 				IsBot:       user.Bot,
 				Flags:       flags,
 			}); err != nil {
-				return err
+				return 0, err
 			}
 			cachePeers = append(cachePeers, &domainpeer.Peer{
 				AccountID:  accountID,
@@ -287,10 +313,10 @@ func (p *Plugin) emitDialogPeers(ctx context.Context, accountID int64, dialogs [
 	}
 	if p.deps.Peers != nil {
 		if err := p.deps.Peers.BulkUpsert(ctx, cachePeers); err != nil {
-			return fmt.Errorf("写入 Telegram peer 缓存失败: %w", err)
+			return 0, fmt.Errorf("写入 Telegram peer 缓存失败: %w", err)
 		}
 	}
-	return nil
+	return len(cachePeers), nil
 }
 
 func cachedPeerToSynced(peer *domainpeer.Peer) pluginsource.SyncedPeer {
@@ -439,6 +465,20 @@ func nextDialogOffset(dialogs []tg.DialogClass, messages []tg.MessageClass, chat
 		return input, topID, messageDate(messages, topID)
 	}
 	return nil, 0, 0
+}
+
+// inputPeerKey 返回 InputPeerClass 的稳定字符串标识，用于检测分页游标是否重复。
+func inputPeerKey(peer tg.InputPeerClass) string {
+	switch p := peer.(type) {
+	case *tg.InputPeerChannel:
+		return fmt.Sprintf("channel:%d", p.ChannelID)
+	case *tg.InputPeerChat:
+		return fmt.Sprintf("chat:%d", p.ChatID)
+	case *tg.InputPeerUser:
+		return fmt.Sprintf("user:%d", p.UserID)
+	default:
+		return fmt.Sprintf("%T", peer)
+	}
 }
 
 func inputPeerFromPeer(peer tg.PeerClass, chats []tg.ChatClass, users []tg.UserClass) tg.InputPeerClass {
