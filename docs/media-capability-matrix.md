@@ -69,6 +69,7 @@
 - 飞书发送消息 API：<https://open.feishu.cn/document/server-docs/im-v1/message/create>
 - 飞书上传图片 API：<https://open.feishu.cn/document/server-docs/im-v1/image/create>
 - 飞书上传文件 API：<https://open.feishu.cn/document/server-docs/im-v1/file/create>
+- 当前内置 `feishu_bot` 实现为自定义机器人 webhook：支持 text/post，未持有应用 token，图片/文件/音视频按文本摘要降级；后续如新增飞书应用消息插件，再启用 image_key/file_key 上传路径。
 - Bark API 文档：<https://bark.day.app/#/tutorial>
 - ntfy publish 文档：<https://docs.ntfy.sh/publish/>
 - ntfy 附件配置：<https://docs.ntfy.sh/config/#attachments>
