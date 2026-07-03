@@ -281,6 +281,9 @@ func (r *DeliveryRepository) deliveryQuery(ctx context.Context, q domaindelivery
 		db = db.Joins("JOIN messages ON messages.id = delivery_tasks.message_id").
 			Where("messages.source_id = ?", q.SourceID)
 	}
+	if q.Since != nil {
+		db = db.Where("delivery_tasks.created_at >= ?", *q.Since)
+	}
 	return db
 }
 

@@ -69,6 +69,7 @@ type Query struct {
 	RuleID   int64
 	SourceID int64
 	SinkID   int64
+	Since    *time.Time
 	Limit    int
 	Offset   int
 }

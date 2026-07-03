@@ -12,18 +12,17 @@ const auth = useAuthStore()
 
 const counts = ref({ accounts: 0, sources: 0, sinks: 0, rules: 0 })
 const deliveries = ref<Delivery[]>([])
+const statusTotals = ref<Record<string, number>>({})
+const windowTotal = ref(0)
 const loading = ref(false)
+const windowHours = 24
 
 const statusCount = computed(() => {
-  const m: Record<string, number> = {}
-  for (const d of deliveries.value) {
-    m[d.status] = (m[d.status] ?? 0) + 1
-  }
-  return m
+  return statusTotals.value
 })
 
 const successRate = computed(() => {
-  const total = deliveries.value.length
+  const total = windowTotal.value
   if (total === 0) return '—'
   const ok = statusCount.value['success'] ?? 0
   return `${Math.round((ok / total) * 100)}%`
@@ -45,6 +44,30 @@ const statusItems = computed(() => [
   { label: '待处理', value: statusCount.value['pending'] ?? 0, tone: 'blue' },
 ])
 
+const queueItems = computed(() => [
+  { label: '待领取', value: statusCount.value['pending'] ?? 0, tone: 'blue' },
+  { label: '处理中', value: statusCount.value['processing'] ?? 0, tone: 'peach' },
+  { label: '等待重试', value: statusCount.value['retrying'] ?? 0, tone: 'coral' },
+])
+
+const topFailures = computed(() => ({
+  sink: topBy(deliveries.value, (item) => item.sink_name || item.sink_type || `Sink #${item.sink_id}`),
+  rule: topBy(deliveries.value, (item) => item.rule_name || `Rule #${item.rule_id}`),
+  source: topBy(deliveries.value, (item) => item.source_name || `Source #${item.message_id}`),
+}))
+
+function topBy(items: Delivery[], keyFn: (item: Delivery) => string) {
+  const counts = new Map<string, number>()
+  for (const item of items) {
+    const key = keyFn(item)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5)
+}
+
 async function load() {
   if (!auth.hasToken) {
     message.warning('请先在「设置」中配置 API Token')
@@ -52,15 +75,30 @@ async function load() {
   }
   loading.value = true
   try {
-    const [accs, srcs, snks, rls, dels] = await Promise.all([
+    const [accs, srcs, snks, rls, all, success, retrying, pending, processing, dead, failed] = await Promise.all([
       accountsApi.list(),
       sourcesApi.list(),
       sinksApi.list(),
       rulesApi.list(),
-      deliveriesApi.list('', 200, 0),
+      deliveriesApi.page('', 1, 0, { since_hours: windowHours }),
+      deliveriesApi.page('success', 1, 0, { since_hours: windowHours }),
+      deliveriesApi.page('retrying', 1, 0, { since_hours: windowHours }),
+      deliveriesApi.page('pending', 1, 0, { since_hours: windowHours }),
+      deliveriesApi.page('processing', 1, 0, { since_hours: windowHours }),
+      deliveriesApi.page('dead', 250, 0, { since_hours: windowHours }),
+      deliveriesApi.page('failed', 250, 0, { since_hours: windowHours }),
     ])
     counts.value = { accounts: accs.length, sources: srcs.length, sinks: snks.length, rules: rls.length }
-    deliveries.value = dels
+    windowTotal.value = all.total
+    statusTotals.value = {
+      success: success.total,
+      retrying: retrying.total,
+      pending: pending.total,
+      processing: processing.total,
+      dead: dead.total,
+      failed: failed.total,
+    }
+    deliveries.value = [...dead.data, ...failed.data]
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
@@ -87,7 +125,7 @@ onMounted(load)
     </div>
 
     <!-- 投递概览 -->
-    <n-card class="panel" title="投递状态（最近 200 条）">
+    <n-card class="panel" :title="`投递状态（近 ${windowHours} 小时）`">
       <template #header-extra>
         <n-button size="small" type="primary" @click="load">
           <template #icon><ClayIcon name="bolt" :size="15" /></template>
@@ -103,7 +141,7 @@ onMounted(load)
 
         <div class="status-grid">
           <div class="status-total">
-            <div class="status-value">{{ deliveries.length }}</div>
+            <div class="status-value">{{ windowTotal }}</div>
             <div class="status-label">总投递</div>
           </div>
           <div
@@ -119,6 +157,30 @@ onMounted(load)
         </div>
       </div>
     </n-card>
+
+    <div class="ops-grid">
+      <n-card class="panel" title="队列状态">
+        <div class="status-grid compact">
+          <div v-for="s in queueItems" :key="s.label" class="status-pill" :class="`tone-${s.tone}`">
+            <span class="status-dot" />
+            <span class="status-num">{{ s.value }}</span>
+            <span class="status-name">{{ s.label }}</span>
+          </div>
+        </div>
+      </n-card>
+      <n-card class="panel" title="失败 Top">
+        <div class="top-grid">
+          <div v-for="(items, key) in topFailures" :key="key" class="top-list">
+            <div class="top-title">{{ key === 'sink' ? 'Sink' : key === 'rule' ? 'Rule' : 'Source' }}</div>
+            <n-empty v-if="!items.length" size="small" description="暂无失败" />
+            <div v-for="item in items" :key="item.label" class="top-item">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </div>
+        </div>
+      </n-card>
+    </div>
   </n-spin>
 </template>
 
@@ -195,6 +257,12 @@ onMounted(load)
 .panel {
   margin-top: 20px;
 }
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 20px;
+}
 .overview {
   display: flex;
   align-items: stretch;
@@ -232,6 +300,10 @@ onMounted(load)
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 14px;
+}
+
+.status-grid.compact {
+  grid-template-columns: 1fr;
 }
 .status-total {
   grid-column: 1 / -1;
@@ -276,5 +348,39 @@ onMounted(load)
   font-size: 13px;
   font-weight: 600;
   color: #8399ad;
+}
+
+.top-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.top-title {
+  margin-bottom: 8px;
+  color: var(--clay-text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.top-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--clay-border);
+}
+
+.top-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .ops-grid,
+  .top-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
