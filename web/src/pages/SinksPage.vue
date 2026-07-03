@@ -1,26 +1,43 @@
 <script setup lang="ts">
 import { computed, h, onMounted, shallowRef } from 'vue'
-import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
+import { useRouter } from 'vue-router'
+import { NButton, NSpace, NSwitch, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import SinkFormModal from '@/components/sinks/SinkFormModal.vue'
-import { sinksApi } from '@/api/client'
-import type { Sink, SinkDescriptor } from '@/types'
+import { rulesApi, sinksApi } from '@/api/client'
+import type { Rule, Sink, SinkDescriptor } from '@/types'
 import { errText } from '@/utils/error'
 
 const message = useMessage()
 const dialog = useDialog()
+const router = useRouter()
 
 const sinks = shallowRef<Sink[]>([])
 const descriptors = shallowRef<SinkDescriptor[]>([])
+const rules = shallowRef<Rule[]>([])
 const loading = shallowRef(false)
 const showForm = shallowRef(false)
 const editingSink = shallowRef<Sink | null>(null)
 
 const descriptorMap = computed(() => new Map(descriptors.value.map((item) => [item.type, item])))
 
+const ruleCountBySinkId = computed(() => {
+  const counts = new Map<number, number>()
+  for (const rule of rules.value) {
+    for (const target of rule.targets) {
+      counts.set(target.sink_id, (counts.get(target.sink_id) ?? 0) + 1)
+    }
+  }
+  return counts
+})
+
 async function load() {
   loading.value = true
   try {
-    ;[sinks.value, descriptors.value] = await Promise.all([sinksApi.list(), sinksApi.meta()])
+    ;[sinks.value, descriptors.value, rules.value] = await Promise.all([
+      sinksApi.list(),
+      sinksApi.meta(),
+      rulesApi.list(),
+    ])
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
@@ -45,10 +62,16 @@ function sinkLabel(type: string): string {
 async function toggle(row: Sink, value: boolean) {
   try {
     await sinksApi.update(row.id, { enabled: value })
-    row.enabled = value
+    // sinks 是 shallowRef：直接改 row.enabled 不会触发表格重新渲染，
+    // 必须替换数组里对应项的引用。
+    sinks.value = sinks.value.map((s) => (s.id === row.id ? { ...s, enabled: value } : s))
   } catch (e) {
     message.error('更新失败：' + errText(e))
   }
+}
+
+function goToRules(sinkId: number) {
+  router.push({ name: 'rules', query: { sink_id: String(sinkId) } })
 }
 
 function confirmDelete(row: Sink) {
@@ -79,6 +102,20 @@ const columns: DataTableColumns<Sink> = [
   },
   { title: '名称', key: 'name', ellipsis: { tooltip: true } },
   { title: '含密钥', key: 'has_secret', width: 90, render: (row) => (row.has_secret ? '是' : '否') },
+  {
+    title: '关联规则',
+    key: 'rules',
+    width: 110,
+    render: (row) => {
+      const count = ruleCountBySinkId.value.get(row.id) ?? 0
+      if (!count) return h(NText, { depth: 3 }, { default: () => '无' })
+      return h(
+        NButton,
+        { text: true, type: 'primary', onClick: () => goToRules(row.id) },
+        { default: () => `${count} 条规则` },
+      )
+    },
+  },
   {
     title: '启用',
     key: 'enabled',

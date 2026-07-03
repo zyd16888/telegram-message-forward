@@ -1,19 +1,34 @@
 <script setup lang="ts">
 import { computed, h, onMounted, shallowRef } from 'vue'
-import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
+import { useRouter } from 'vue-router'
+import { NButton, NSpace, NSwitch, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import PeerSyncPanel from '@/components/sources/PeerSyncPanel.vue'
-import { accountsApi, sourcesApi } from '@/api/client'
-import type { Account, Source } from '@/types'
+import { accountsApi, rulesApi, sourcesApi } from '@/api/client'
+import type { Account, Rule, Source } from '@/types'
 import { errText } from '@/utils/error'
 
 const message = useMessage()
 const dialog = useDialog()
+const router = useRouter()
 
 const sources = shallowRef<Source[]>([])
 const accounts = shallowRef<Account[]>([])
+const rules = shallowRef<Rule[]>([])
 const loading = shallowRef(false)
 const sourceSearch = shallowRef('')
 const sourceKindFilter = shallowRef<string | null>(null)
+
+const accountNameById = computed(() => new Map(accounts.value.map((a) => [a.id, a.name])))
+
+const ruleCountBySourceId = computed(() => {
+  const counts = new Map<number, number>()
+  for (const rule of rules.value) {
+    for (const id of rule.source_ids) {
+      counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
+  }
+  return counts
+})
 
 const visibleSources = computed(() => {
   const keyword = sourceSearch.value.trim().toLowerCase()
@@ -38,7 +53,11 @@ const sourceKindOptions = computed(() => {
 async function load() {
   loading.value = true
   try {
-    ;[sources.value, accounts.value] = await Promise.all([sourcesApi.list(), accountsApi.list()])
+    ;[sources.value, accounts.value, rules.value] = await Promise.all([
+      sourcesApi.list(),
+      accountsApi.list(),
+      rulesApi.list(),
+    ])
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
@@ -54,31 +73,23 @@ function sourceDisplayType(source: Source): string {
   return '频道/超级群'
 }
 
+function accountName(source: Source): string {
+  return accountNameById.value.get(source.account_id) ?? `#${source.account_id}`
+}
+
 async function toggle(row: Source, value: boolean) {
   try {
     await sourcesApi.update(row.id, { enabled: value })
-    row.enabled = value
+    // sources 是 shallowRef：直接改 row.enabled 不会触发表格重新渲染，
+    // 必须替换数组里对应项的引用。
+    sources.value = sources.value.map((s) => (s.id === row.id ? { ...s, enabled: value } : s))
   } catch (e) {
     message.error('更新失败：' + errText(e))
   }
 }
 
-async function start(row: Source) {
-  try {
-    await sourcesApi.start(row.id)
-    message.success('已启动监听')
-  } catch (e) {
-    message.error('启动失败：' + errText(e))
-  }
-}
-
-async function stop(row: Source) {
-  try {
-    await sourcesApi.stop(row.id)
-    message.success('已停止监听')
-  } catch (e) {
-    message.error('停止失败：' + errText(e))
-  }
+function goToRules(sourceId: number) {
+  router.push({ name: 'rules', query: { source_id: String(sourceId) } })
 }
 
 function confirmDelete(row: Source) {
@@ -109,7 +120,21 @@ const columns: DataTableColumns<Source> = [
     render: (row) => h(NTag, { size: 'small' }, { default: () => sourceDisplayType(row) }),
   },
   { title: 'Peer ID', key: 'peer_id', width: 140 },
-  { title: '账号', key: 'account_id', width: 90 },
+  { title: '账号', key: 'account_id', width: 140, render: (row) => accountName(row) },
+  {
+    title: '关联规则',
+    key: 'rules',
+    width: 110,
+    render: (row) => {
+      const count = ruleCountBySourceId.value.get(row.id) ?? 0
+      if (!count) return h(NText, { depth: 3 }, { default: () => '无' })
+      return h(
+        NButton,
+        { text: true, type: 'primary', onClick: () => goToRules(row.id) },
+        { default: () => `${count} 条规则` },
+      )
+    },
+  },
   {
     title: '启用',
     key: 'enabled',
@@ -119,15 +144,9 @@ const columns: DataTableColumns<Source> = [
   {
     title: '操作',
     key: 'actions',
-    width: 220,
+    width: 90,
     render: (row) =>
-      h(NSpace, {}, {
-        default: () => [
-          h(NButton, { size: 'small', onClick: () => start(row) }, { default: () => '启动' }),
-          h(NButton, { size: 'small', onClick: () => stop(row) }, { default: () => '停止' }),
-          h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
-        ],
-      }),
+      h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
   },
 ]
 

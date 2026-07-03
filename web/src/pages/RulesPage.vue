@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { h, onMounted, shallowRef } from 'vue'
-import { NButton, NSpace, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
+import { computed, h, onMounted, shallowRef } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { NAlert, NButton, NSpace, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
 import { rulesApi, sinksApi, sourcesApi, templatesApi } from '@/api/client'
 import type { Rule, RuleMeta, Sink, Source, Template } from '@/types'
@@ -8,6 +9,8 @@ import { errText } from '@/utils/error'
 
 const message = useMessage()
 const dialog = useDialog()
+const route = useRoute()
+const router = useRouter()
 
 const rules = shallowRef<Rule[]>([])
 const sources = shallowRef<Source[]>([])
@@ -17,6 +20,33 @@ const meta = shallowRef<RuleMeta>({ conditions: [], processors: [] })
 const loading = shallowRef(false)
 const showModal = shallowRef(false)
 const editingRule = shallowRef<Rule | null>(null)
+
+function queryId(key: string): number | null {
+  const raw = route.query[key]
+  const id = Number(Array.isArray(raw) ? raw[0] : raw)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+const filterSourceId = computed(() => queryId('source_id'))
+const filterSinkId = computed(() => queryId('sink_id'))
+const filterSourceName = computed(
+  () => sources.value.find((s) => s.id === filterSourceId.value)?.name ?? `#${filterSourceId.value}`,
+)
+const filterSinkName = computed(
+  () => sinks.value.find((s) => s.id === filterSinkId.value)?.name ?? `#${filterSinkId.value}`,
+)
+
+const visibleRules = computed(() =>
+  rules.value.filter((rule) => {
+    if (filterSourceId.value && !rule.source_ids.includes(filterSourceId.value)) return false
+    if (filterSinkId.value && !rule.targets.some((target) => target.sink_id === filterSinkId.value)) return false
+    return true
+  }),
+)
+
+function clearFilter() {
+  router.replace({ name: 'rules', query: {} })
+}
 
 async function load() {
   loading.value = true
@@ -101,7 +131,17 @@ onMounted(load)
       <NButton @click="load">刷新</NButton>
     </NSpace>
 
-    <NDataTable :loading="loading" :columns="columns" :data="rules" :bordered="false" />
+    <NAlert v-if="filterSourceId || filterSinkId" type="info" :show-icon="false">
+      <NSpace align="center" justify="space-between">
+        <span>
+          正在按{{ filterSourceId ? `监听源「${filterSourceName}」` : `渠道「${filterSinkName}」` }}筛选，共
+          {{ visibleRules.length }} 条规则
+        </span>
+        <NButton size="small" text type="primary" @click="clearFilter">清除筛选</NButton>
+      </NSpace>
+    </NAlert>
+
+    <NDataTable :loading="loading" :columns="columns" :data="visibleRules" :bordered="false" />
 
     <RuleEditorModal
       v-model:show="showModal"
