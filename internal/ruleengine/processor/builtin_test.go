@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	domainmessage "telegram-message-forward/internal/domain/message"
 )
@@ -41,5 +42,70 @@ func TestTruncateText(t *testing.T) {
 	_ = p.Process(context.Background(), short, map[string]any{"max_length": float64(10)})
 	if short.Text != "abc" {
 		t.Fatalf("短文本不应改动: %q", short.Text)
+	}
+}
+
+func TestPreserveLinksAndMediaFallbackText(t *testing.T) {
+	m := &domainmessage.NormalizedMessage{
+		Text:        "hello",
+		OriginalURL: "https://t.me/c/1/2",
+		Links:       []domainmessage.Link{{URL: "https://example.com/a"}},
+		Media:       []domainmessage.Media{{Type: "image", FileName: "a.jpg", Size: 2048, Caption: "cap"}},
+	}
+	p, _ := Get("preserve_links")
+	if err := p.Process(context.Background(), m, map[string]any{"include_original_url": true}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = Get("media_fallback_text")
+	if err := p.Process(context.Background(), m, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"https://example.com/a", "https://t.me/c/1/2", "[图片消息]", "a.jpg", "2.0 KB"} {
+		if !strings.Contains(m.Text, want) {
+			t.Fatalf("处理后文本缺少 %s: %q", want, m.Text)
+		}
+	}
+}
+
+func TestMaskSensitiveAndDedupe(t *testing.T) {
+	m := &domainmessage.NormalizedMessage{
+		Text:  "phone 13812345678\nphone 13812345678\ntoken=abcdef",
+		Links: []domainmessage.Link{{URL: "https://a.test"}, {URL: "https://a.test"}},
+	}
+	p, _ := Get("mask_sensitive")
+	if err := p.Process(context.Background(), m, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = Get("dedupe")
+	if err := p.Process(context.Background(), m, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(m.Text, "13812345678") || strings.Contains(m.Text, "abcdef") {
+		t.Fatalf("敏感信息应被遮罩: %q", m.Text)
+	}
+	if strings.Count(m.Text, "phone") != 1 {
+		t.Fatalf("重复行应去除: %q", m.Text)
+	}
+	if len(m.Links) != 1 {
+		t.Fatalf("重复链接应去除: %+v", m.Links)
+	}
+}
+
+func TestQuietHoursAndBatchDigest(t *testing.T) {
+	sent := time.Date(2026, 7, 3, 23, 0, 0, 0, time.FixedZone("CST", 8*3600))
+	m := &domainmessage.NormalizedMessage{Text: "hello", SenderName: "Tech", SentAt: &sent}
+	p, _ := Get("quiet_hours")
+	if err := p.Process(context.Background(), m, map[string]any{"start": "22:00", "end": "08:00", "timezone": "Asia/Shanghai"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(m.Text, "[静默时间]") {
+		t.Fatalf("静默时间应追加标记: %q", m.Text)
+	}
+	p, _ = Get("batch_digest")
+	if err := p.Process(context.Background(), m, map[string]any{"title": "日报"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.Text, "【日报】") || !strings.Contains(m.Text, "来源：Tech") {
+		t.Fatalf("摘要格式错误: %q", m.Text)
 	}
 }

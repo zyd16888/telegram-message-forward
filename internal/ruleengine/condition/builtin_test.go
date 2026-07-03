@@ -3,6 +3,7 @@ package condition
 import (
 	"context"
 	"testing"
+	"time"
 
 	domainmessage "telegram-message-forward/internal/domain/message"
 )
@@ -78,5 +79,64 @@ func TestMessageType(t *testing.T) {
 	ok, _ = c.Evaluate(context.Background(), msg("hi", "video"), cfg)
 	if ok {
 		t.Fatal("video 不应命中")
+	}
+}
+
+func TestSourceSenderAndMediaConditions(t *testing.T) {
+	m := &domainmessage.NormalizedMessage{
+		SourceID:       7,
+		SenderPeerType: "channel",
+		SenderID:       99,
+		SenderName:     "Tech News",
+		Media:          []domainmessage.Media{{Type: "image"}},
+	}
+
+	c, _ := Get("source")
+	ok, _ := c.Evaluate(context.Background(), m, map[string]any{"source_ids": []any{"7", "8"}})
+	if !ok {
+		t.Fatal("source_id 应命中")
+	}
+
+	c, _ = Get("sender")
+	ok, _ = c.Evaluate(context.Background(), m, map[string]any{
+		"peer_types": []any{"channel"},
+		"sender_ids": []any{"99"},
+		"names":      []any{"tech"},
+	})
+	if !ok {
+		t.Fatal("sender 条件应命中")
+	}
+
+	c, _ = Get("has_media")
+	ok, _ = c.Evaluate(context.Background(), m, map[string]any{"value": true})
+	if !ok {
+		t.Fatal("has_media 应命中")
+	}
+
+	c, _ = Get("media_type")
+	ok, _ = c.Evaluate(context.Background(), m, map[string]any{"types": []any{"image"}})
+	if !ok {
+		t.Fatal("media_type 应命中")
+	}
+}
+
+func TestTimeWindowAndMessageLength(t *testing.T) {
+	sent := time.Date(2026, 7, 3, 23, 30, 0, 0, time.FixedZone("CST", 8*3600))
+	m := &domainmessage.NormalizedMessage{Text: "一二三四", SentAt: &sent}
+
+	c, _ := Get("time_window")
+	ok, err := c.Evaluate(context.Background(), m, map[string]any{"start": "22:00", "end": "08:00", "timezone": "Asia/Shanghai"})
+	if err != nil || !ok {
+		t.Fatalf("跨午夜时间窗口应命中: ok=%v err=%v", ok, err)
+	}
+
+	c, _ = Get("message_length")
+	ok, _ = c.Evaluate(context.Background(), m, map[string]any{"min": float64(2), "max": float64(4)})
+	if !ok {
+		t.Fatal("文本长度范围应命中")
+	}
+	ok, _ = c.Evaluate(context.Background(), m, map[string]any{"max": float64(3)})
+	if ok {
+		t.Fatal("超过最大长度不应命中")
 	}
 }
