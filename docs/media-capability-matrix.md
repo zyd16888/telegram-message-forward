@@ -72,6 +72,7 @@
 - 当前内置 `feishu_bot` 实现为自定义机器人 webhook：支持 text/post，未持有应用 token，图片/文件/音视频按文本摘要降级；后续如新增飞书应用消息插件，再启用 image_key/file_key 上传路径。
 - 当前内置 `email` 实现为 SMTP Sink：支持 text/html，媒体有本地文件时作为 MIME attachment 发送；只有 URL 或下载失败时追加降级文本摘要。
 - 当前内置 `ntfy` 实现为 HTTP publish Sink：远程媒体 URL 使用 `Attach` header，本地媒体作为附件请求体上传；文本支持 Markdown header。
+- 当前内置 `bark` 实现为 `/push` JSON Sink：远程图片 URL 写入 `image` 字段；本地图片和其它媒体降级为文本摘要。
 - Bark API 文档：<https://bark.day.app/#/tutorial>
 - ntfy publish 文档：<https://docs.ntfy.sh/publish/>
 - ntfy 附件配置：<https://docs.ntfy.sh/config/#attachments>

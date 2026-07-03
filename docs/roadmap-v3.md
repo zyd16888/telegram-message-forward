@@ -234,7 +234,7 @@ v3 优先完成六条主线：
 1. 飞书 Sink（已完成自定义机器人 webhook）
 2. 邮件 Sink（已完成 SMTP）
 3. ntfy Sink（已完成 HTTP publish）
-4. Bark Sink
+4. Bark Sink（已完成 `/push` JSON）
 5. Gotify Sink
 6. RSS Source
 7. Webhook Source
@@ -262,6 +262,13 @@ v3 优先完成六条主线：
 - [x] ntfy Sink 连通性测试。
 - [x] ntfy Sink 单测。
 - [x] ntfy Sink 文档矩阵更新。
+- [x] Bark Sink 插件实现。
+- [x] Bark Sink capability 声明。
+- [x] Bark Sink descriptor 表单元数据。
+- [x] Bark Sink 配置校验。
+- [x] Bark Sink 连通性测试。
+- [x] Bark Sink 单测。
+- [x] Bark Sink 文档矩阵更新。
 
 每个 Source 必须包含：
 
