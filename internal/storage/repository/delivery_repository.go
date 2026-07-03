@@ -169,15 +169,12 @@ func (r *DeliveryRepository) GetByID(ctx context.Context, id int64) (*domaindeli
 	return toDeliveryDomain(&m)
 }
 
-// List 按状态分页查询投递任务。status 为空时返回全部。
+// List 按状态分页查询投递任务。status 为空时返回非 cancelled 记录。
 func (r *DeliveryRepository) List(ctx context.Context, status domaindelivery.Status, limit, offset int) ([]*domaindelivery.Task, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	q := r.db.WithContext(ctx).Model(&model.DeliveryTask{})
-	if status != "" {
-		q = q.Where("status = ?", string(status))
-	}
+	q := r.deliveryStatusQuery(ctx, status)
 	var ms []model.DeliveryTask
 	if err := q.Order("id DESC").Limit(limit).Offset(offset).Find(&ms).Error; err != nil {
 		return nil, err
@@ -191,6 +188,21 @@ func (r *DeliveryRepository) List(ctx context.Context, status domaindelivery.Sta
 		out = append(out, task)
 	}
 	return out, nil
+}
+
+// Count 统计投递任务数量。status 为空时不统计 cancelled 记录。
+func (r *DeliveryRepository) Count(ctx context.Context, status domaindelivery.Status) (int64, error) {
+	var count int64
+	err := r.deliveryStatusQuery(ctx, status).Count(&count).Error
+	return count, err
+}
+
+func (r *DeliveryRepository) deliveryStatusQuery(ctx context.Context, status domaindelivery.Status) *gorm.DB {
+	q := r.db.WithContext(ctx).Model(&model.DeliveryTask{})
+	if status != "" {
+		return q.Where("status = ?", string(status))
+	}
+	return q.Where("status <> ?", string(domaindelivery.StatusCancelled))
 }
 
 func toDeliveryModel(t *domaindelivery.Task) (*model.DeliveryTask, error) {

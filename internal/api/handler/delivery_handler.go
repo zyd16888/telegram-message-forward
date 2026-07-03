@@ -32,11 +32,16 @@ func (h *DeliveryHandler) List(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	total, err := h.svc.Count(c.Request.Context(), status)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
 	out := make([]dto.DeliveryDTO, 0, len(views))
 	for _, v := range views {
 		out = append(out, dto.NewDeliveryViewDTO(v.Task, v.Message, v.Source, v.Sink, v.Rule, v.Template))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": out})
+	c.JSON(http.StatusOK, gin.H{"data": out, "total": total})
 }
 
 // Get GET /deliveries/:id

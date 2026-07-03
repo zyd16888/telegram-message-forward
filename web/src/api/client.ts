@@ -3,6 +3,7 @@ import type {
   Account,
   ApiItem,
   ApiList,
+  ApiPage,
   ApiToken,
   BootstrapStatus,
   Delivery,
@@ -273,6 +274,10 @@ export const deliveriesApi = {
     http
       .get<ApiList<Delivery>>('/deliveries', { params: { status, limit, offset } })
       .then((r) => r.data.data),
+  page: (status = '', limit = 50, offset = 0) =>
+    http
+      .get<ApiPage<Delivery>>('/deliveries', { params: { status, limit, offset } })
+      .then((r) => ({ data: r.data.data, total: r.data.total ?? r.data.data.length })),
   retry: (id: number) => http.post(`/deliveries/${id}/retry`),
 }
 

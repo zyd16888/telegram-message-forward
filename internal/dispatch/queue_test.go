@@ -8,6 +8,7 @@ import (
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainrule "telegram-message-forward/internal/domain/rule"
+	domainsink "telegram-message-forward/internal/domain/sink"
 	"telegram-message-forward/internal/ruleengine"
 )
 
@@ -34,6 +35,9 @@ func (r *notifyTaskRepo) GetByID(context.Context, int64) (*domaindelivery.Task, 
 func (r *notifyTaskRepo) List(context.Context, domaindelivery.Status, int, int) ([]*domaindelivery.Task, error) {
 	return nil, nil
 }
+func (r *notifyTaskRepo) Count(context.Context, domaindelivery.Status) (int64, error) {
+	return int64(r.created), nil
+}
 
 func TestQueueNotifiesAfterEnqueue(t *testing.T) {
 	notifier := NewNotifier()
@@ -57,5 +61,30 @@ func TestQueueNotifiesAfterEnqueue(t *testing.T) {
 	case <-notifier.C():
 	case <-time.After(time.Second):
 		t.Fatal("enqueue 后应唤醒 worker")
+	}
+}
+
+func TestQueueSkipsDisabledSink(t *testing.T) {
+	notifier := NewNotifier()
+	repo := &notifyTaskRepo{}
+	queue := NewQueue(repo, 3, notifier).UseSinks(fakeSinkRepo{sink: &domainsink.Sink{ID: 30, Enabled: false}})
+
+	msg := &domainmessage.NormalizedMessage{ID: 10}
+	matches := []ruleengine.Match{{
+		Rule:    &domainrule.Rule{ID: 20},
+		Targets: []domainrule.Target{{SinkID: 30}},
+		Message: msg,
+	}}
+	if err := queue.Enqueue(context.Background(), msg, matches); err != nil {
+		t.Fatal(err)
+	}
+	if repo.created != 0 {
+		t.Fatalf("禁用渠道不应创建投递任务，created = %d", repo.created)
+	}
+
+	select {
+	case <-notifier.C():
+		t.Fatal("没有创建任务时不应唤醒 worker")
+	default:
 	}
 }

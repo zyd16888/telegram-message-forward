@@ -79,4 +79,5 @@ type Repository interface {
 	AddAttempt(ctx context.Context, a *Attempt) error
 	GetByID(ctx context.Context, id int64) (*Task, error)
 	List(ctx context.Context, status Status, limit, offset int) ([]*Task, error)
+	Count(ctx context.Context, status Status) (int64, error)
 }

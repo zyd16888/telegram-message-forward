@@ -60,6 +60,11 @@ func (s *Service) List(ctx context.Context, status domaindelivery.Status, limit,
 	return s.tasks.List(ctx, status, limit, offset)
 }
 
+// Count 统计投递任务数量。
+func (s *Service) Count(ctx context.Context, status domaindelivery.Status) (int64, error) {
+	return s.tasks.Count(ctx, status)
+}
+
 // ListViews 按状态分页查询投递任务，并补齐页面展示所需的关联名称与消息内容。
 func (s *Service) ListViews(ctx context.Context, status domaindelivery.Status, limit, offset int) ([]*View, error) {
 	tasks, err := s.List(ctx, status, limit, offset)

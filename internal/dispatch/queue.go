@@ -6,12 +6,14 @@ import (
 
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
 	domainmessage "telegram-message-forward/internal/domain/message"
+	domainsink "telegram-message-forward/internal/domain/sink"
 	"telegram-message-forward/internal/ruleengine"
 )
 
 // Queue 根据规则引擎的匹配结果生成投递任务。
 type Queue struct {
 	tasks       domaindelivery.Repository
+	sinks       domainsink.Repository
 	maxAttempts int
 	notifier    *Notifier
 }
@@ -28,13 +30,27 @@ func NewQueue(tasks domaindelivery.Repository, maxAttempts int, notifiers ...*No
 	return &Queue{tasks: tasks, maxAttempts: maxAttempts, notifier: notifier}
 }
 
+// UseSinks 注入渠道仓储，用于入队前跳过已禁用目标渠道。
+func (q *Queue) UseSinks(sinks domainsink.Repository) *Queue {
+	q.sinks = sinks
+	return q
+}
+
 // Enqueue 为每个命中规则的每个目标渠道生成一个 pending 投递任务。
 //
 // 任务创建按 (message_id, rule_id, sink_id) 幂等，重复不产生新任务。
 func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessage, matches []ruleengine.Match) error {
 	created := false
+	enabledSinks := map[int64]bool{}
 	for _, m := range matches {
 		for _, target := range m.Targets {
+			enabled, err := q.sinkEnabled(ctx, target.SinkID, enabledSinks)
+			if err != nil {
+				return err
+			}
+			if !enabled {
+				continue
+			}
 			task := &domaindelivery.Task{
 				MessageID:       msg.ID,
 				RuleID:          m.Rule.ID,
@@ -54,4 +70,19 @@ func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessag
 		q.notifier.Notify()
 	}
 	return nil
+}
+
+func (q *Queue) sinkEnabled(ctx context.Context, sinkID int64, cache map[int64]bool) (bool, error) {
+	if q.sinks == nil {
+		return true, nil
+	}
+	if enabled, ok := cache[sinkID]; ok {
+		return enabled, nil
+	}
+	sink, err := q.sinks.GetByID(ctx, sinkID)
+	if err != nil {
+		return false, err
+	}
+	cache[sinkID] = sink.Enabled
+	return sink.Enabled, nil
 }

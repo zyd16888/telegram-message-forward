@@ -49,6 +49,9 @@ func (r *recordingTaskRepo) GetByID(context.Context, int64) (*domaindelivery.Tas
 func (r *recordingTaskRepo) List(context.Context, domaindelivery.Status, int, int) ([]*domaindelivery.Task, error) {
 	return nil, nil
 }
+func (r *recordingTaskRepo) Count(context.Context, domaindelivery.Status) (int64, error) {
+	return 0, nil
+}
 
 type fakeMessageRepo struct {
 	msg *domainmessage.NormalizedMessage

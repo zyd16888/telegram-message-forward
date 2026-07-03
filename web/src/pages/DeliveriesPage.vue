@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { h, onMounted, shallowRef } from 'vue'
-import { NButton, NTag, NText, NTooltip, useMessage, type DataTableColumns } from 'naive-ui'
+import { computed, h, onMounted, shallowRef } from 'vue'
+import { NButton, NTag, NText, NTooltip, useMessage, type DataTableColumns, type PaginationProps } from 'naive-ui'
 import { deliveriesApi } from '@/api/client'
 import type { Delivery } from '@/types'
 import { errText } from '@/utils/error'
@@ -12,6 +12,9 @@ const message = useMessage()
 const deliveries = shallowRef<Delivery[]>([])
 const loading = shallowRef(false)
 const status = shallowRef('')
+const page = shallowRef(1)
+const pageSize = shallowRef(20)
+const total = shallowRef(0)
 
 const statusOptions = [
   { label: '全部', value: '' },
@@ -21,7 +24,6 @@ const statusOptions = [
   { label: '待重试', value: 'retrying' },
   { label: '失败', value: 'failed' },
   { label: '已死亡', value: 'dead' },
-  { label: '已取消', value: 'cancelled' },
 ]
 
 const statusType: Record<string, 'success' | 'warning' | 'error' | 'info' | 'default'> = {
@@ -53,15 +55,47 @@ const messageTypeLabel: Record<string, string> = {
   voice: '语音',
 }
 
+const sinkTypeLabel: Record<string, string> = {
+  webhook: 'Webhook',
+  wecom_bot: '企业微信机器人',
+  wecom_app: '企业微信应用',
+  dingtalk: '钉钉机器人',
+}
+
+const pagination = computed<PaginationProps>(() => ({
+  page: page.value,
+  pageSize: pageSize.value,
+  itemCount: total.value,
+  showSizePicker: true,
+  pageSizes: [20, 50, 100],
+  prefix: ({ itemCount }) => `共 ${itemCount} 条`,
+  onUpdatePage: (nextPage) => {
+    page.value = nextPage
+    void load()
+  },
+  onUpdatePageSize: (nextPageSize) => {
+    pageSize.value = nextPageSize
+    page.value = 1
+    void load()
+  },
+}))
+
 async function load() {
   loading.value = true
   try {
-    deliveries.value = await deliveriesApi.list(status.value, 100, 0)
+    const result = await deliveriesApi.page(status.value, pageSize.value, (page.value - 1) * pageSize.value)
+    deliveries.value = result.data
+    total.value = result.total
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
     loading.value = false
   }
+}
+
+async function reloadFromFirstPage() {
+  page.value = 1
+  await load()
 }
 
 async function retry(row: Delivery) {
@@ -98,7 +132,12 @@ function targetTitle(row: Delivery): string {
 }
 
 function targetMeta(row: Delivery): string {
-  const parts = [row.rule_name ? `规则：${row.rule_name}` : '', row.template_name ? `模板：${row.template_name}` : '']
+  const sinkType = row.sink_type ? (sinkTypeLabel[row.sink_type] ?? row.sink_type) : ''
+  const parts = [
+    sinkType ? `类型：${sinkType}` : '',
+    row.rule_name ? `规则：${row.rule_name}` : '',
+    row.template_name ? `模板：${row.template_name}` : '',
+  ]
   return parts.filter(Boolean).join(' · ') || '默认文本模板'
 }
 
@@ -172,7 +211,7 @@ const columns: DataTableColumns<Delivery> = [
         NButton,
         {
           size: 'small',
-          disabled: !['dead', 'failed', 'cancelled'].includes(r.status),
+          disabled: !['dead', 'failed'].includes(r.status),
           onClick: () => retry(r),
         },
         { default: () => '重试' },
@@ -191,7 +230,7 @@ onMounted(load)
           v-model:value="status"
           class="status-filter"
           :options="statusOptions"
-          @update:value="load"
+          @update:value="reloadFromFirstPage"
         />
         <n-button secondary @click="load">
           <template #icon><ClayIcon name="refresh" :size="16" /></template>
@@ -199,7 +238,15 @@ onMounted(load)
         </n-button>
       </template>
     </PageHeader>
-    <n-data-table :loading="loading" :columns="columns" :data="deliveries" :bordered="false" :scroll-x="1200" />
+    <n-data-table
+      remote
+      :loading="loading"
+      :columns="columns"
+      :data="deliveries"
+      :bordered="false"
+      :pagination="pagination"
+      :scroll-x="1200"
+    />
   </n-space>
 </template>
 

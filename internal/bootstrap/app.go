@@ -126,7 +126,7 @@ func Build(cfg *config.Config) (*App, error) {
 	engine := ruleengine.NewEngine()
 	renderer := tmpl.NewRenderer()
 	deliveryNotifier := dispatch.NewNotifier()
-	queue := dispatch.NewQueue(deliveries, cfg.Dispatch.MaxAttempts, deliveryNotifier)
+	queue := dispatch.NewQueue(deliveries, cfg.Dispatch.MaxAttempts, deliveryNotifier).UseSinks(sinks)
 	ingestSvc := appingest.NewService(messages, rules, engine, queue, clk, log)
 	deliverySvc := appdelivery.NewService(deliveries, appdelivery.DisplayDeps{
 		Messages:  messages,

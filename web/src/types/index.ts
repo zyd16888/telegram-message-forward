@@ -2,10 +2,16 @@
 
 export interface ApiList<T> {
   data: T[]
+  total?: number
 }
 
 export interface ApiItem<T> {
   data: T
+}
+
+export interface ApiPage<T> {
+  data: T[]
+  total: number
 }
 
 export interface Proxy {
