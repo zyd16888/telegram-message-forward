@@ -56,3 +56,18 @@ func TestNextDialogOffsetSkipsInvalidTail(t *testing.T) {
 		t.Fatalf("offset peer = %+v", ch)
 	}
 }
+
+func TestNextDialogOffsetHandlesServiceMessageTop(t *testing.T) {
+	// 会话的最新消息是服务消息（比如有人入群）时，日期查找不能静默退化为 0，
+	// 否则算出的 OffsetDate=0 会破坏 Telegram 分页游标的一致性，导致分页原地打转。
+	dialogs := []tg.DialogClass{
+		&tg.Dialog{Peer: &tg.PeerChannel{ChannelID: 42}, TopMessage: 273},
+	}
+	messages := []tg.MessageClass{&tg.MessageService{ID: 273, Date: 123456}}
+	chats := []tg.ChatClass{&tg.Channel{ID: 42, AccessHash: 999}}
+
+	_, topID, date := nextDialogOffset(dialogs, messages, chats, nil)
+	if topID != 273 || date != 123456 {
+		t.Fatalf("offset = topID %d date %d, want 273/123456", topID, date)
+	}
+}

@@ -524,11 +524,22 @@ func findUser(users []tg.UserClass, id int64) *tg.User {
 	return nil
 }
 
+// messageDate 返回 id 对应消息的发送日期。
+//
+// 会话的最新消息经常是服务消息（入群、改群头像等，*tg.MessageService），而不是普通
+// *tg.Message；此前只匹配 *tg.Message 会导致这类会话的日期查找失败、静默退化为 0，
+// 使分页请求带上 OffsetDate=0，破坏 Telegram 分页游标的一致性，导致服务端反复返回
+// 同一批 dialog（分页原地打转、永远翻不完）。这里改用两者共有的 NotEmptyMessage 接口
+// 统一取日期。
 func messageDate(messages []tg.MessageClass, id int) int {
 	for _, m := range messages {
-		if msg, ok := m.(*tg.Message); ok && msg.ID == id {
-			return msg.Date
+		if m.GetID() != id {
+			continue
 		}
+		if nm, ok := m.AsNotEmpty(); ok {
+			return nm.GetDate()
+		}
+		return 0
 	}
 	return 0
 }
