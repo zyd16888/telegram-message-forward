@@ -253,18 +253,22 @@ type SinkTestDTO struct {
 
 // SourceDTO 是监听源响应。
 type SourceDTO struct {
-	ID            int64          `json:"id"`
-	AccountID     int64          `json:"account_id"`
-	PeerType      string         `json:"peer_type"`
-	PeerID        int64          `json:"peer_id"`
-	Name          string         `json:"name"`
-	Username      string         `json:"username,omitempty"`
-	Enabled       bool           `json:"enabled"`
-	Config        map[string]any `json:"config"`
-	LastMessageID int64          `json:"last_message_id"`
-	LastSyncedAt  *time.Time     `json:"last_synced_at,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	ID                    int64          `json:"id"`
+	AccountID             int64          `json:"account_id"`
+	PeerType              string         `json:"peer_type"`
+	PeerID                int64          `json:"peer_id"`
+	Name                  string         `json:"name"`
+	Username              string         `json:"username,omitempty"`
+	Enabled               bool           `json:"enabled"`
+	Config                map[string]any `json:"config"`
+	LastMessageID         int64          `json:"last_message_id"`
+	LastSyncedAt          *time.Time     `json:"last_synced_at,omitempty"`
+	RunnerStatus          string         `json:"runner_status,omitempty"`
+	RunnerSubscriptions   int            `json:"runner_subscriptions,omitempty"`
+	RunnerRecentMessageAt *time.Time     `json:"runner_recent_message_at,omitempty"`
+	RunnerLastError       string         `json:"runner_last_error,omitempty"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
 }
 
 // NewSourceDTO 从 domain 监听源构造 DTO。
@@ -287,6 +291,16 @@ func NewSourceDTO(s *domainsource.Source) SourceDTO {
 		CreatedAt:     s.CreatedAt,
 		UpdatedAt:     s.UpdatedAt,
 	}
+}
+
+// NewSourceDTOWithRuntime 从 domain 监听源构造带运行状态的 DTO。
+func NewSourceDTOWithRuntime(s *domainsource.Source, status string, subscriptions int, recentMessageAt *time.Time, lastError string) SourceDTO {
+	out := NewSourceDTO(s)
+	out.RunnerStatus = status
+	out.RunnerSubscriptions = subscriptions
+	out.RunnerRecentMessageAt = recentMessageAt
+	out.RunnerLastError = lastError
+	return out
 }
 
 // SourceCreateRequest 是创建监听源请求。

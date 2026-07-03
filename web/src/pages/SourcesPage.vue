@@ -80,6 +80,27 @@ function accountName(source: Source): string {
   return accountNameById.value.get(source.account_id) ?? `#${source.account_id}`
 }
 
+function runnerStatusLabel(source: Source): string {
+  if (!source.enabled) return '未启用'
+  if (source.runner_status === 'running') return '运行中'
+  return '未运行'
+}
+
+function runnerStatusType(source: Source): 'success' | 'warning' | 'default' {
+  if (!source.enabled) return 'default'
+  return source.runner_status === 'running' ? 'success' : 'warning'
+}
+
+function formatRuntimeTime(value?: string): string {
+  if (!value) return ''
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
 async function toggle(row: Source, value: boolean) {
   try {
     await sourcesApi.update(row.id, { enabled: value })
@@ -132,6 +153,28 @@ const columns: DataTableColumns<Source> = [
   },
   { title: 'Peer ID', key: 'peer_id', width: 140 },
   { title: '账号', key: 'account_id', width: 140, render: (row) => accountName(row) },
+  {
+    title: '运行',
+    key: 'runner_status',
+    width: 180,
+    render: (row) =>
+      h('div', { class: 'runtime-cell' }, [
+        h(NTag, { size: 'small', type: runnerStatusType(row), bordered: false }, { default: () => runnerStatusLabel(row) }),
+        h(
+          NText,
+          { depth: row.runner_last_error ? 1 : 3 },
+          {
+            default: () =>
+              row.runner_last_error ||
+              (row.runner_recent_message_at
+                ? `最近 ${formatRuntimeTime(row.runner_recent_message_at)}`
+                : row.runner_subscriptions
+                  ? `${row.runner_subscriptions} 个订阅`
+                  : '无运行信息'),
+          },
+        ),
+      ]),
+  },
   {
     title: '关联规则',
     key: 'rules',
@@ -198,7 +241,7 @@ onMounted(() => {
         </NButton>
       </div>
     </div>
-    <NDataTable :loading="loading" :columns="columns" :data="visibleSources" :bordered="false" :scroll-x="980" />
+    <NDataTable :loading="loading" :columns="columns" :data="visibleSources" :bordered="false" :scroll-x="1120" />
   </NSpace>
 </template>
 
@@ -224,6 +267,11 @@ onMounted(() => {
 }
 .source-kind {
   width: 150px;
+}
+
+.runtime-cell {
+  display: grid;
+  gap: 4px;
 }
 
 @media (max-width: 640px) {

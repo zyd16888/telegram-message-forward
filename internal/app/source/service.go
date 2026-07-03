@@ -29,6 +29,13 @@ type Service struct {
 	lastFullSync map[int64]time.Time // account_id -> 上次全量网络同步完成时间
 }
 
+type RuntimeStatus struct {
+	Status            string
+	SubscriptionCount int
+	RecentMessageAt   *time.Time
+	LastError         string
+}
+
 // NewService 创建监听源服务。
 func NewService(
 	sources domainsource.Repository,
@@ -48,6 +55,27 @@ func NewService(
 // List 返回全部监听源。
 func (s *Service) List(ctx context.Context) ([]*domainsource.Source, error) {
 	return s.sources.List(ctx)
+}
+
+// RuntimeStatusBySource 返回当前插件 runner 映射到 source 的运行状态。
+func (s *Service) RuntimeStatusBySource() map[int64]RuntimeStatus {
+	provider, ok := s.plugin.(pluginsource.RunnerStatusProvider)
+	if !ok {
+		return nil
+	}
+	out := map[int64]RuntimeStatus{}
+	for _, status := range provider.RunnerStatuses() {
+		mapped := RuntimeStatus{
+			Status:            status.Status,
+			SubscriptionCount: status.SubscriptionCount,
+			RecentMessageAt:   status.RecentMessageAt,
+			LastError:         status.LastError,
+		}
+		for _, sourceID := range status.SourceIDs {
+			out[sourceID] = mapped
+		}
+	}
+	return out
 }
 
 // Get 查询单个监听源。

@@ -550,10 +550,12 @@ type sourceSubscription struct {
 }
 
 type accountRunner struct {
-	accountID int64
-	client    *telegram.Client
-	cancel    context.CancelFunc
-	sources   map[int64]sourceSubscription // source_id -> subscription
+	accountID       int64
+	client          *telegram.Client
+	cancel          context.CancelFunc
+	sources         map[int64]sourceSubscription // source_id -> subscription
+	recentMessageAt *time.Time
+	lastError       string
 }
 
 func newAccountRunner(accountID int64, client *telegram.Client, cancel context.CancelFunc) *accountRunner {
@@ -583,6 +585,28 @@ func (r *accountRunner) matchingSubscriptions(msg *tg.Message) []sourceSubscript
 		if matchesSource(msg, &sub.source) {
 			out = append(out, sub)
 		}
+	}
+	return out
+}
+
+// RunnerStatuses 返回当前账号 runner 的运行状态快照。
+func (p *Plugin) RunnerStatuses() []pluginsource.RunnerStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]pluginsource.RunnerStatus, 0, len(p.runners))
+	for _, runner := range p.runners {
+		sourceIDs := make([]int64, 0, len(runner.sources))
+		for sourceID := range runner.sources {
+			sourceIDs = append(sourceIDs, sourceID)
+		}
+		out = append(out, pluginsource.RunnerStatus{
+			AccountID:         runner.accountID,
+			SourceIDs:         sourceIDs,
+			Status:            "running",
+			SubscriptionCount: len(runner.sources),
+			RecentMessageAt:   runner.recentMessageAt,
+			LastError:         runner.lastError,
+		})
 	}
 	return out
 }
@@ -645,6 +669,9 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 		})
 		if err != nil && !errors.Is(err, context.Canceled) {
 			p.deps.Log.Error("Telegram account runner 运行退出", "account", acc.ID, "err", err)
+			p.mu.Lock()
+			runner.lastError = err.Error()
+			p.mu.Unlock()
 		}
 		p.mu.Lock()
 		if p.runners[acc.ID] == runner {
@@ -690,6 +717,12 @@ func (p *Plugin) forwardToSubscriptions(runCtx context.Context, accountID int64,
 	p.mu.Unlock()
 
 	for _, sub := range subs {
+		now := time.Now()
+		p.mu.Lock()
+		if runner := p.runners[accountID]; runner != nil {
+			runner.recentMessageAt = &now
+		}
+		p.mu.Unlock()
 		nm := Normalize(sub.source.ID, msg, e)
 		nm.Media = downloadMessageImages(runCtx, client, sub.source.ID, msg, nm.Media)
 		for _, media := range nm.Media {

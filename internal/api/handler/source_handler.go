@@ -10,6 +10,7 @@ import (
 
 	"telegram-message-forward/internal/api/dto"
 	appsource "telegram-message-forward/internal/app/source"
+	domainsource "telegram-message-forward/internal/domain/source"
 	pluginsource "telegram-message-forward/internal/plugin/source"
 )
 
@@ -32,9 +33,10 @@ func (h *SourceHandler) List(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	runtimeBySource := h.svc.RuntimeStatusBySource()
 	out := make([]dto.SourceDTO, 0, len(srcs))
 	for _, s := range srcs {
-		out = append(out, dto.NewSourceDTO(s))
+		out = append(out, newSourceDTOWithRuntime(s, runtimeBySource))
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
@@ -50,7 +52,7 @@ func (h *SourceHandler) Get(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": dto.NewSourceDTO(s)})
+	c.JSON(http.StatusOK, gin.H{"data": newSourceDTOWithRuntime(s, h.svc.RuntimeStatusBySource())})
 }
 
 // Create POST /sources
@@ -213,6 +215,17 @@ func newSyncedPeerDTO(p pluginsource.SyncedPeer) dto.SyncedPeerDTO {
 		Flags:        p.Flags,
 		Cached:       p.Cached,
 	}
+}
+
+func newSourceDTOWithRuntime(s *domainsource.Source, runtimeBySource map[int64]appsource.RuntimeStatus) dto.SourceDTO {
+	if runtimeBySource == nil {
+		return dto.NewSourceDTO(s)
+	}
+	status, ok := runtimeBySource[s.ID]
+	if !ok {
+		return dto.NewSourceDTOWithRuntime(s, "stopped", 0, nil, "")
+	}
+	return dto.NewSourceDTOWithRuntime(s, status.Status, status.SubscriptionCount, status.RecentMessageAt, status.LastError)
 }
 
 // Start POST /sources/:id/start

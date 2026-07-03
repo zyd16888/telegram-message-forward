@@ -129,6 +129,10 @@ export interface Source {
   config: Record<string, unknown>
   last_message_id: number
   last_synced_at?: string
+  runner_status?: string
+  runner_subscriptions?: number
+  runner_recent_message_at?: string
+  runner_last_error?: string
   created_at: string
   updated_at: string
 }

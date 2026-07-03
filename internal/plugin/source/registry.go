@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	domainaccount "telegram-message-forward/internal/domain/account"
 	domainmessage "telegram-message-forward/internal/domain/message"
@@ -36,6 +37,21 @@ type SyncedPeer struct {
 	IsForum      bool
 	Flags        []string
 	Cached       bool
+}
+
+// RunnerStatus 是 Source 插件可选暴露的运行状态快照。
+type RunnerStatus struct {
+	AccountID         int64
+	SourceIDs         []int64
+	Status            string
+	SubscriptionCount int
+	RecentMessageAt   *time.Time
+	LastError         string
+}
+
+// RunnerStatusProvider 可由支持长连接 runner 的 Source 插件实现。
+type RunnerStatusProvider interface {
+	RunnerStatuses() []RunnerStatus
 }
 
 // SyncPeerHandler 接收同步过程中的单个 peer。
