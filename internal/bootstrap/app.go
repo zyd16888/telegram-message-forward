@@ -40,6 +40,7 @@ import (
 	tmpl "telegram-message-forward/internal/template"
 
 	// 通过 blank import 触发内置 Sink 插件的编译期注册。
+	_ "telegram-message-forward/internal/plugin/sink/dingtalk"
 	_ "telegram-message-forward/internal/plugin/sink/webhook"
 	_ "telegram-message-forward/internal/plugin/sink/wecom"
 )

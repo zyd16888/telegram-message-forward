@@ -113,6 +113,11 @@
 - [x] **M3-4 dead 任务手动重试**：`delivery.Repository.Requeue`（终态→pending、清零计数与锁）+ `app/delivery.Service.RetryDead`（校验状态后重排），API 在 M4 暴露。
 - 验收：**可运行部分 PASS（单测验证请求构造/错误处理/token 刷新/限流）**。**剩余：需真实企业微信 corpid/secret/agentid 或群机器人 key 做端到端联调。**
 
+## Phase 5 补充 — 钉钉自定义机器人 Sink
+
+- [x] **`dingtalk_bot` Sink**（`internal/plugin/sink/dingtalk`）：自定义机器人 webhook，config.access_token（或 webhook_url 覆盖）+ 可选 secret 加签（HMAC-SHA256 + timestamp，钉钉安全设置三选一，未配置密钥则不加签）；text/markdown（markdown title 取 sink 名称）；`errcode` 判成功；限流沿用 wecom 的~20条/分包级分桶模式。单测覆盖成功/错误码/加签签名交叉校验/markdown title/配置校验。已在 `bootstrap/app.go` blank import 注册。
+  - 剩余：需真实钉钉群机器人 access_token（+可选加签密钥）做端到端联调。
+
 ---
 
 ## M4 — 管理 API + 鉴权
