@@ -1,0 +1,38 @@
+services:
+  app:
+    image: ghcr.io/zyd16888/telegram-message-forward:nightly
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${TMF_HTTP_PORT:-8080}:8080"
+    environment:
+      TMF_SERVER_ADDR: ":8080"
+      TMF_LOG_LEVEL: "${TMF_LOG_LEVEL:-info}"
+      TMF_LOG_FORMAT: "${TMF_LOG_FORMAT:-text}"
+      TMF_DATABASE_DSN: "postgres://${POSTGRES_USER:-tmf}:${POSTGRES_PASSWORD:-CHANGE_ME_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-telegram_forward}?sslmode=disable"
+      # 开箱运行时自动执行 goose migration；生产环境可改为 false 后手动运行迁移命令。
+      TMF_DATABASE_AUTO_MIGRATE: "${TMF_DATABASE_AUTO_MIGRATE:-true}"
+      # 首次部署前请替换为 32 字节随机值；存入真实 session/secret 后不要再修改。
+      TMF_SECURITY_ENCRYPTION_KEY: "${TMF_SECURITY_ENCRYPTION_KEY:-CHANGE_ME_32_BYTES_LONG_KEY_0000}"
+      TMF_SECURITY_AUTH_ENABLED: "${TMF_SECURITY_AUTH_ENABLED:-true}"
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-telegram_forward}"
+      POSTGRES_USER: "${POSTGRES_USER:-tmf}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-CHANGE_ME_DB_PASSWORD}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
