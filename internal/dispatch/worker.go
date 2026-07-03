@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	pluginsink "telegram-message-forward/internal/plugin/sink"
 	tmpl "telegram-message-forward/internal/template"
 )
+
+var errSinkDisabled = errors.New("目标渠道已禁用，已取消投递")
 
 // Worker 从数据库领取投递任务并执行。
 type Worker struct {
@@ -107,7 +110,13 @@ func (w *Worker) process(ctx context.Context, task *domaindelivery.Task) {
 	}
 
 	task.AttemptCount++
-	if err == nil && result != nil && result.Success {
+	if errors.Is(err, errSinkDisabled) {
+		attempt.Status = domaindelivery.AttemptFailed
+		attempt.Error = err.Error()
+		task.Status = domaindelivery.StatusCancelled
+		task.LastError = err.Error()
+		task.NextRetryAt = nil
+	} else if err == nil && result != nil && result.Success {
 		attempt.Status = domaindelivery.AttemptSuccess
 		attempt.ResponseSummary = result.ResponseSummary
 		task.Status = domaindelivery.StatusSuccess
@@ -140,6 +149,9 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 	s, err := w.sinks.GetByID(ctx, task.SinkID)
 	if err != nil {
 		return nil, err
+	}
+	if !s.Enabled {
+		return nil, errSinkDisabled
 	}
 
 	var tpl *domaintemplate.Template
