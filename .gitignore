@@ -26,6 +26,9 @@ vendor/
 dist/
 build/
 out/
+!internal/webui/dist/
+internal/webui/dist/*
+!internal/webui/dist/placeholder.txt
 
 # 日志文件
 *.log

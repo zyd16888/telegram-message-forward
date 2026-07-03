@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
+    "build:embed": "vue-tsc -b && vite build --outDir ../internal/webui/dist --emptyOutDir",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit"
   },
