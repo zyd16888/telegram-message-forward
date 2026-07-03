@@ -199,6 +199,16 @@ export interface Delivery {
   max_attempts: number
   next_retry_at?: string
   last_error?: string
+  message_text?: string
+  message_type?: string
+  sender_name?: string
+  source_name?: string
+  source_username?: string
+  source_peer_type?: string
+  sink_name?: string
+  sink_type?: string
+  rule_name?: string
+  template_name?: string
   created_at: string
   updated_at: string
 }

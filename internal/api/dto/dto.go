@@ -12,6 +12,7 @@ import (
 	domainapitoken "telegram-message-forward/internal/domain/apitoken"
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
 	domainloginflow "telegram-message-forward/internal/domain/loginflow"
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domainsource "telegram-message-forward/internal/domain/source"
@@ -459,18 +460,28 @@ func (r *RuleRequest) TargetsToDomain() []domainrule.Target {
 
 // DeliveryDTO 是投递任务响应。
 type DeliveryDTO struct {
-	ID           int64      `json:"id"`
-	MessageID    int64      `json:"message_id"`
-	RuleID       int64      `json:"rule_id"`
-	SinkID       int64      `json:"sink_id"`
-	TemplateID   *int64     `json:"template_id,omitempty"`
-	Status       string     `json:"status"`
-	AttemptCount int        `json:"attempt_count"`
-	MaxAttempts  int        `json:"max_attempts"`
-	NextRetryAt  *time.Time `json:"next_retry_at,omitempty"`
-	LastError    string     `json:"last_error,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID             int64      `json:"id"`
+	MessageID      int64      `json:"message_id"`
+	RuleID         int64      `json:"rule_id"`
+	SinkID         int64      `json:"sink_id"`
+	TemplateID     *int64     `json:"template_id,omitempty"`
+	Status         string     `json:"status"`
+	AttemptCount   int        `json:"attempt_count"`
+	MaxAttempts    int        `json:"max_attempts"`
+	NextRetryAt    *time.Time `json:"next_retry_at,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
+	MessageText    string     `json:"message_text,omitempty"`
+	MessageType    string     `json:"message_type,omitempty"`
+	SenderName     string     `json:"sender_name,omitempty"`
+	SourceName     string     `json:"source_name,omitempty"`
+	SourceUsername string     `json:"source_username,omitempty"`
+	SourcePeerType string     `json:"source_peer_type,omitempty"`
+	SinkName       string     `json:"sink_name,omitempty"`
+	SinkType       string     `json:"sink_type,omitempty"`
+	RuleName       string     `json:"rule_name,omitempty"`
+	TemplateName   string     `json:"template_name,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // NewDeliveryDTO 从 domain 投递任务构造 DTO。
@@ -489,6 +500,39 @@ func NewDeliveryDTO(t *domaindelivery.Task) DeliveryDTO {
 		CreatedAt:    t.CreatedAt,
 		UpdatedAt:    t.UpdatedAt,
 	}
+}
+
+// NewDeliveryViewDTO 从投递任务及其关联数据构造页面友好的 DTO。
+func NewDeliveryViewDTO(
+	t *domaindelivery.Task,
+	msg *domainmessage.NormalizedMessage,
+	src *domainsource.Source,
+	sink *domainsink.Sink,
+	rule *domainrule.Rule,
+	tpl *domaintemplate.Template,
+) DeliveryDTO {
+	out := NewDeliveryDTO(t)
+	if msg != nil {
+		out.MessageText = msg.Text
+		out.MessageType = msg.MessageType
+		out.SenderName = msg.SenderName
+	}
+	if src != nil {
+		out.SourceName = src.Name
+		out.SourceUsername = src.Username
+		out.SourcePeerType = string(src.PeerType)
+	}
+	if sink != nil {
+		out.SinkName = sink.Name
+		out.SinkType = sink.Type
+	}
+	if rule != nil {
+		out.RuleName = rule.Name
+	}
+	if tpl != nil {
+		out.TemplateName = tpl.Name
+	}
+	return out
 }
 
 // --- API Token ---

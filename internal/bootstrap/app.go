@@ -128,7 +128,13 @@ func Build(cfg *config.Config) (*App, error) {
 	deliveryNotifier := dispatch.NewNotifier()
 	queue := dispatch.NewQueue(deliveries, cfg.Dispatch.MaxAttempts, deliveryNotifier)
 	ingestSvc := appingest.NewService(messages, rules, engine, queue, clk, log)
-	deliverySvc := appdelivery.NewService(deliveries)
+	deliverySvc := appdelivery.NewService(deliveries, appdelivery.DisplayDeps{
+		Messages:  messages,
+		Sources:   sources,
+		Sinks:     sinks,
+		Rules:     rules,
+		Templates: templates,
+	})
 
 	// Telegram Source 插件（deps 注入，避免 plugin 直连存储层）。
 	tgPlugin := tgsource.NewPlugin(tgsource.Deps{

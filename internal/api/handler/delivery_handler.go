@@ -27,14 +27,14 @@ func (h *DeliveryHandler) List(c *gin.Context) {
 	limit := parseIntDefault(c.Query("limit"), 50)
 	offset := parseIntDefault(c.Query("offset"), 0)
 
-	tasks, err := h.svc.List(c.Request.Context(), status, limit, offset)
+	views, err := h.svc.ListViews(c.Request.Context(), status, limit, offset)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	out := make([]dto.DeliveryDTO, 0, len(tasks))
-	for _, t := range tasks {
-		out = append(out, dto.NewDeliveryDTO(t))
+	out := make([]dto.DeliveryDTO, 0, len(views))
+	for _, v := range views {
+		out = append(out, dto.NewDeliveryViewDTO(v.Task, v.Message, v.Source, v.Sink, v.Rule, v.Template))
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
@@ -45,12 +45,12 @@ func (h *DeliveryHandler) Get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	t, err := h.svc.Get(c.Request.Context(), id)
+	v, err := h.svc.GetView(c.Request.Context(), id)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": dto.NewDeliveryDTO(t)})
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewDeliveryViewDTO(v.Task, v.Message, v.Source, v.Sink, v.Rule, v.Template)})
 }
 
 // Retry POST /deliveries/:id/retry — 手动重试终态任务。
