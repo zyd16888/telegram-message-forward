@@ -22,6 +22,7 @@ const meta = shallowRef<RuleMeta>({ conditions: [], processors: [] })
 const loading = shallowRef(false)
 const showModal = shallowRef(false)
 const editingRule = shallowRef<Rule | null>(null)
+const initialRuleOpenDone = shallowRef(false)
 
 function queryId(key: string): number | null {
   const raw = route.query[key]
@@ -31,6 +32,7 @@ function queryId(key: string): number | null {
 
 const filterSourceId = computed(() => queryId('source_id'))
 const filterSinkId = computed(() => queryId('sink_id'))
+const queryRuleId = computed(() => queryId('rule_id'))
 const filterSourceName = computed(
   () => sources.value.find((s) => s.id === filterSourceId.value)?.name ?? `#${filterSourceId.value}`,
 )
@@ -60,6 +62,7 @@ async function load() {
       templatesApi.list(),
       rulesApi.meta(),
     ])
+    openQueriedRule()
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
@@ -75,6 +78,14 @@ function openCreate() {
 function openEdit(row: Rule) {
   editingRule.value = row
   showModal.value = true
+}
+
+function openQueriedRule() {
+  if (initialRuleOpenDone.value || !queryRuleId.value) return
+  const rule = rules.value.find((item) => item.id === queryRuleId.value)
+  if (!rule) return
+  initialRuleOpenDone.value = true
+  openEdit(rule)
 }
 
 function confirmDelete(row: Rule) {

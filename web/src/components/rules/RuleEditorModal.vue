@@ -201,85 +201,112 @@ async function submit() {
 
 <template>
   <NModal v-model:show="show" preset="card" :title="editing ? '编辑规则' : '新建规则'" class="rule-modal">
-    <NForm label-placement="left" label-width="92">
-      <NFormItem label="名称" required>
-        <NInput v-model:value="form.name" />
-      </NFormItem>
-      <NSpace>
-        <NFormItem label="优先级">
-          <NInputNumber v-model:value="form.priority" />
-        </NFormItem>
-        <NFormItem label="启用">
-          <NSwitch v-model:value="form.enabled" />
-        </NFormItem>
-        <NFormItem label="命中即停">
-          <NSwitch v-model:value="form.stop_on_match" />
-        </NFormItem>
-      </NSpace>
-      <NFormItem label="来源">
-        <NSelect v-model:value="form.source_ids" multiple :options="sourceOptions" />
-      </NFormItem>
+    <div class="modal-body">
+      <NForm label-placement="top">
+        <section class="form-section">
+          <div class="section-title">规则入口</div>
+          <div class="base-grid">
+            <NFormItem label="名称" required>
+              <NInput v-model:value="form.name" />
+            </NFormItem>
+            <NFormItem label="优先级">
+              <NInputNumber v-model:value="form.priority" class="full-input" />
+            </NFormItem>
+            <NFormItem label="启用">
+              <NSwitch v-model:value="form.enabled" />
+            </NFormItem>
+            <NFormItem label="命中即停">
+              <NSwitch v-model:value="form.stop_on_match" />
+            </NFormItem>
+          </div>
+          <NFormItem label="来源">
+            <NSelect v-model:value="form.source_ids" multiple :options="sourceOptions" />
+          </NFormItem>
+        </section>
 
-      <NDivider>条件</NDivider>
-      <div v-for="(condition, index) in form.conditions" :key="index" class="rule-block">
-        <NSpace align="center" justify="space-between">
-          <NSelect
-            :value="condition.type"
-            class="type-select"
-            :options="conditionOptions"
-            @update:value="(value: string) => updateConditionType(condition, value)"
-          />
-          <NButton size="small" type="error" @click="removeCondition(index)">移除</NButton>
-        </NSpace>
-        <ConfigFormRenderer
-          v-if="conditionDescriptor(condition.type)"
-          v-model="condition.config"
-          :fields="conditionDescriptor(condition.type)?.fields ?? []"
-        />
-        <NText v-if="conditionDescriptor(condition.type)?.description" depth="3">
-          {{ conditionDescriptor(condition.type)?.description }}
-        </NText>
-      </div>
-      <NButton size="small" dashed @click="addCondition">添加条件</NButton>
+        <section class="form-section">
+          <div class="section-head">
+            <div>
+              <div class="section-title">匹配条件</div>
+              <div class="section-desc">为空时表示来源消息直接进入这条规则。</div>
+            </div>
+            <NButton size="small" dashed @click="addCondition">添加条件</NButton>
+          </div>
+          <div v-for="(condition, index) in form.conditions" :key="index" class="rule-block">
+            <NSpace align="center" justify="space-between">
+              <NSelect
+                :value="condition.type"
+                class="type-select"
+                :options="conditionOptions"
+                @update:value="(value: string) => updateConditionType(condition, value)"
+              />
+              <NButton size="small" type="error" secondary @click="removeCondition(index)">移除</NButton>
+            </NSpace>
+            <ConfigFormRenderer
+              v-if="conditionDescriptor(condition.type)"
+              v-model="condition.config"
+              :fields="conditionDescriptor(condition.type)?.fields ?? []"
+            />
+            <NText v-if="conditionDescriptor(condition.type)?.description" depth="3">
+              {{ conditionDescriptor(condition.type)?.description }}
+            </NText>
+          </div>
+          <NEmpty v-if="!form.conditions.length" size="small" description="未添加条件" />
+        </section>
 
-      <NDivider>处理器</NDivider>
-      <div v-for="(processor, index) in form.processors" :key="index" class="rule-block">
-        <NSpace align="center" justify="space-between">
-          <NSelect
-            :value="processor.type"
-            class="type-select"
-            :options="processorOptions"
-            @update:value="(value: string) => updateProcessorType(processor, value)"
-          />
-          <NButton size="small" type="error" @click="removeProcessor(index)">移除</NButton>
-        </NSpace>
-        <ConfigFormRenderer
-          v-if="processorDescriptor(processor.type)"
-          v-model="processor.config"
-          :fields="processorDescriptor(processor.type)?.fields ?? []"
-        />
-        <NText v-if="processorDescriptor(processor.type)?.description" depth="3">
-          {{ processorDescriptor(processor.type)?.description }}
-        </NText>
-      </div>
-      <NButton size="small" dashed @click="addProcessor">添加处理器</NButton>
+        <section class="form-section">
+          <div class="section-head">
+            <div>
+              <div class="section-title">处理器</div>
+              <div class="section-desc">在投递前改写或过滤消息内容。</div>
+            </div>
+            <NButton size="small" dashed @click="addProcessor">添加处理器</NButton>
+          </div>
+          <div v-for="(processor, index) in form.processors" :key="index" class="rule-block">
+            <NSpace align="center" justify="space-between">
+              <NSelect
+                :value="processor.type"
+                class="type-select"
+                :options="processorOptions"
+                @update:value="(value: string) => updateProcessorType(processor, value)"
+              />
+              <NButton size="small" type="error" secondary @click="removeProcessor(index)">移除</NButton>
+            </NSpace>
+            <ConfigFormRenderer
+              v-if="processorDescriptor(processor.type)"
+              v-model="processor.config"
+              :fields="processorDescriptor(processor.type)?.fields ?? []"
+            />
+            <NText v-if="processorDescriptor(processor.type)?.description" depth="3">
+              {{ processorDescriptor(processor.type)?.description }}
+            </NText>
+          </div>
+          <NEmpty v-if="!form.processors.length" size="small" description="未添加处理器" />
+        </section>
 
-      <NDivider>目标渠道</NDivider>
-      <div v-for="(target, index) in form.targets" :key="index" class="target-row">
-        <NSpace align="center">
-          <NSelect v-model:value="target.sink_id" class="target-select" placeholder="渠道" :options="sinkOptions" />
-          <NSelect
-            v-model:value="target.template_id"
-            class="target-select"
-            clearable
-            placeholder="模板（可空=纯文本）"
-            :options="templateOptionsFor(target.sink_id)"
-          />
-          <NButton size="small" type="error" @click="removeTarget(index)">移除</NButton>
-        </NSpace>
-      </div>
-      <NButton size="small" dashed @click="addTarget">添加目标</NButton>
-    </NForm>
+        <section class="form-section">
+          <div class="section-head">
+            <div>
+              <div class="section-title">目标渠道</div>
+              <div class="section-desc">一条规则可以投递到多个渠道，每个渠道可选择模板。</div>
+            </div>
+            <NButton size="small" dashed @click="addTarget">添加目标</NButton>
+          </div>
+          <div v-for="(target, index) in form.targets" :key="index" class="target-row">
+            <NSelect v-model:value="target.sink_id" class="target-select" placeholder="渠道" :options="sinkOptions" />
+            <NSelect
+              v-model:value="target.template_id"
+              class="target-select"
+              clearable
+              placeholder="模板（可空=纯文本）"
+              :options="templateOptionsFor(target.sink_id)"
+            />
+            <NButton size="small" type="error" secondary @click="removeTarget(index)">移除</NButton>
+          </div>
+          <NEmpty v-if="!form.targets.length" size="small" description="未添加目标渠道" />
+        </section>
+      </NForm>
+    </div>
     <template #footer>
       <NSpace justify="end">
         <NButton @click="show = false">取消</NButton>
@@ -291,25 +318,89 @@ async function submit() {
 
 <style scoped>
 .rule-modal {
-  width: min(820px, calc(100vw - 32px));
+  width: min(840px, calc(100vw - 32px));
+}
+
+.modal-body {
+  max-height: min(70vh, 720px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.form-section {
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--clay-surface-2);
+}
+
+.form-section + .form-section {
+  margin-top: 12px;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-title {
+  color: var(--clay-text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.section-desc {
+  margin-top: 3px;
+  color: var(--clay-text-3);
+  font-size: 12px;
+}
+
+.base-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 140px 100px 120px;
+  gap: 12px;
+  align-items: start;
+}
+
+.full-input {
+  width: 100%;
 }
 
 .rule-block {
-  border: 1px solid var(--n-border-color);
-  border-radius: 6px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
   margin-bottom: 10px;
   padding: 12px;
+  background: var(--clay-surface);
 }
 
 .type-select {
-  width: 240px;
+  width: min(260px, 100%);
 }
 
 .target-row {
-  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
 }
 
 .target-select {
-  width: 240px;
+  width: 100%;
+}
+
+@media (max-width: 760px) {
+  .base-grid,
+  .target-row {
+    grid-template-columns: 1fr;
+  }
+
+  .section-head {
+    flex-direction: column;
+  }
 }
 </style>

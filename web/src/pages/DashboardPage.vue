@@ -156,31 +156,29 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 22px;
-  border-radius: 24px;
+  padding: 18px;
+  border: 1px solid var(--clay-border);
+  border-radius: 10px;
   background: var(--clay-surface);
-  box-shadow: var(--clay-out), var(--clay-inset-hi);
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  box-shadow: var(--clay-out-sm);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 .tile:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--clay-hover), var(--clay-inset-hi);
+  border-color: var(--clay-border-strong);
+  box-shadow: var(--clay-hover);
 }
 .tile-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 18px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
   color: var(--tone);
   background: var(--tone-soft);
-  box-shadow:
-    inset 2px 2px 5px rgba(255, 255, 255, 0.55),
-    inset -3px -3px 6px rgba(56, 104, 150, 0.12);
   flex-shrink: 0;
 }
 .tile-value {
-  font-size: 34px;
+  font-size: 30px;
   font-weight: 900;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -206,7 +204,7 @@ onMounted(load)
 .rate-badge {
   flex-shrink: 0;
   width: 150px;
-  border-radius: 22px;
+  border-radius: 10px;
   padding: 22px;
   display: flex;
   flex-direction: column;
@@ -214,11 +212,7 @@ onMounted(load)
   align-items: center;
   color: #fff;
   background: linear-gradient(150deg, #56b0ea, #2f8fd6);
-  box-shadow:
-    6px 6px 16px rgba(24, 108, 170, 0.4),
-    -3px -3px 10px rgba(255, 255, 255, 0.4),
-    inset 2px 2px 5px rgba(255, 255, 255, 0.4),
-    inset -4px -4px 8px rgba(18, 90, 150, 0.35);
+  box-shadow: var(--clay-out-sm);
 }
 .rate-value {
   font-size: 40px;
@@ -261,9 +255,9 @@ onMounted(load)
   align-items: center;
   gap: 10px;
   padding: 14px 16px;
-  border-radius: 18px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
   background: var(--clay-surface-2);
-  box-shadow: var(--clay-out-sm), var(--clay-inset-hi);
 }
 .status-dot {
   width: 12px;

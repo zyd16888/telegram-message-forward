@@ -166,41 +166,50 @@ async function submit() {
 
 <template>
   <NModal v-model:show="show" preset="card" :title="editing ? '编辑渠道' : '新建渠道'" class="sink-modal">
-    <NForm label-placement="left" label-width="96">
-      <NFormItem label="类型" required>
-        <NSelect v-model:value="form.type" :disabled="editing" :options="typeOptions" />
-      </NFormItem>
-      <NFormItem label="名称" required>
-        <NInput v-model:value="form.name" placeholder="例如：技术群通知" />
-      </NFormItem>
-      <NFormItem label="启用">
-        <NSwitch v-model:value="form.enabled" />
-      </NFormItem>
-      <NDivider>渠道配置</NDivider>
-      <NAlert v-if="descriptor?.description" type="default" :show-icon="false" class="sink-desc">
-        {{ descriptor.description }}
-      </NAlert>
-      <ConfigFormRenderer v-if="descriptor" v-model="form.config" :fields="descriptor.config_fields" />
-      <NFormItem v-if="descriptor?.secret_field" :label="descriptor.secret_field.label" :required="!editing && descriptor.secret_field.required">
-        <NInput
-          v-model:value="form.secret"
-          type="password"
-          show-password-on="click"
-          :placeholder="editing ? '留空则保留原密钥' : descriptor.secret_field.placeholder"
-        />
-      </NFormItem>
-      <NAlert
-        v-if="testing.success !== null"
-        class="test-result"
-        :type="testing.success ? 'success' : 'error'"
-        :title="testing.success ? '测试成功' : '测试失败'"
-      >
-        <NSpace vertical size="small">
-          <NText>{{ testing.message }}</NText>
-          <NCode v-if="testing.summary" :code="testing.summary" language="json" />
-        </NSpace>
-      </NAlert>
-    </NForm>
+    <div class="modal-body">
+      <NForm label-placement="top">
+        <section class="form-section">
+          <div class="section-title">基础信息</div>
+          <NFormItem label="类型" required>
+            <NSelect v-model:value="form.type" :disabled="editing" :options="typeOptions" />
+          </NFormItem>
+          <NFormItem label="名称" required>
+            <NInput v-model:value="form.name" placeholder="例如：技术群通知" />
+          </NFormItem>
+          <NFormItem label="启用">
+            <NSwitch v-model:value="form.enabled" />
+          </NFormItem>
+        </section>
+
+        <section class="form-section">
+          <div class="section-title">渠道配置</div>
+          <NAlert v-if="descriptor?.description" type="default" :show-icon="false" class="sink-desc">
+            {{ descriptor.description }}
+          </NAlert>
+          <ConfigFormRenderer v-if="descriptor" v-model="form.config" :fields="descriptor.config_fields" />
+          <NFormItem v-if="descriptor?.secret_field" :label="descriptor.secret_field.label" :required="!editing && descriptor.secret_field.required">
+            <NInput
+              v-model:value="form.secret"
+              type="password"
+              show-password-on="click"
+              :placeholder="editing ? '留空则保留原密钥' : descriptor.secret_field.placeholder"
+            />
+          </NFormItem>
+        </section>
+
+        <NAlert
+          v-if="testing.success !== null"
+          class="test-result"
+          :type="testing.success ? 'success' : 'error'"
+          :title="testing.success ? '测试成功' : '测试失败'"
+        >
+          <NSpace vertical size="small">
+            <NText>{{ testing.message }}</NText>
+            <NCode v-if="testing.summary" :code="testing.summary" language="json" />
+          </NSpace>
+        </NAlert>
+      </NForm>
+    </div>
     <template #footer>
       <NSpace justify="end">
         <NButton :loading="testing.loading" @click="testConfig">测试配置</NButton>
@@ -213,7 +222,31 @@ async function submit() {
 
 <style scoped>
 .sink-modal {
-  width: min(680px, calc(100vw - 32px));
+  width: min(620px, calc(100vw - 32px));
+}
+
+.modal-body {
+  max-height: min(68vh, 680px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.form-section {
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  padding: 14px 14px 2px;
+  background: var(--clay-surface-2);
+}
+
+.form-section + .form-section {
+  margin-top: 12px;
+}
+
+.section-title {
+  margin-bottom: 12px;
+  color: var(--clay-text);
+  font-size: 14px;
+  font-weight: 800;
 }
 
 .sink-desc {

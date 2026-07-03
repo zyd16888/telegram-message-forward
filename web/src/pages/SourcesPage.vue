@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, shallowRef } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSpace, NSwitch, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import PeerSyncPanel from '@/components/sources/PeerSyncPanel.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -11,6 +11,7 @@ import { errText } from '@/utils/error'
 
 const message = useMessage()
 const dialog = useDialog()
+const route = useRoute()
 const router = useRouter()
 
 const sources = shallowRef<Source[]>([])
@@ -38,7 +39,7 @@ const visibleSources = computed(() => {
     const kind = sourceDisplayType(source)
     if (sourceKindFilter.value && kind !== sourceKindFilter.value) return false
     if (!keyword) return true
-    return [source.name, source.username, String(source.peer_id), kind, source.peer_type]
+    return [String(source.id), source.name, source.username, String(source.peer_id), kind, source.peer_type]
       .filter(Boolean)
       .some((item) => String(item).toLowerCase().includes(keyword))
   })
@@ -152,7 +153,12 @@ const columns: DataTableColumns<Source> = [
   },
 ]
 
-onMounted(load)
+onMounted(() => {
+  const raw = route.query.source_id
+  const id = Array.isArray(raw) ? raw[0] : raw
+  if (id) sourceSearch.value = String(id)
+  void load()
+})
 </script>
 
 <template>
