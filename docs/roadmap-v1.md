@@ -30,6 +30,7 @@
 
 - [ ] `security.encryption_key` 仍是占位符。**存真实 session/secret 前必须换成 `openssl rand -hex 16`，且一旦启用不可再改**。
 - [ ] Telegram Source 目前「每 source 一个客户端」，多 source 共账号的连接复用（SourceManager 去重）后置。
+- [ ] Telegram 历史补拉后置排期：基于 `sources.last_message_id` 设计手动回捞、启动补漏和断线恢复后的增量追平，不混入媒体转发主线。
 - [ ] http 代理未实现（仅 socks5）；媒体仅记录轻量描述，不下载文件。
 - [ ] 前端 naive-ui 单 chunk 体积告警（未做手动分包）。
 
