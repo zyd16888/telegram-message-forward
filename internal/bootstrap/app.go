@@ -44,6 +44,7 @@ import (
 	_ "telegram-message-forward/internal/plugin/sink/dingtalk"
 	_ "telegram-message-forward/internal/plugin/sink/email"
 	_ "telegram-message-forward/internal/plugin/sink/feishu"
+	_ "telegram-message-forward/internal/plugin/sink/gotify"
 	_ "telegram-message-forward/internal/plugin/sink/ntfy"
 	_ "telegram-message-forward/internal/plugin/sink/webhook"
 	_ "telegram-message-forward/internal/plugin/sink/wecom"

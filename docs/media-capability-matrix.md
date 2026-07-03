@@ -24,7 +24,7 @@
 | 邮件 | 支持 | 可转文本 | 支持 | MIME inline/attachment | MIME attachment | MIME attachment | MIME attachment | 邮件服务商决定 | 邮件服务商决定，建议默认 20 MB 内 | 支持 | 否 | 是 | 超限时只发摘要和原始链接 |
 | Bark | 支持 | 不支持 | 不支持 | icon/image URL | 不支持 | 不支持 | 不支持 | 未给固定上限，受 URL/body 限制 | 不适用 | 支持 | 否 | 否 | 图片作为 URL 参数；其它媒体降级为文本 |
 | ntfy | 支持 | 客户端可显示 Markdown | 不支持 | attachment/URL | attachment/URL | attachment/URL | attachment/URL | 服务端配置决定 | ntfy.sh 默认附件上限约 15 MB，私有部署可配 | 支持 | 可选 | 支持 PUT/POST | 超限时发文本摘要和原始链接 |
-| Gotify | 支持 | 客户端 extras 可声明 Markdown | 不支持 | 无原生附件 | 无原生附件 | 无原生附件 | 无原生附件 | 服务端配置决定 | 不适用 | 可放入消息链接 | 否 | 否 | 所有媒体降级为文本摘要和链接 |
+| Gotify | 支持 | 客户端 extras 可声明 Markdown | 不支持 | 远程 bigImageUrl | 不支持 | 不支持 | 不支持 | 服务端配置决定 | 不适用 | 支持图片 URL | 否 | 否 | 本地图片和其它媒体降级为文本摘要和链接 |
 
 ## 当前内置 Sink 契约
 
@@ -73,8 +73,10 @@
 - 当前内置 `email` 实现为 SMTP Sink：支持 text/html，媒体有本地文件时作为 MIME attachment 发送；只有 URL 或下载失败时追加降级文本摘要。
 - 当前内置 `ntfy` 实现为 HTTP publish Sink：远程媒体 URL 使用 `Attach` header，本地媒体作为附件请求体上传；文本支持 Markdown header。
 - 当前内置 `bark` 实现为 `/push` JSON Sink：远程图片 URL 写入 `image` 字段；本地图片和其它媒体降级为文本摘要。
+- 当前内置 `gotify` 实现为 `POST /message` JSON Sink：通过 `X-Gotify-Key` header 传应用 token；Markdown 使用 `client::display.contentType`，远程图片 URL 使用 `client::notification.bigImageUrl`，本地媒体降级为文本摘要。
 - Bark API 文档：<https://bark.day.app/#/tutorial>
 - ntfy publish 文档：<https://docs.ntfy.sh/publish/>
 - ntfy 附件配置：<https://docs.ntfy.sh/config/#attachments>
+- Gotify push message：<https://gotify.net/docs/pushmsg>
 - Gotify message extras：<https://gotify.net/docs/msgextras>
 - Email MIME RFC 2045：<https://www.rfc-editor.org/rfc/rfc2045>

@@ -235,7 +235,7 @@ v3 优先完成六条主线：
 2. 邮件 Sink（已完成 SMTP）
 3. ntfy Sink（已完成 HTTP publish）
 4. Bark Sink（已完成 `/push` JSON）
-5. Gotify Sink
+5. Gotify Sink（已完成 `POST /message` JSON）
 6. RSS Source
 7. Webhook Source
 
@@ -269,6 +269,13 @@ v3 优先完成六条主线：
 - [x] Bark Sink 连通性测试。
 - [x] Bark Sink 单测。
 - [x] Bark Sink 文档矩阵更新。
+- [x] Gotify Sink 插件实现。
+- [x] Gotify Sink capability 声明。
+- [x] Gotify Sink descriptor 表单元数据。
+- [x] Gotify Sink 配置校验。
+- [x] Gotify Sink 连通性测试。
+- [x] Gotify Sink 单测。
+- [x] Gotify Sink 文档矩阵更新。
 
 每个 Source 必须包含：
 
