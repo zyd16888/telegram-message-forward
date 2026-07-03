@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -88,6 +91,38 @@ func (c *Client) Get(ctx context.Context, url string, headers map[string]string)
 	if err != nil {
 		return nil, fmt.Errorf("构建请求失败: %w", err)
 	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	return c.do(req)
+}
+
+// PostMultipartFile 上传单个文件字段并返回响应。
+func (c *Client) PostMultipartFile(ctx context.Context, url, fieldName, path string, headers map[string]string) (*Response, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	file, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, fmt.Errorf("打开上传文件失败: %w", err)
+	}
+	defer file.Close()
+
+	part, err := writer.CreateFormFile(fieldName, filepath.Base(path))
+	if err != nil {
+		return nil, fmt.Errorf("创建 multipart 字段失败: %w", err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return nil, fmt.Errorf("写入 multipart 文件失败: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("关闭 multipart body 失败: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
+	if err != nil {
+		return nil, fmt.Errorf("构建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

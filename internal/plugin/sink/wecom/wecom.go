@@ -6,13 +6,18 @@ package wecom
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 
+	domainmessage "telegram-message-forward/internal/domain/message"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
 )
 
@@ -31,6 +36,12 @@ type apiResp struct {
 // textPayload / markdownPayload 是消息体。
 type textContent struct {
 	Content string `json:"content"`
+}
+
+type imageContent struct {
+	Base64  string `json:"base64,omitempty"`
+	MD5     string `json:"md5,omitempty"`
+	MediaID string `json:"media_id,omitempty"`
 }
 
 // buildMessage 根据渲染格式选择 msgtype，返回 (msgtype, contentField)。
@@ -91,4 +102,34 @@ func waitRate(ctx context.Context, key string) error {
 // failResult 构造失败结果。
 func failResult(summary []byte, errMsg string) *pluginsink.Result {
 	return &pluginsink.Result{Success: false, ResponseSummary: summary, Error: errMsg}
+}
+
+func firstLocalImage(payload pluginsink.Payload) (domainmessage.Media, bool) {
+	for _, item := range payload.Media {
+		if (item.Type == "photo" || item.Type == "image") && item.LocalPath != "" {
+			return item, true
+		}
+	}
+	return domainmessage.Media{}, false
+}
+
+func fallbackText(payload pluginsink.Payload) string {
+	if payload.FallbackText != "" {
+		return payload.FallbackText
+	}
+	return payload.Text
+}
+
+func imageBase64MD5(path string) (string, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer f.Close()
+	h := md5.New()
+	data, err := io.ReadAll(io.TeeReader(f, h))
+	if err != nil {
+		return "", "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), fmt.Sprintf("%x", h.Sum(nil)), nil
 }

@@ -283,11 +283,14 @@ async function submit() {
       </NForm>
     </div>
     <template #footer>
-      <NSpace justify="end">
-        <NButton :loading="testing.loading" @click="testConfig">测试配置</NButton>
-        <NButton @click="show = false">取消</NButton>
-        <NButton type="primary" @click="submit">保存</NButton>
-      </NSpace>
+      <div class="modal-footer">
+        <NText depth="3" class="test-note">测试配置当前仅发送文本测试消息。</NText>
+        <NSpace justify="end">
+          <NButton :loading="testing.loading" @click="testConfig">测试配置</NButton>
+          <NButton @click="show = false">取消</NButton>
+          <NButton type="primary" @click="submit">保存</NButton>
+        </NSpace>
+      </div>
     </template>
   </NModal>
 </template>
@@ -366,5 +369,17 @@ async function submit() {
 
 .test-result {
   margin-top: 12px;
+}
+
+.modal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.test-note {
+  font-size: 12px;
 }
 </style>

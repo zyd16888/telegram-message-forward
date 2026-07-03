@@ -110,6 +110,22 @@ func (s *BotSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 		return nil, err
 	}
 
+	if img, ok := firstLocalImage(payload); ok {
+		if payload.Text != "" {
+			if res, err := s.sendText(ctx, url, payload); err != nil || res == nil || !res.Success {
+				return res, err
+			}
+		}
+		return s.sendImage(ctx, url, img.LocalPath)
+	}
+	if len(payload.Media) > 0 {
+		payload.Format = "text"
+		payload.Text = fallbackText(payload)
+	}
+	return s.sendText(ctx, url, payload)
+}
+
+func (s *BotSink) sendText(ctx context.Context, url string, payload pluginsink.Payload) (*pluginsink.Result, error) {
 	msgType := msgTypeFor(payload.Format)
 	body := map[string]any{"msgtype": msgType}
 	if msgType == "markdown" {
@@ -118,6 +134,26 @@ func (s *BotSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 		body["text"] = textContent{Content: payload.Text}
 	}
 
+	resp, err := s.client.PostJSON(ctx, url, body, nil)
+	if err != nil {
+		return failResult(nil, err.Error()), err
+	}
+	summary, ok, _, errMsg := parseResp(resp.Body)
+	if !ok {
+		return failResult(summary, errMsg), nil
+	}
+	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
+}
+
+func (s *BotSink) sendImage(ctx context.Context, url string, path string) (*pluginsink.Result, error) {
+	b64, md5sum, err := imageBase64MD5(path)
+	if err != nil {
+		return failResult(nil, "读取图片失败: "+err.Error()), nil
+	}
+	body := map[string]any{
+		"msgtype": "image",
+		"image":   imageContent{Base64: b64, MD5: md5sum},
+	}
 	resp, err := s.client.PostJSON(ctx, url, body, nil)
 	if err != nil {
 		return failResult(nil, err.Error()), err

@@ -179,6 +179,23 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 
 	msgType := msgTypeFor(payload.Format)
 	body := map[string]any{"msgtype": msgType}
+	if len(payload.Media) > 0 {
+		if imageURL := firstImageURL(payload); imageURL != "" {
+			payload.Format = "markdown"
+			msgType = "markdown"
+			body["msgtype"] = msgType
+			if payload.Text == "" {
+				payload.Text = "![image](" + imageURL + ")"
+			} else {
+				payload.Text += "\n\n![image](" + imageURL + ")"
+			}
+		} else {
+			payload.Format = "text"
+			payload.Text = fallbackText(payload)
+			msgType = "text"
+			body["msgtype"] = msgType
+		}
+	}
 	if msgType == "markdown" {
 		title := sink.Name
 		if title == "" {
@@ -207,6 +224,28 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 		}, nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
+}
+
+func firstImageURL(payload pluginsink.Payload) string {
+	for _, item := range payload.Media {
+		if item.Type != "photo" && item.Type != "image" {
+			continue
+		}
+		if item.RemoteURL != "" {
+			return item.RemoteURL
+		}
+		if item.URL != "" {
+			return item.URL
+		}
+	}
+	return ""
+}
+
+func fallbackText(payload pluginsink.Payload) string {
+	if payload.FallbackText != "" {
+		return payload.FallbackText
+	}
+	return payload.Text
 }
 
 func truncate(b []byte, n int) []byte {

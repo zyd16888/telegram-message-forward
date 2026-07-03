@@ -220,6 +220,27 @@ func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, ag
 		return nil, false, err
 	}
 
+	if img, ok := firstLocalImage(payload); ok {
+		if payload.Text != "" {
+			textResult, expired, err := s.sendAppText(ctx, sink, token, agentid, payload)
+			if err != nil || expired || textResult == nil || !textResult.Success {
+				return textResult, expired, err
+			}
+		}
+		mediaID, summary, err := s.uploadMedia(ctx, token, "image", img.LocalPath)
+		if err != nil {
+			return failResult(summary, err.Error()), false, err
+		}
+		return s.sendAppImage(ctx, sink, token, agentid, mediaID)
+	}
+	if len(payload.Media) > 0 {
+		payload.Format = "text"
+		payload.Text = fallbackText(payload)
+	}
+	return s.sendAppText(ctx, sink, token, agentid, payload)
+}
+
+func (s *AppSink) sendAppText(ctx context.Context, sink *domainsink.Sink, token, agentid string, payload pluginsink.Payload) (*pluginsink.Result, bool, error) {
 	msgType := msgTypeFor(payload.Format)
 	body := map[string]any{
 		"touser":  s.toUser(sink),
@@ -241,8 +262,47 @@ func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, ag
 	if ok {
 		return &pluginsink.Result{Success: true, ResponseSummary: summary}, false, nil
 	}
-	if expired && !forceRefresh {
+	if expired {
 		return failResult(summary, errMsg), true, nil
 	}
 	return failResult(summary, errMsg), false, nil
+}
+
+func (s *AppSink) uploadMedia(ctx context.Context, token, mediaType, path string) (string, []byte, error) {
+	url := fmt.Sprintf("%s/media/upload?access_token=%s&type=%s", apiBase, token, mediaType)
+	resp, err := s.client.PostMultipartFile(ctx, url, "media", path, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	var r struct {
+		apiResp
+		MediaID string `json:"media_id"`
+	}
+	if err := json.Unmarshal(resp.Body, &r); err != nil {
+		return "", truncate(resp.Body, 512), fmt.Errorf("解析上传响应失败: %w", err)
+	}
+	summary, _ := json.Marshal(map[string]any{"errcode": r.ErrCode, "errmsg": r.ErrMsg, "has_media_id": r.MediaID != ""})
+	if r.ErrCode != 0 || r.MediaID == "" {
+		return "", summary, fmt.Errorf("上传临时素材失败 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg)
+	}
+	return r.MediaID, summary, nil
+}
+
+func (s *AppSink) sendAppImage(ctx context.Context, sink *domainsink.Sink, token, agentid, mediaID string) (*pluginsink.Result, bool, error) {
+	body := map[string]any{
+		"touser":  s.toUser(sink),
+		"msgtype": "image",
+		"agentid": agentid,
+		"image":   imageContent{MediaID: mediaID},
+	}
+	url := apiBase + "/message/send?access_token=" + token
+	resp, err := s.client.PostJSON(ctx, url, body, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	summary, ok, expired, errMsg := parseResp(resp.Body)
+	if ok {
+		return &pluginsink.Result{Success: true, ResponseSummary: summary}, false, nil
+	}
+	return failResult(summary, errMsg), expired, nil
 }

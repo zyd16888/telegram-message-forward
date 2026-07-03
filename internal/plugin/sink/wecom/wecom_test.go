@@ -6,10 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
 )
@@ -35,6 +37,37 @@ func TestBotSendSuccess(t *testing.T) {
 	body, _ := gotBody.Load().(string)
 	if !strings.Contains(body, `"msgtype":"text"`) || !strings.Contains(body, "hello wecom") {
 		t.Fatalf("请求体不正确: %s", body)
+	}
+}
+
+func TestBotSendLocalImage(t *testing.T) {
+	img := t.TempDir() + "/image.jpg"
+	if err := os.WriteFile(img, []byte("fake-image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(b))
+		io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+	}))
+	defer srv.Close()
+
+	s := NewBot()
+	sink := &domainsink.Sink{Type: "wecom_bot", Config: map[string]any{"webhook_url": srv.URL}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Media: []domainmessage.Media{{Type: "photo", LocalPath: img}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("图片应发送成功: %+v", res)
+	}
+	body, _ := gotBody.Load().(string)
+	if !strings.Contains(body, `"msgtype":"image"`) || !strings.Contains(body, `"base64"`) || !strings.Contains(body, `"md5"`) {
+		t.Fatalf("图片请求体不正确: %s", body)
 	}
 }
 
@@ -135,5 +168,56 @@ func TestAppMissingConfig(t *testing.T) {
 	}
 	if res.Success {
 		t.Fatal("缺少 agentid/secret 应失败")
+	}
+}
+
+func TestAppSendLocalImageUploadsMedia(t *testing.T) {
+	tokenMu.Lock()
+	tokenCache = map[string]*cachedToken{}
+	tokenMu.Unlock()
+
+	img := t.TempDir() + "/image.jpg"
+	if err := os.WriteFile(img, []byte("fake-image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var uploadCalled, imageSent atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gettoken"):
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK","expires_in":7200}`)
+		case strings.Contains(r.URL.Path, "/media/upload"):
+			uploadCalled.Store(true)
+			if !strings.Contains(r.Header.Get("Content-Type"), "multipart/form-data") {
+				t.Errorf("应使用 multipart 上传，Content-Type=%s", r.Header.Get("Content-Type"))
+			}
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","media_id":"MEDIA_ID"}`)
+		case strings.Contains(r.URL.Path, "/message/send"):
+			b, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(b), `"msgtype":"image"`) && strings.Contains(string(b), "MEDIA_ID") {
+				imageSent.Store(true)
+			}
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		}
+	}))
+	defer srv.Close()
+
+	apiBase = srv.URL
+	defer func() { apiBase = "https://qyapi.weixin.qq.com/cgi-bin" }()
+
+	s := NewApp()
+	sink := &domainsink.Sink{
+		Type:   "wecom_app",
+		Config: map[string]any{"corpid": "corp1", "agentid": "1000002"},
+		Secret: []byte("secret1"),
+	}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Media: []domainmessage.Media{{Type: "image", LocalPath: img}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success || !uploadCalled.Load() || !imageSent.Load() {
+		t.Fatalf("图片上传/发送未完成 res=%+v upload=%v image=%v", res, uploadCalled.Load(), imageSent.Load())
 	}
 }

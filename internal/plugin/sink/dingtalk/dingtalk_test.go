@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
 )
@@ -140,6 +141,70 @@ func TestSendMarkdownUsesSinkNameAsTitle(t *testing.T) {
 	body, _ := gotBody.Load().(string)
 	if !strings.Contains(body, `"title":"技术群通知"`) {
 		t.Fatalf("markdown title 应使用 sink 名称: %s", body)
+	}
+}
+
+func TestSendImageWithPublicURLUsesMarkdown(t *testing.T) {
+	var gotBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(b))
+		io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+	}))
+	defer srv.Close()
+	apiBase = srv.URL
+	defer func() { apiBase = "https://oapi.dingtalk.com/robot/send" }()
+
+	s := New()
+	sink := &domainsink.Sink{Type: "dingtalk_bot", Name: "图片通知", Config: map[string]any{"access_token": "TOKEN123"}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Format: "text",
+		Text:   "hello",
+		Media:  []domainmessage.Media{{Type: "image", RemoteURL: "https://example.com/a.jpg"}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("应成功: %+v", res)
+	}
+	body, _ := gotBody.Load().(string)
+	if !strings.Contains(body, `"msgtype":"markdown"`) || !strings.Contains(body, "![image](https://example.com/a.jpg)") {
+		t.Fatalf("公网图片应以 markdown 图片投递: %s", body)
+	}
+}
+
+func TestSendLocalImageFallsBackToText(t *testing.T) {
+	var gotBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(b))
+		io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+	}))
+	defer srv.Close()
+	apiBase = srv.URL
+	defer func() { apiBase = "https://oapi.dingtalk.com/robot/send" }()
+
+	s := New()
+	sink := &domainsink.Sink{Type: "dingtalk_bot", Config: map[string]any{"access_token": "TOKEN123"}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Format:       "text",
+		Text:         "hello",
+		FallbackText: "hello\n[图片消息] image.jpg",
+		Media:        []domainmessage.Media{{Type: "image", LocalPath: "C:/tmp/image.jpg"}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("应成功: %+v", res)
+	}
+	body, _ := gotBody.Load().(string)
+	if !strings.Contains(body, `"msgtype":"text"`) || !strings.Contains(body, "[图片消息] image.jpg") {
+		t.Fatalf("本地图片应降级为文本: %s", body)
+	}
+	if strings.Contains(body, "![image]") {
+		t.Fatalf("本地图片不应生成 markdown 图片: %s", body)
 	}
 }
 

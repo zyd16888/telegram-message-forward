@@ -88,7 +88,7 @@ v3 优先完成六条主线：
 
 目标：Telegram 图片必须能被识别、下载，并作为标准媒体进入投递 payload。
 
-- [ ] 扩展 `domain/message.Media`：
+- [x] 扩展 `domain/message.Media`：
   - type
   - mime_type
   - file_name
@@ -99,25 +99,25 @@ v3 优先完成六条主线：
   - local_path 或 storage_key
   - remote_url（可选）
   - ttl/created_at（如使用临时文件缓存）
-- [ ] 扩展 Telegram normalizer：
+- [x] 扩展 Telegram normalizer：
   - 图片消息识别为 `photo`
   - document 图片识别为 image/document
   - album/grouped_id 保留
   - caption/text 语义明确
   - 原始链接 `original_url` 保留
-- [ ] 新增 Telegram 媒体下载服务：
+- [x] 新增 Telegram 媒体下载服务：
   - 按 source/account 复用已登录 client 或注入下载能力。
   - 限制最大文件大小。
   - 支持图片优先，文件后置。
   - 下载产物不进数据库大字段。
   - 临时文件路径不通过 API 泄漏给用户。
-- [ ] 扩展 `plugin/sink.Payload`：
+- [x] 扩展 `plugin/sink.Payload`：
   - text
   - format
   - media[]
   - fallback_text
-- [ ] 入队时保存处理后的 message snapshot，包含媒体元数据但不包含过大二进制。
-- [ ] 对不支持图片的 Sink 生成清晰降级文本，例如：
+- [x] 入队时保存处理后的 message snapshot，包含媒体元数据但不包含过大二进制。
+- [x] 对不支持图片的 Sink 生成清晰降级文本，例如：
   - `[图片消息] <caption>`
   - 原始 Telegram URL
   - 文件名/大小摘要
@@ -129,31 +129,35 @@ v3 优先完成六条主线：
 - 图片下载失败不会导致整个 source 崩溃，应记录错误并按降级策略投递。
 - 不支持图片的渠道能收到可读文本。
 
+进度说明（2026-07-03）：V3-2 已完成并验证 `go test ./...`、`go vet ./...`、`go build ./...`。Telegram photo 与 document image 已标准化为媒体元数据并走现有 client 下载图片；下载失败只写入媒体状态并继续进入投递降级链路，二进制不写入数据库。
+
 ### V3-3 现有 Sink 媒体投递改造
 
 目标：先让现有渠道按自身能力正确处理图片，不支持则明确降级。
 
-- [ ] Webhook：
+- [x] Webhook：
   - 默认仍可保持 text JSON。
   - 可选支持 media metadata 或 URL 字段。
   - 不默认发送二进制。
-- [ ] 企业微信群机器人：
+- [x] 企业微信群机器人：
   - 按官方能力补图片发送路径。
   - 如需要 md5/base64 或上传流程，封装在 Sink 内。
   - 文本 + 图片组合要有明确顺序策略。
-- [ ] 企业微信应用消息：
+- [x] 企业微信应用消息：
   - 按官方能力补图片/文件上传与发送路径。
   - access_token 缓存沿用现有实现。
-- [ ] 钉钉自定义机器人：
+- [x] 钉钉自定义机器人：
   - 明确 markdown 图片链接、文本、文件能力边界。
   - 不支持本地图片直传时，必须给用户看见限制和降级。
-- [ ] Sink 测试接口支持媒体测试或至少展示“此渠道当前测试仅覆盖文本”。
+- [x] Sink 测试接口支持媒体测试或至少展示“此渠道当前测试仅覆盖文本”。
 
 验收：
 
 - 支持图片的现有 Sink 能发出 Telegram 图片。
 - 不支持图片的 Sink 不假装成功发送图片，必须降级或返回可解释错误。
 - 每个改动的 Sink 有单测覆盖成功/失败/降级。
+
+进度说明（2026-07-03）：V3-3 已完成并验证 `go test ./...`、`go vet ./...`、`go build ./...`、`cd web && npm run build`。Webhook 只外发媒体公开元数据；企业微信群机器人使用 base64/md5 发送本地图片；企业微信应用消息上传临时素材后按 `media_id` 发送图片；钉钉对公网图片使用 markdown 图片链接，本地图片降级为可读文本。真实 Telegram、企业微信、钉钉外部联调需凭证，未纳入本轮自动验证。
 
 ### V3-4 同账号多监听源连接复用
 
