@@ -4,6 +4,8 @@ import { NButton, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 import { deliveriesApi } from '@/api/client'
 import type { Delivery } from '@/types'
 import { errText } from '@/utils/error'
+import PageHeader from '@/components/PageHeader.vue'
+import ClayIcon from '@/components/ClayIcon.vue'
 
 const message = useMessage()
 
@@ -54,7 +56,7 @@ async function retry(row: Delivery) {
 }
 
 const columns: DataTableColumns<Delivery> = [
-  { title: 'ID', key: 'id', width: 70 },
+  { title: 'ID', key: 'id', width: 70, fixed: 'left' },
   { title: '消息', key: 'message_id', width: 90 },
   { title: '规则', key: 'rule_id', width: 80 },
   { title: '渠道', key: 'sink_id', width: 80 },
@@ -87,10 +89,32 @@ onMounted(load)
 
 <template>
   <n-space vertical size="large">
-    <n-space>
-      <n-select v-model:value="status" style="width: 180px" :options="statusOptions" @update:value="load" />
-      <n-button @click="load">刷新</n-button>
-    </n-space>
-    <n-data-table :loading="loading" :columns="columns" :data="deliveries" :bordered="false" />
+    <PageHeader title="投递记录" desc="查看消息投递结果，失败可重新入队" icon="deliveries">
+      <template #actions>
+        <n-select
+          v-model:value="status"
+          class="status-filter"
+          :options="statusOptions"
+          @update:value="load"
+        />
+        <n-button secondary @click="load">
+          <template #icon><ClayIcon name="refresh" :size="16" /></template>
+          刷新
+        </n-button>
+      </template>
+    </PageHeader>
+    <n-data-table :loading="loading" :columns="columns" :data="deliveries" :bordered="false" :scroll-x="820" />
   </n-space>
 </template>
+
+<style scoped>
+.status-filter {
+  width: 170px;
+}
+@media (max-width: 640px) {
+  .status-filter {
+    flex: 1;
+    width: auto;
+  }
+}
+</style>

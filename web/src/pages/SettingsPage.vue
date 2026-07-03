@@ -5,6 +5,7 @@ import { tokensApi } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import type { ApiToken } from '@/types'
 import { errText } from '@/utils/error'
+import PageHeader from '@/components/PageHeader.vue'
 
 const message = useMessage()
 const auth = useAuthStore()
@@ -80,6 +81,8 @@ onMounted(loadTokens)
 
 <template>
   <n-space vertical size="large">
+    <PageHeader title="设置" desc="管理 API 鉴权与访问凭证" icon="settings" />
+
     <n-card title="API 鉴权状态">
       <n-alert :type="authStatus.type" :title="authStatus.title">
         {{ authStatus.desc }}
@@ -105,7 +108,7 @@ onMounted(loadTokens)
           <n-text code>{{ createdToken }}</n-text>
         </n-alert>
 
-        <n-data-table :loading="loading" :columns="columns" :data="tokens" :bordered="false" />
+        <n-data-table :loading="loading" :columns="columns" :data="tokens" :bordered="false" :scroll-x="560" />
       </n-space>
     </n-card>
   </n-space>

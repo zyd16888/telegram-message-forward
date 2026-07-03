@@ -3,7 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#eaf1f8" />
     <title>Telegram Message Forward 管理后台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* 首屏前的基底色，避免字体/JS 加载时白屏闪烁 */
+      html {
+        background-color: #eaf1f8;
+      }
+      html[data-clay-theme='dark'] {
+        background-color: #182432;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>

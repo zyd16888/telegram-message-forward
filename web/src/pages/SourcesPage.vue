@@ -3,6 +3,8 @@ import { computed, h, onMounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NSpace, NSwitch, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import PeerSyncPanel from '@/components/sources/PeerSyncPanel.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import ClayIcon from '@/components/ClayIcon.vue'
 import { accountsApi, rulesApi, sourcesApi } from '@/api/client'
 import type { Account, Rule, Source } from '@/types'
 import { errText } from '@/utils/error'
@@ -155,11 +157,13 @@ onMounted(load)
 
 <template>
   <NSpace vertical size="large">
+    <PageHeader title="监听源" desc="从账号同步会话，管理需要监听的来源" icon="sources" />
+
     <PeerSyncPanel :accounts="accounts" :sources="sources" @added="load" />
 
-    <NSpace justify="space-between" align="center">
-      <NText strong>已配置监听源</NText>
-      <NSpace>
+    <div class="list-toolbar">
+      <NText strong class="list-title">已配置监听源</NText>
+      <div class="list-filters">
         <NInput v-model:value="sourceSearch" clearable class="source-search" placeholder="搜索名称、用户名、Peer ID" />
         <NSelect
           v-model:value="sourceKindFilter"
@@ -168,19 +172,51 @@ onMounted(load)
           placeholder="全部类型"
           :options="sourceKindOptions"
         />
-        <NButton @click="load">刷新</NButton>
-      </NSpace>
-    </NSpace>
-    <NDataTable :loading="loading" :columns="columns" :data="visibleSources" :bordered="false" />
+        <NButton secondary @click="load">
+          <template #icon><ClayIcon name="refresh" :size="16" /></template>
+          刷新
+        </NButton>
+      </div>
+    </div>
+    <NDataTable :loading="loading" :columns="columns" :data="visibleSources" :bordered="false" :scroll-x="820" />
   </NSpace>
 </template>
 
 <style scoped>
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.list-title {
+  font-size: 15px;
+}
+.list-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 .source-search {
   width: 260px;
 }
-
 .source-kind {
   width: 150px;
+}
+
+@media (max-width: 640px) {
+  .list-filters {
+    width: 100%;
+  }
+  .source-search {
+    flex: 1 1 100%;
+    width: auto;
+  }
+  .source-kind {
+    flex: 1;
+    width: auto;
+  }
 }
 </style>

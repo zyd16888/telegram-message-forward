@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 import { errText } from '@/utils/error'
+import ClayIcon from '@/components/ClayIcon.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -80,10 +81,19 @@ async function doBootstrap() {
 
 <template>
   <div class="login-wrap">
-    <n-card class="login-card" :bordered="true">
-      <template #header>
-        <div class="brand">TG Forward 管理后台</div>
-      </template>
+    <span class="blob blob-a" />
+    <span class="blob blob-b" />
+
+    <div class="login-card">
+      <div class="brand">
+        <div class="brand-badge">
+          <ClayIcon name="telegram" :size="30" />
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">TG Forward</span>
+          <span class="brand-sub">消息转发管理后台</span>
+        </div>
+      </div>
 
       <n-spin :show="!ready">
         <!-- 开发免鉴权 -->
@@ -138,25 +148,90 @@ async function doBootstrap() {
           </n-space>
         </div>
       </n-spin>
-    </n-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .login-wrap {
+  position: relative;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
+  overflow: hidden;
 }
+
+/* 背景柔光团 */
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(10px);
+  pointer-events: none;
+}
+.blob-a {
+  width: 340px;
+  height: 340px;
+  top: -80px;
+  left: -60px;
+  background: radial-gradient(circle at 35% 35%, rgba(120, 190, 245, 0.55), transparent 68%);
+}
+.blob-b {
+  width: 380px;
+  height: 380px;
+  bottom: -110px;
+  right: -80px;
+  background: radial-gradient(circle at 60% 60%, rgba(180, 235, 215, 0.5), transparent 68%);
+}
+
 .login-card {
-  width: 420px;
+  position: relative;
+  z-index: 1;
+  width: 428px;
   max-width: 100%;
+  padding: 34px 32px;
+  border-radius: 30px;
+  background: var(--clay-surface);
+  box-shadow: var(--clay-out), var(--clay-inset-hi);
 }
+
 .brand {
-  font-size: 18px;
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 24px;
+}
+.brand-badge {
+  width: 60px;
+  height: 60px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(150deg, #56b0ea, #2f8fd6);
+  box-shadow:
+    6px 6px 15px rgba(24, 108, 170, 0.4),
+    -3px -3px 9px rgba(255, 255, 255, 0.5),
+    inset 2px 2px 5px rgba(255, 255, 255, 0.45),
+    inset -3px -3px 6px rgba(18, 90, 150, 0.35);
+  flex-shrink: 0;
+}
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.brand-name {
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  color: var(--n-text-color, #22364a);
+}
+.brand-sub {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8aa0b4;
 }
 .mt {
   margin-top: 16px;

@@ -4,6 +4,8 @@ import { NButton, NSpace, NTag, useDialog, useMessage, type DataTableColumns } f
 import { telegramConfigApi } from '@/api/client'
 import type { SharedProxy, TelegramApp } from '@/types'
 import { errText } from '@/utils/error'
+import PageHeader from '@/components/PageHeader.vue'
+import ClayIcon from '@/components/ClayIcon.vue'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -218,18 +220,26 @@ onMounted(load)
 
 <template>
   <n-space vertical size="large">
+    <PageHeader title="Telegram 配置" desc="维护 Telegram App 凭证与共享代理" icon="telegram" />
+
     <n-card title="Telegram App">
       <template #header-extra>
-        <n-button type="primary" @click="openCreateApp">新增 App</n-button>
+        <n-button type="primary" @click="openCreateApp">
+          <template #icon><ClayIcon name="plus" :size="16" /></template>
+          新增 App
+        </n-button>
       </template>
-      <n-data-table :loading="loading" :columns="appColumns" :data="apps" :bordered="false" />
+      <n-data-table :loading="loading" :columns="appColumns" :data="apps" :bordered="false" :scroll-x="640" />
     </n-card>
 
     <n-card title="代理">
       <template #header-extra>
-        <n-button type="primary" @click="openCreateProxy">新增代理</n-button>
+        <n-button type="primary" @click="openCreateProxy">
+          <template #icon><ClayIcon name="plus" :size="16" /></template>
+          新增代理
+        </n-button>
       </template>
-      <n-data-table :loading="loading" :columns="proxyColumns" :data="proxies" :bordered="false" />
+      <n-data-table :loading="loading" :columns="proxyColumns" :data="proxies" :bordered="false" :scroll-x="720" />
     </n-card>
 
     <n-modal v-model:show="showAppModal" preset="card" title="Telegram App" style="width: 520px">

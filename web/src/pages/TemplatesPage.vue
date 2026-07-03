@@ -2,6 +2,8 @@
 import { h, onMounted, shallowRef } from 'vue'
 import { NButton, NSpace, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import TemplateEditorModal from '@/components/templates/TemplateEditorModal.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import ClayIcon from '@/components/ClayIcon.vue'
 import { templatesApi } from '@/api/client'
 import type { Template } from '@/types'
 import { errText } from '@/utils/error'
@@ -77,12 +79,20 @@ onMounted(load)
 
 <template>
   <NSpace vertical size="large">
-    <NSpace justify="space-between">
-      <NButton type="primary" @click="openCreate">新建模板</NButton>
-      <NButton @click="load">刷新</NButton>
-    </NSpace>
+    <PageHeader title="模板" desc="定义消息渲染模板，供规则复用" icon="templates">
+      <template #actions>
+        <NButton type="primary" @click="openCreate">
+          <template #icon><ClayIcon name="plus" :size="16" /></template>
+          新建模板
+        </NButton>
+        <NButton secondary @click="load">
+          <template #icon><ClayIcon name="refresh" :size="16" /></template>
+          刷新
+        </NButton>
+      </template>
+    </PageHeader>
 
-    <NDataTable :loading="loading" :columns="columns" :data="templates" :bordered="false" />
+    <NDataTable :loading="loading" :columns="columns" :data="templates" :bordered="false" :scroll-x="640" />
 
     <TemplateEditorModal v-model:show="showModal" :template="editingTemplate" @saved="load" />
   </NSpace>

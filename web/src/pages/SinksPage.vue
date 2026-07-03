@@ -3,6 +3,8 @@ import { computed, h, onMounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NSpace, NSwitch, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import SinkFormModal from '@/components/sinks/SinkFormModal.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import ClayIcon from '@/components/ClayIcon.vue'
 import { rulesApi, sinksApi } from '@/api/client'
 import type { Rule, Sink, SinkDescriptor } from '@/types'
 import { errText } from '@/utils/error'
@@ -141,12 +143,20 @@ onMounted(load)
 
 <template>
   <NSpace vertical size="large">
-    <NSpace justify="space-between">
-      <NButton type="primary" @click="openCreate">新建渠道</NButton>
-      <NButton @click="load">刷新</NButton>
-    </NSpace>
+    <PageHeader title="目标渠道" desc="配置消息投递的下游渠道（Webhook、机器人等）" icon="sinks">
+      <template #actions>
+        <NButton type="primary" @click="openCreate">
+          <template #icon><ClayIcon name="plus" :size="16" /></template>
+          新建渠道
+        </NButton>
+        <NButton secondary @click="load">
+          <template #icon><ClayIcon name="refresh" :size="16" /></template>
+          刷新
+        </NButton>
+      </template>
+    </PageHeader>
 
-    <NDataTable :loading="loading" :columns="columns" :data="sinks" :bordered="false" />
+    <NDataTable :loading="loading" :columns="columns" :data="sinks" :bordered="false" :scroll-x="760" />
 
     <SinkFormModal v-model:show="showForm" :descriptors="descriptors" :sink="editingSink" @saved="load" />
   </NSpace>

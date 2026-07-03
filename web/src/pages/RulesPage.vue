@@ -3,6 +3,8 @@ import { computed, h, onMounted, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NButton, NSpace, NTag, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import ClayIcon from '@/components/ClayIcon.vue'
 import { rulesApi, sinksApi, sourcesApi, templatesApi } from '@/api/client'
 import type { Rule, RuleMeta, Sink, Source, Template } from '@/types'
 import { errText } from '@/utils/error'
@@ -126,10 +128,18 @@ onMounted(load)
 
 <template>
   <NSpace vertical size="large">
-    <NSpace justify="space-between">
-      <NButton type="primary" @click="openCreate">新建规则</NButton>
-      <NButton @click="load">刷新</NButton>
-    </NSpace>
+    <PageHeader title="规则" desc="定义监听源到目标渠道的匹配、处理与投递规则" icon="rules">
+      <template #actions>
+        <NButton type="primary" @click="openCreate">
+          <template #icon><ClayIcon name="plus" :size="16" /></template>
+          新建规则
+        </NButton>
+        <NButton secondary @click="load">
+          <template #icon><ClayIcon name="refresh" :size="16" /></template>
+          刷新
+        </NButton>
+      </template>
+    </PageHeader>
 
     <NAlert v-if="filterSourceId || filterSinkId" type="info" :show-icon="false">
       <NSpace align="center" justify="space-between">
@@ -141,7 +151,7 @@ onMounted(load)
       </NSpace>
     </NAlert>
 
-    <NDataTable :loading="loading" :columns="columns" :data="visibleRules" :bordered="false" />
+    <NDataTable :loading="loading" :columns="columns" :data="visibleRules" :bordered="false" :scroll-x="880" />
 
     <RuleEditorModal
       v-model:show="showModal"

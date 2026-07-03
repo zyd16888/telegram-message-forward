@@ -6,6 +6,8 @@ import { accountsApi, telegramConfigApi } from '@/api/client'
 import type { Account, SharedProxy, TelegramApp } from '@/types'
 import { errText } from '@/utils/error'
 import AccountLoginModal from '@/components/AccountLoginModal.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import ClayIcon from '@/components/ClayIcon.vue'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -160,17 +162,31 @@ onMounted(load)
 
 <template>
   <n-space vertical size="large">
-    <n-space justify="space-between">
-      <n-button type="primary" @click="showCreate = true">新建账号</n-button>
-      <n-button @click="load">刷新</n-button>
-    </n-space>
+    <PageHeader title="账号" desc="管理 Telegram 登录账号与代理绑定" icon="accounts">
+      <template #actions>
+        <n-button type="primary" @click="showCreate = true">
+          <template #icon><ClayIcon name="plus" :size="16" /></template>
+          新建账号
+        </n-button>
+        <n-button secondary @click="load">
+          <template #icon><ClayIcon name="refresh" :size="16" /></template>
+          刷新
+        </n-button>
+      </template>
+    </PageHeader>
 
     <n-alert type="info" title="登录说明">
       新建账号后点击「登录」，在弹窗中完成 Telegram 登录（发送验证码 → 输入验证码 →
       如有两步验证再输入密码），登录成功后状态变为 active。
     </n-alert>
 
-    <n-data-table :loading="loading" :columns="columns" :data="accounts" :bordered="false" />
+    <n-data-table
+      :loading="loading"
+      :columns="columns"
+      :data="accounts"
+      :bordered="false"
+      :scroll-x="820"
+    />
 
     <AccountLoginModal v-model:show="showLogin" :account="loginAccount" @success="onLoginSuccess" />
 
