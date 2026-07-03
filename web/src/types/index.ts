@@ -36,14 +36,29 @@ export interface Account {
   updated_at: string
 }
 
+export interface MediaCapability {
+  type: string
+  supported: boolean
+  max_size_mb?: number
+  supports_public_url: boolean
+  requires_upload: boolean
+  supports_binary: boolean
+  delivery_mode?: string
+  fallback?: string
+}
+
 export interface Capabilities {
   supports_text: boolean
   supports_markdown: boolean
   supports_html: boolean
   supports_image: boolean
   supports_file: boolean
+  supports_audio: boolean
+  supports_video: boolean
   max_text_length?: number
   max_file_size_mb?: number
+  media?: MediaCapability[]
+  notes?: string[]
 }
 
 export type FieldType =

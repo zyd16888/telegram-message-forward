@@ -3,7 +3,7 @@ import { computed, reactive, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import ConfigFormRenderer from '@/components/ConfigFormRenderer.vue'
 import { sinksApi } from '@/api/client'
-import type { Sink, SinkDescriptor } from '@/types'
+import type { Capabilities, MediaCapability, Sink, SinkDescriptor } from '@/types'
 import { errText } from '@/utils/error'
 
 const show = defineModel<boolean>('show', { required: true })
@@ -36,6 +36,9 @@ const testing = reactive({
 const editing = computed(() => Boolean(props.sink))
 const descriptor = computed(() => props.descriptors.find((item) => item.type === form.type) ?? props.descriptors[0])
 const typeOptions = computed(() => props.descriptors.map((item) => ({ label: item.label, value: item.type })))
+const capabilities = computed(() => descriptor.value?.capabilities)
+const formatCapabilities = computed(() => formatItems(capabilities.value))
+const mediaCapabilities = computed(() => capabilities.value?.media ?? [])
 
 watch(
   () => [show.value, props.sink, props.descriptors] as const,
@@ -79,6 +82,35 @@ function defaultsFor(desc?: SinkDescriptor): Record<string, unknown> {
     if (field.default !== undefined) out[field.key] = field.default
   }
   return out
+}
+
+function formatItems(caps?: Capabilities) {
+  return [
+    { key: 'text', label: 'Text', supported: Boolean(caps?.supports_text) },
+    { key: 'markdown', label: 'Markdown', supported: Boolean(caps?.supports_markdown) },
+    { key: 'html', label: 'HTML', supported: Boolean(caps?.supports_html) },
+  ]
+}
+
+function mediaTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    image: '图片',
+    file: '文件',
+    audio: '音频',
+    video: '视频',
+  }
+  return labels[type] ?? type
+}
+
+function mediaDetail(item: MediaCapability): string {
+  if (!item.supported) return item.fallback || '不支持时按文本降级'
+  const parts: string[] = []
+  if (item.max_size_mb) parts.push(`<= ${item.max_size_mb} MB`)
+  if (item.requires_upload) parts.push('需上传')
+  if (item.supports_public_url) parts.push('支持公网 URL')
+  if (item.supports_binary) parts.push('支持二进制')
+  if (item.delivery_mode) parts.push(item.delivery_mode)
+  return parts.join(' / ') || '支持'
 }
 
 function validate(): boolean {
@@ -192,6 +224,40 @@ async function submit() {
           <NAlert v-if="descriptor?.description" type="default" :show-icon="false" class="sink-desc">
             {{ descriptor.description }}
           </NAlert>
+          <div v-if="capabilities" class="capability-panel">
+            <div class="cap-row">
+              <span class="cap-label">格式</span>
+              <NSpace size="small">
+                <NTag
+                  v-for="item in formatCapabilities"
+                  :key="item.key"
+                  size="small"
+                  :type="item.supported ? 'success' : 'default'"
+                  :bordered="false"
+                >
+                  {{ item.label }}
+                </NTag>
+              </NSpace>
+            </div>
+            <div v-if="capabilities.max_text_length" class="cap-row">
+              <span class="cap-label">文本上限</span>
+              <NText>{{ capabilities.max_text_length }} 字符/字节，按渠道官方口径执行</NText>
+            </div>
+            <div v-if="mediaCapabilities.length" class="cap-row cap-row-media">
+              <span class="cap-label">媒体</span>
+              <div class="media-caps">
+                <div v-for="item in mediaCapabilities" :key="item.type" class="media-cap-item">
+                  <NTag size="small" :type="item.supported ? 'success' : 'warning'" :bordered="false">
+                    {{ mediaTypeLabel(item.type) }}{{ item.supported ? '支持' : '降级' }}
+                  </NTag>
+                  <NText depth="3">{{ mediaDetail(item) }}</NText>
+                </div>
+              </div>
+            </div>
+            <NText v-for="note in capabilities.notes ?? []" :key="note" class="cap-note" depth="3">
+              {{ note }}
+            </NText>
+          </div>
           <ConfigFormRenderer v-if="descriptor" v-model="form.config" :fields="descriptor.config_fields" />
           <NFormItem v-if="descriptor?.secret_field" :label="descriptor.secret_field.label" :required="!editing && descriptor.secret_field.required">
             <NInput
@@ -253,6 +319,49 @@ async function submit() {
 
 .sink-desc {
   margin-bottom: 14px;
+}
+
+.capability-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  background: var(--clay-surface);
+}
+
+.cap-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.cap-label {
+  color: var(--clay-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.media-caps {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.media-cap-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.cap-note {
+  display: block;
+  padding-left: 82px;
+  font-size: 12px;
 }
 
 .test-result {

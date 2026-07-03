@@ -6,7 +6,7 @@ import SinkFormModal from '@/components/sinks/SinkFormModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 import { rulesApi, sinksApi } from '@/api/client'
-import type { Rule, Sink, SinkDescriptor } from '@/types'
+import type { Capabilities, Rule, Sink, SinkDescriptor } from '@/types'
 import { errText } from '@/utils/error'
 
 const message = useMessage()
@@ -61,6 +61,35 @@ function sinkLabel(type: string): string {
   return descriptorMap.value.get(type)?.label ?? type
 }
 
+function sinkCapabilities(row: Sink): Capabilities {
+  const descriptorCaps = descriptorMap.value.get(row.type)?.capabilities
+  if ((row.capabilities.media?.length ?? 0) > 0 || row.capabilities.supports_text) {
+    return row.capabilities
+  }
+  return descriptorCaps ?? row.capabilities
+}
+
+function formatSummary(caps: Capabilities): string {
+  const out: string[] = []
+  if (caps.supports_text) out.push('Text')
+  if (caps.supports_markdown) out.push('Markdown')
+  if (caps.supports_html) out.push('HTML')
+  return out.join(' / ') || '无'
+}
+
+function mediaSummary(caps: Capabilities): string {
+  const supported = (caps.media ?? [])
+    .filter((item) => item.supported)
+    .map((item) => item.type)
+  if (supported.length) return supported.join(' / ')
+  const legacy: string[] = []
+  if (caps.supports_image) legacy.push('image')
+  if (caps.supports_file) legacy.push('file')
+  if (caps.supports_audio) legacy.push('audio')
+  if (caps.supports_video) legacy.push('video')
+  return legacy.join(' / ') || '文本降级'
+}
+
 async function toggle(row: Sink, value: boolean) {
   try {
     await sinksApi.update(row.id, { enabled: value })
@@ -111,6 +140,20 @@ const columns: DataTableColumns<Sink> = [
     render: (row) => h(NTag, { size: 'small' }, { default: () => sinkLabel(row.type) }),
   },
   { title: '名称', key: 'name', ellipsis: { tooltip: true } },
+  {
+    title: '能力',
+    key: 'capabilities',
+    width: 220,
+    render: (row) => {
+      const caps = sinkCapabilities(row)
+      return h(NSpace, { vertical: true, size: 2 }, {
+        default: () => [
+          h(NText, { depth: 2 }, { default: () => formatSummary(caps) }),
+          h(NText, { depth: 3 }, { default: () => `媒体：${mediaSummary(caps)}` }),
+        ],
+      })
+    },
+  },
   { title: '含密钥', key: 'has_secret', width: 90, render: (row) => (row.has_secret ? '是' : '否') },
   {
     title: '关联规则',
@@ -166,7 +209,7 @@ onMounted(load)
       </template>
     </PageHeader>
 
-    <NDataTable :loading="loading" :columns="columns" :data="sinks" :bordered="false" :scroll-x="900" />
+    <NDataTable :loading="loading" :columns="columns" :data="sinks" :bordered="false" :scroll-x="1060" />
 
     <SinkFormModal v-model:show="showForm" :descriptors="descriptors" :sink="editingSink" @saved="load" />
   </NSpace>
