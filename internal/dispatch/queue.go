@@ -13,20 +13,26 @@ import (
 type Queue struct {
 	tasks       domaindelivery.Repository
 	maxAttempts int
+	notifier    *Notifier
 }
 
 // NewQueue 创建投递任务生成器。
-func NewQueue(tasks domaindelivery.Repository, maxAttempts int) *Queue {
+func NewQueue(tasks domaindelivery.Repository, maxAttempts int, notifiers ...*Notifier) *Queue {
 	if maxAttempts <= 0 {
 		maxAttempts = 3
 	}
-	return &Queue{tasks: tasks, maxAttempts: maxAttempts}
+	var notifier *Notifier
+	if len(notifiers) > 0 {
+		notifier = notifiers[0]
+	}
+	return &Queue{tasks: tasks, maxAttempts: maxAttempts, notifier: notifier}
 }
 
 // Enqueue 为每个命中规则的每个目标渠道生成一个 pending 投递任务。
 //
 // 任务创建按 (message_id, rule_id, sink_id) 幂等，重复不产生新任务。
 func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessage, matches []ruleengine.Match) error {
+	created := false
 	for _, m := range matches {
 		for _, target := range m.Targets {
 			task := &domaindelivery.Task{
@@ -41,7 +47,11 @@ func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessag
 			if err := q.tasks.Create(ctx, task); err != nil {
 				return err
 			}
+			created = true
 		}
+	}
+	if created {
+		q.notifier.Notify()
 	}
 	return nil
 }

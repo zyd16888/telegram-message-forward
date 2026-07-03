@@ -125,7 +125,8 @@ func Build(cfg *config.Config) (*App, error) {
 	// 规则引擎、渲染器、投递队列。
 	engine := ruleengine.NewEngine()
 	renderer := tmpl.NewRenderer()
-	queue := dispatch.NewQueue(deliveries, cfg.Dispatch.MaxAttempts)
+	deliveryNotifier := dispatch.NewNotifier()
+	queue := dispatch.NewQueue(deliveries, cfg.Dispatch.MaxAttempts, deliveryNotifier)
 	ingestSvc := appingest.NewService(messages, rules, engine, queue, clk, log)
 	deliverySvc := appdelivery.NewService(deliveries)
 
@@ -162,7 +163,7 @@ func Build(cfg *config.Config) (*App, error) {
 	for i := 0; i < workerCount; i++ {
 		id := fmt.Sprintf("worker-%d", i+1)
 		workers = append(workers, dispatch.NewWorker(
-			id, cfg.Dispatch, deliveries, sinks, templates, messages, renderer, clk, log,
+			id, cfg.Dispatch, deliveries, sinks, templates, messages, renderer, clk, log, deliveryNotifier,
 		))
 	}
 

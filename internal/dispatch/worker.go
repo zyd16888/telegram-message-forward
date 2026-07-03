@@ -26,6 +26,7 @@ type Worker struct {
 	renderer  *tmpl.Renderer
 	clock     clock.Clock
 	log       *slog.Logger
+	notifier  *Notifier
 }
 
 // NewWorker 创建 worker。
@@ -39,25 +40,35 @@ func NewWorker(
 	renderer *tmpl.Renderer,
 	clk clock.Clock,
 	log *slog.Logger,
+	notifiers ...*Notifier,
 ) *Worker {
+	var notifier *Notifier
+	if len(notifiers) > 0 {
+		notifier = notifiers[0]
+	}
 	return &Worker{
 		id: id, cfg: cfg, tasks: tasks, sinks: sinks, templates: templates,
-		messages: messages, renderer: renderer, clock: clk, log: log,
+		messages: messages, renderer: renderer, clock: clk, log: log, notifier: notifier,
 	}
 }
 
-// Run 按 poll interval 循环领取并处理任务，直到 ctx 取消。
+// Run 在收到新任务唤醒信号时立即领取任务，并保留 poll interval 作为兜底扫描。
 func (w *Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(w.cfg.PollInterval)
 	defer ticker.Stop()
+	wake := w.notifier.C()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-wake:
+			if err := w.tick(ctx); err != nil {
+				w.log.Error("worker tick 失败", "worker", w.id, "trigger", "notify", "err", err)
+			}
 		case <-ticker.C:
 			if err := w.tick(ctx); err != nil {
-				w.log.Error("worker tick 失败", "worker", w.id, "err", err)
+				w.log.Error("worker tick 失败", "worker", w.id, "trigger", "poll", "err", err)
 			}
 		}
 	}
