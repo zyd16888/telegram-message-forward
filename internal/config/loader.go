@@ -56,4 +56,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("dispatch.poll_interval", "2s")
 	v.SetDefault("dispatch.visibility_timeout", "5m")
 	v.SetDefault("dispatch.max_attempts", 3)
+	v.SetDefault("media.dir", "data/media")
+	v.SetDefault("media.url_ttl", "24h")
+	v.SetDefault("media.retention", "168h")
+	v.SetDefault("media.s3.enabled", false)
+	v.SetDefault("media.s3.use_ssl", true)
+	v.SetDefault("media.s3.auto_cleanup", false)
 }

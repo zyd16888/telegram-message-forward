@@ -13,6 +13,7 @@ import (
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domaintemplate "telegram-message-forward/internal/domain/template"
 	"telegram-message-forward/internal/infra/clock"
+	"telegram-message-forward/internal/infra/mediastore"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
 	tmpl "telegram-message-forward/internal/template"
 )
@@ -31,6 +32,7 @@ type Worker struct {
 	clock     clock.Clock
 	log       *slog.Logger
 	notifier  *Notifier
+	media     mediastore.Store
 }
 
 // NewWorker 创建 worker。
@@ -54,6 +56,12 @@ func NewWorker(
 		id: id, cfg: cfg, tasks: tasks, sinks: sinks, templates: templates,
 		messages: messages, renderer: renderer, clock: clk, log: log, notifier: notifier,
 	}
+}
+
+// UseMediaStore 注入媒体存储：投递时为有 StorageKey 的媒体生成公网 URL。
+func (w *Worker) UseMediaStore(store mediastore.Store) *Worker {
+	w.media = store
+	return w
 }
 
 // Run 在收到新任务唤醒信号时立即领取任务，并保留 poll interval 作为兜底扫描。
@@ -178,11 +186,12 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 	if err != nil {
 		return nil, err
 	}
-	fallbackText := mediaFallbackText(rendered.Text, msg)
+	media := w.publicMedia(ctx, msg.Media)
+	fallbackText := mediaFallbackText(rendered.Text, media, msg.OriginalURL)
 	payload := pluginsink.Payload{
 		Format:       string(rendered.Format),
 		Text:         rendered.Text,
-		Media:        msg.Media,
+		Media:        media,
 		FallbackText: fallbackText,
 	}
 	if len(msg.Media) > 0 && !supportsAllMedia(s.Capabilities, msg.Media) {
@@ -231,12 +240,33 @@ func supportsAllMedia(c domainsink.Capabilities, media []domainmessage.Media) bo
 	return true
 }
 
-func mediaFallbackText(text string, msg *domainmessage.NormalizedMessage) string {
-	if len(msg.Media) == 0 {
+// publicMedia 为有 StorageKey 但无公网地址的媒体生成访问 URL。
+// URL 在投递时生成而非落库时生成：签名/预签名 URL 有有效期，重试时需要新鲜 URL。
+func (w *Worker) publicMedia(ctx context.Context, media []domainmessage.Media) []domainmessage.Media {
+	if w.media == nil || len(media) == 0 {
+		return media
+	}
+	out := append([]domainmessage.Media(nil), media...)
+	for i := range out {
+		if out[i].StorageKey == "" || out[i].URL != "" || out[i].RemoteURL != "" {
+			continue
+		}
+		u, err := w.media.PublicURL(ctx, out[i].StorageKey)
+		if err != nil {
+			w.log.Warn("生成媒体公网 URL 失败", "storage_key", out[i].StorageKey, "err", err)
+			continue
+		}
+		out[i].URL = u
+	}
+	return out
+}
+
+func mediaFallbackText(text string, media []domainmessage.Media, originalURL string) string {
+	if len(media) == 0 {
 		return text
 	}
 	out := text
-	for _, item := range msg.Media {
+	for _, item := range media {
 		label := item.Type
 		if label == "photo" || label == "image" {
 			label = "图片"
@@ -255,8 +285,8 @@ func mediaFallbackText(text string, msg *domainmessage.NormalizedMessage) string
 			line += " " + item.RemoteURL
 		} else if item.URL != "" {
 			line += " " + item.URL
-		} else if msg.OriginalURL != "" {
-			line += " " + msg.OriginalURL
+		} else if originalURL != "" {
+			line += " " + originalURL
 		}
 		if out == "" {
 			out = line

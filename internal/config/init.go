@@ -62,6 +62,34 @@ dispatch:
   poll_interval: "2s"
   visibility_timeout: "5m"
   max_attempts: 3
+
+# 媒体存储推荐在管理后台「设置」页配置（页面保存后立即生效且优先于本段）；
+# 本段仅作为页面未配置时的默认值，可整段留默认。
+media:
+  # 本地媒体目录；Telegram 下载的图片等媒体保存在这里。
+  dir: "data/media"
+  # 本服务对外可访问的根地址（如 https://tmf.example.com）。
+  # 配置后钉钉/Bark/Gotify 等只认公网 URL 的渠道可直接引用本服务托管的媒体。
+  public_base_url: ""
+  url_ttl: "24h"
+  # 媒体保留时长（如 30 天写 "720h"），超过后由后台任务清理；0 表示不清理。
+  retention: "168h"
+  # 可选：S3 兼容对象存储（AWS S3 / Cloudflare R2 / MinIO / OSS / COS）。
+  # 启用后媒体额外上传到对象存储，公网 URL 优先使用对象存储地址。
+  s3:
+    enabled: false
+    endpoint: ""
+    region: ""
+    bucket: ""
+    access_key: ""
+    secret_key: ""
+    use_ssl: true
+    key_prefix: ""
+    # 公开桶或 CDN 根地址；留空则生成预签名 URL。
+    public_base_url: ""
+    # 开启后超过 retention 的对象由本服务定时删除（共用桶时务必设置 key_prefix）；
+    # 关闭时请用桶生命周期规则清理。
+    auto_cleanup: false
 `, key)
 
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
