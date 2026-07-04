@@ -74,6 +74,12 @@ media:
   url_ttl: "24h"
   # 媒体保留时长（如 30 天写 "720h"），超过后由后台任务清理；0 表示不清理。
   retention: "168h"
+  # 媒体下载策略：图片/文件大小上限与文件类型白名单（推荐在设置页配置）。
+  download:
+    image_max_mb: 20
+    file_max_mb: 50
+    # 文件扩展名白名单（不带点）；留空列表 [] 表示不限类型。
+    file_types: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "txt", "md", "epub", "zip", "rar", "7z"]
   # 可选：S3 兼容对象存储（AWS S3 / Cloudflare R2 / MinIO / OSS / COS）。
   # 启用后媒体额外上传到对象存储，公网 URL 优先使用对象存储地址。
   s3:

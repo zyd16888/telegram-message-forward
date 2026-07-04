@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"telegram-message-forward/internal/api"
@@ -144,7 +145,11 @@ func Build(cfg *config.Config) (*App, error) {
 	settingsSvc := appsettings.NewService(settingsRepo, cfg.Media)
 	mediaStore := mediastore.NewManager()
 	mediaSignKey := []byte(cfg.Security.EncryptionKey)
+	// Telegram 下载策略随媒体设置一起热更新：reloadMedia 时刷新，插件通过闭包读取。
+	var downloadPolicy atomic.Pointer[tgsource.DownloadPolicy]
 	reloadMedia := func(ms appsettings.MediaSettings, s3Secret string) error {
+		policy := downloadPolicyFrom(ms)
+		downloadPolicy.Store(&policy)
 		local := mediastore.NewLocal(ms.Dir, ms.PublicBaseURL, mediaSignKey, ms.URLTTL())
 		var store mediastore.Store = local
 		if ms.S3.Enabled {
@@ -185,6 +190,12 @@ func Build(cfg *config.Config) (*App, error) {
 	tgPlugin := tgsource.NewPlugin(tgsource.Deps{
 		Peers: peers,
 		Log:   log,
+		DownloadPolicy: func() tgsource.DownloadPolicy {
+			if p := downloadPolicy.Load(); p != nil {
+				return *p
+			}
+			return tgsource.DownloadPolicy{}
+		},
 		LoadSession: func(ctx context.Context, accountID int64) ([]byte, error) {
 			acc, err := accounts.GetByID(ctx, accountID)
 			if err != nil {
@@ -309,6 +320,21 @@ func (a *App) Handler() http.Handler {
 // Deps 返回已装配的依赖，供集成测试使用。
 func (a *App) Dependencies() *Deps {
 	return a.deps
+}
+
+// downloadPolicyFrom 把媒体设置的下载策略段转换为 Telegram 插件的下载策略（MB → 字节）。
+func downloadPolicyFrom(ms appsettings.MediaSettings) tgsource.DownloadPolicy {
+	toBytes := func(mb float64) int64 {
+		if mb <= 0 {
+			return 0
+		}
+		return int64(mb * 1024 * 1024)
+	}
+	return tgsource.DownloadPolicy{
+		ImageMaxBytes: toBytes(ms.Download.ImageMaxMB),
+		FileMaxBytes:  toBytes(ms.Download.FileMaxMB),
+		FileTypes:     ms.Download.FileTypes,
+	}
 }
 
 // mediaS3Options 把媒体设置转换为 mediastore 的 S3 连接参数。

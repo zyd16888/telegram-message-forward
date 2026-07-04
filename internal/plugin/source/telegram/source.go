@@ -29,6 +29,8 @@ type Deps struct {
 	LoadSession func(ctx context.Context, accountID int64) ([]byte, error)
 	// SaveSession 持久化账号明文 session（由实现方负责加密落库）。
 	SaveSession func(ctx context.Context, accountID int64, session []byte) error
+	// DownloadPolicy 返回当前生效的媒体下载策略（设置页保存后热生效）；nil 使用内置默认。
+	DownloadPolicy func() DownloadPolicy
 }
 
 // Plugin 实现 source.Plugin。
@@ -724,7 +726,7 @@ func (p *Plugin) forwardToSubscriptions(runCtx context.Context, accountID int64,
 		}
 		p.mu.Unlock()
 		nm := Normalize(sub.source.ID, msg, e)
-		nm.Media = downloadMessageImages(runCtx, client, sub.source.ID, msg, nm.Media)
+		nm.Media = downloadMessageMedia(runCtx, client, sub.source.ID, msg, nm.Media, p.downloadPolicy(), sourceDownloadFiles(&sub.source))
 		for _, media := range nm.Media {
 			if media.DownloadStatus == "failed" {
 				p.deps.Log.Warn("Telegram 媒体下载失败，按降级文本继续处理", "source", sub.source.ID, "message_id", msg.ID, "media_type", media.Type, "err", media.DownloadError)
@@ -745,6 +747,23 @@ func (p *Plugin) ensureAuthorized(ctx context.Context, client *telegram.Client) 
 		return errors.New("账号未登录，请先通过 cmd/login 完成登录")
 	}
 	return nil
+}
+
+// downloadPolicy 返回当前媒体下载策略；未注入时使用内置默认。
+func (p *Plugin) downloadPolicy() DownloadPolicy {
+	if p.deps.DownloadPolicy == nil {
+		return DownloadPolicy{}
+	}
+	return p.deps.DownloadPolicy()
+}
+
+// sourceDownloadFiles 读取 source 级「下载文件」开关；默认关闭（仅下载图片）。
+func sourceDownloadFiles(src *domainsource.Source) bool {
+	if src == nil || src.Config == nil {
+		return false
+	}
+	v, _ := src.Config["download_files"].(bool)
+	return v
 }
 
 // matchesSource 判断消息是否来自指定 source 的 peer。

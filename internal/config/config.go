@@ -56,6 +56,18 @@ type MediaConfig struct {
 	Retention time.Duration `mapstructure:"retention"`
 	// S3 是可选的 S3 兼容对象存储配置，启用后媒体额外上传并优先用其 URL。
 	S3 S3Config `mapstructure:"s3"`
+	// Download 是 Source 侧媒体下载策略（大小上限、文件类型白名单）。
+	Download DownloadConfig `mapstructure:"download"`
+}
+
+// DownloadConfig 是媒体下载策略配置。
+type DownloadConfig struct {
+	// ImageMaxMB 是图片（photo 与 image document）下载大小上限，<=0 使用内置默认。
+	ImageMaxMB float64 `mapstructure:"image_max_mb"`
+	// FileMaxMB 是文件（PDF 等非图片 document）下载大小上限，<=0 使用内置默认。
+	FileMaxMB float64 `mapstructure:"file_max_mb"`
+	// FileTypes 是文件扩展名白名单（不带点，如 pdf、docx）；空列表表示不限类型。
+	FileTypes []string `mapstructure:"file_types"`
 }
 
 // S3Config 是 S3 兼容对象存储配置（AWS S3 / Cloudflare R2 / MinIO / OSS / COS）。

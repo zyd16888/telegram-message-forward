@@ -352,11 +352,19 @@ export interface MediaS3Settings {
   auto_cleanup: boolean
 }
 
+export interface MediaDownloadSettings {
+  image_max_mb: number
+  file_max_mb: number
+  // 文件扩展名白名单（不带点）；空列表表示不限类型。
+  file_types: string[]
+}
+
 export interface MediaSettings {
   dir: string
   public_base_url: string
   url_ttl_hours: number
   retention_hours: number
+  download: MediaDownloadSettings
   s3: MediaS3Settings
   has_s3_secret: boolean
   // database：页面已保存；file：仍在使用配置文件默认值。
@@ -368,6 +376,7 @@ export interface MediaSettingsRequest {
   public_base_url: string
   url_ttl_hours: number
   retention_hours: number
+  download: MediaDownloadSettings
   s3: MediaS3Settings
   // 省略表示保留已有 secret。
   s3_secret_key?: string

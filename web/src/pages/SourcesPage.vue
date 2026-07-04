@@ -132,6 +132,16 @@ async function toggle(row: Source, value: boolean) {
   }
 }
 
+async function toggleDownloadFiles(row: Source, value: boolean) {
+  const config = { ...(row.config ?? {}), download_files: value }
+  try {
+    await sourcesApi.update(row.id, { config })
+    sources.value = sources.value.map((s) => (s.id === row.id ? { ...s, config } : s))
+  } catch (e) {
+    message.error('更新失败：' + errText(e))
+  }
+}
+
 async function addRSSSource() {
   const feedURL = rssForm.feed_url.trim()
   const name = rssForm.name.trim()
@@ -324,6 +334,25 @@ const telegramColumns: DataTableColumns<Source> = [
   },
   { title: 'Peer ID', key: 'peer_id', width: 140 },
   { title: '账号', key: 'account_id', width: 130, render: (row) => accountName(row) },
+  {
+    title: '文件下载',
+    key: 'download_files',
+    width: 100,
+    render: (row) =>
+      h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () =>
+            h(NSwitch, {
+              size: 'small',
+              value: row.config?.download_files === true,
+              onUpdateValue: (value: boolean) => toggleDownloadFiles(row, value),
+            }),
+          default: () => '开启后下载该来源的 PDF 等文件（大小与类型限制见「设置 → 媒体存储」）；图片始终下载',
+        },
+      ),
+  },
   ...commonTailColumns(),
 ]
 
@@ -407,7 +436,7 @@ onMounted(async () => {
             :columns="telegramColumns"
             :data="visibleTelegramSources"
             :bordered="false"
-            :scroll-x="1120"
+            :scroll-x="1220"
           />
         </NSpace>
       </NTabPane>

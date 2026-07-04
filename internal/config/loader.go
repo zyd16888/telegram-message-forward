@@ -62,4 +62,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("media.s3.enabled", false)
 	v.SetDefault("media.s3.use_ssl", true)
 	v.SetDefault("media.s3.auto_cleanup", false)
+	v.SetDefault("media.download.image_max_mb", 20)
+	v.SetDefault("media.download.file_max_mb", 50)
+	v.SetDefault("media.download.file_types", DefaultDownloadFileTypes())
+}
+
+// DefaultDownloadFileTypes 返回文件下载扩展名白名单默认值（文档、表格、压缩包等常见资料类型）。
+func DefaultDownloadFileTypes() []string {
+	return []string{"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "txt", "md", "epub", "zip", "rar", "7z"}
 }

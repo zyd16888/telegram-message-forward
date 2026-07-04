@@ -83,6 +83,11 @@ const mediaForm = ref({
   public_base_url: '',
   url_ttl_hours: 24,
   retention_hours: 168,
+  download: {
+    image_max_mb: 20,
+    file_max_mb: 50,
+    file_types: [] as string[],
+  },
   s3: {
     enabled: false,
     endpoint: '',
@@ -111,6 +116,11 @@ async function loadMedia() {
       public_base_url: ms.public_base_url,
       url_ttl_hours: ms.url_ttl_hours,
       retention_hours: ms.retention_hours,
+      download: {
+        image_max_mb: ms.download.image_max_mb,
+        file_max_mb: ms.download.file_max_mb,
+        file_types: [...(ms.download.file_types ?? [])],
+      },
       s3: { ...ms.s3 },
     }
     hasS3Secret.value = ms.has_s3_secret
@@ -126,6 +136,7 @@ async function loadMedia() {
 function mediaRequestBody(): MediaSettingsRequest {
   const body: MediaSettingsRequest = {
     ...mediaForm.value,
+    download: { ...mediaForm.value.download, file_types: [...mediaForm.value.download.file_types] },
     s3: { ...mediaForm.value.s3 },
   }
   // 留空表示不修改已保存的 secret。
@@ -196,8 +207,9 @@ onMounted(() => {
       <n-spin :show="mediaLoading">
         <n-space vertical size="large">
           <n-text depth="3">
-            Telegram 图片等媒体的存储与公网访问设置。配置「公网访问地址」后，钉钉、Bark、Gotify
-            等只认公网 URL 的渠道可以直接收到图片；保存后立即生效，无需重启服务。
+            Telegram 图片、文件等媒体的下载、存储与公网访问设置。配置「公网访问地址」后，钉钉、Bark、Gotify
+            等只认公网 URL 的渠道可以直接收到图片；PDF 等文件的下载还需在监听源上开启「文件下载」开关。
+            保存后立即生效，无需重启服务。
           </n-text>
 
           <n-form label-placement="left" label-width="130" :show-feedback="false">
@@ -218,6 +230,27 @@ onMounted(() => {
                 <n-space align="center">
                   <n-input-number v-model:value="mediaForm.retention_hours" :min="0" :step="24" style="width: 160px" />
                   <n-text depth="3">超过后自动清理；0 表示不清理，30 天填 720</n-text>
+                </n-space>
+              </n-form-item>
+
+              <n-divider style="margin: 4px 0">媒体下载策略（Telegram 图片与文件）</n-divider>
+
+              <n-form-item label="图片上限(MB)">
+                <n-space align="center">
+                  <n-input-number v-model:value="mediaForm.download.image_max_mb" :min="1" style="width: 160px" />
+                  <n-text depth="3">超过上限的图片不下载，按文本摘要降级</n-text>
+                </n-space>
+              </n-form-item>
+              <n-form-item label="文件上限(MB)">
+                <n-space align="center">
+                  <n-input-number v-model:value="mediaForm.download.file_max_mb" :min="1" style="width: 160px" />
+                  <n-text depth="3">PDF 等文件的下载上限；文件下载需在监听源上单独开启</n-text>
+                </n-space>
+              </n-form-item>
+              <n-form-item label="文件类型白名单">
+                <n-space vertical size="small" style="width: 100%">
+                  <n-dynamic-tags v-model:value="mediaForm.download.file_types" />
+                  <n-text depth="3">按扩展名过滤（不带点，如 pdf、docx、zip）；清空表示不限类型，仅按大小限制</n-text>
                 </n-space>
               </n-form-item>
 

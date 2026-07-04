@@ -17,11 +17,23 @@ import (
 
 // MediaSettings 是媒体存储设置（不含敏感字段，敏感字段单独加密存储）。
 type MediaSettings struct {
-	Dir            string     `json:"dir"`
-	PublicBaseURL  string     `json:"public_base_url"`
-	URLTTLHours    float64    `json:"url_ttl_hours"`
-	RetentionHours float64    `json:"retention_hours"`
-	S3             S3Settings `json:"s3"`
+	Dir            string           `json:"dir"`
+	PublicBaseURL  string           `json:"public_base_url"`
+	URLTTLHours    float64          `json:"url_ttl_hours"`
+	RetentionHours float64          `json:"retention_hours"`
+	Download       DownloadSettings `json:"download"`
+	S3             S3Settings       `json:"s3"`
+}
+
+// DownloadSettings 是 Source 侧媒体下载策略。
+type DownloadSettings struct {
+	// ImageMaxMB 是图片下载大小上限（MB），<=0 使用默认 20。
+	ImageMaxMB float64 `json:"image_max_mb"`
+	// FileMaxMB 是文件下载大小上限（MB），<=0 使用默认 50。
+	FileMaxMB float64 `json:"file_max_mb"`
+	// FileTypes 是文件扩展名白名单（不带点）；空列表表示不限类型，
+	// nil 表示未配置（回退到配置文件默认值）。
+	FileTypes []string `json:"file_types"`
 }
 
 // S3Settings 是 S3 兼容对象存储设置（secret_key 除外）。
@@ -112,7 +124,22 @@ func (s *Service) EffectiveMedia(ctx context.Context) (MediaSettings, string, st
 	if err != nil {
 		return MediaSettings{}, "", "", err
 	}
+	s.fillDownloadDefaults(&ms)
 	return ms, secret.S3SecretKey, SourceDatabase, nil
+}
+
+// fillDownloadDefaults 为历史记录补齐下载策略：字段缺失时回退到配置文件默认值。
+// FileTypes 用 nil 区分「未配置」与「用户清空表示不限类型」（空数组）。
+func (s *Service) fillDownloadDefaults(ms *MediaSettings) {
+	if ms.Download.ImageMaxMB <= 0 {
+		ms.Download.ImageMaxMB = s.fileDefaults.Download.ImageMaxMB
+	}
+	if ms.Download.FileMaxMB <= 0 {
+		ms.Download.FileMaxMB = s.fileDefaults.Download.FileMaxMB
+	}
+	if ms.Download.FileTypes == nil {
+		ms.Download.FileTypes = s.fileDefaults.Download.FileTypes
+	}
 }
 
 // GetMedia 返回当前生效的媒体设置（脱敏：只返回是否已配置 secret）。
@@ -188,6 +215,7 @@ func normalizeMedia(ms *MediaSettings) {
 	if ms.Dir == "" {
 		ms.Dir = "data/media"
 	}
+	ms.Download.FileTypes = normalizeFileTypes(ms.Download.FileTypes)
 	ms.PublicBaseURL = strings.TrimSpace(strings.TrimRight(ms.PublicBaseURL, "/"))
 	ms.S3.Endpoint = strings.TrimSpace(ms.S3.Endpoint)
 	ms.S3.Bucket = strings.TrimSpace(ms.S3.Bucket)
@@ -196,9 +224,33 @@ func normalizeMedia(ms *MediaSettings) {
 	ms.S3.PublicBaseURL = strings.TrimSpace(strings.TrimRight(ms.S3.PublicBaseURL, "/"))
 }
 
+// normalizeFileTypes 清洗扩展名白名单：去点、小写、去重；nil 原样返回（表示未配置）。
+func normalizeFileTypes(types []string) []string {
+	if types == nil {
+		return nil
+	}
+	out := make([]string, 0, len(types))
+	seen := map[string]struct{}{}
+	for _, t := range types {
+		t = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(t), "."))
+		if t == "" {
+			continue
+		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+	}
+	return out
+}
+
 func validateMedia(ms MediaSettings, s3Secret string) error {
 	if ms.URLTTLHours < 0 || ms.RetentionHours < 0 {
 		return fmt.Errorf("URL 有效期与保留时长不能为负数")
+	}
+	if ms.Download.ImageMaxMB < 0 || ms.Download.FileMaxMB < 0 {
+		return fmt.Errorf("媒体下载大小上限不能为负数")
 	}
 	if ms.PublicBaseURL != "" && !strings.HasPrefix(ms.PublicBaseURL, "http://") && !strings.HasPrefix(ms.PublicBaseURL, "https://") {
 		return fmt.Errorf("公网访问地址必须以 http:// 或 https:// 开头")
@@ -222,6 +274,11 @@ func fromConfig(cfg config.MediaConfig) MediaSettings {
 		PublicBaseURL:  strings.TrimRight(cfg.PublicBaseURL, "/"),
 		URLTTLHours:    cfg.URLTTL.Hours(),
 		RetentionHours: cfg.Retention.Hours(),
+		Download: DownloadSettings{
+			ImageMaxMB: cfg.Download.ImageMaxMB,
+			FileMaxMB:  cfg.Download.FileMaxMB,
+			FileTypes:  normalizeFileTypes(cfg.Download.FileTypes),
+		},
 		S3: S3Settings{
 			Enabled:       cfg.S3.Enabled,
 			Endpoint:      cfg.S3.Endpoint,
