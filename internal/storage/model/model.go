@@ -275,10 +275,13 @@ type TelegramLoginFlow struct {
 func (TelegramLoginFlow) TableName() string { return "telegram_login_flows" }
 
 // Setting 对应 settings 表。
+//
+// 敏感字段（如 S3 secret_key）以 JSON 形式加密存储在 secret_encrypted 列。
 type Setting struct {
-	Key       string `gorm:"primaryKey"`
-	Value     datatypes.JSON
-	UpdatedAt time.Time
+	Key             string `gorm:"primaryKey"`
+	Value           datatypes.JSON
+	SecretEncrypted []byte
+	UpdatedAt       time.Time
 }
 
 func (Setting) TableName() string { return "settings" }

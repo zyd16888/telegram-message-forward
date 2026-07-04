@@ -18,6 +18,7 @@ import (
 	appdelivery "telegram-message-forward/internal/app/delivery"
 	appingest "telegram-message-forward/internal/app/ingest"
 	apprule "telegram-message-forward/internal/app/rule"
+	appsettings "telegram-message-forward/internal/app/settings"
 	appsink "telegram-message-forward/internal/app/sink"
 	appsource "telegram-message-forward/internal/app/source"
 	apptelegramconfig "telegram-message-forward/internal/app/telegramconfig"
@@ -29,6 +30,7 @@ import (
 	"telegram-message-forward/internal/infra/clock"
 	"telegram-message-forward/internal/infra/crypto"
 	"telegram-message-forward/internal/infra/logger"
+	"telegram-message-forward/internal/infra/mediastore"
 	infratelegram "telegram-message-forward/internal/infra/telegram"
 	pluginsource "telegram-message-forward/internal/plugin/source"
 	rsssource "telegram-message-forward/internal/plugin/source/rss"
@@ -60,6 +62,7 @@ type App struct {
 	workers    []*dispatch.Worker
 	srcManager *appsource.Manager
 	tgLogin    *apptelegramlogin.Service
+	mediaStore *mediastore.Manager
 	deps       *Deps
 }
 
@@ -134,7 +137,42 @@ func Build(cfg *config.Config) (*App, error) {
 	renderer := tmpl.NewRenderer()
 	deliveryNotifier := dispatch.NewNotifier()
 	queue := dispatch.NewQueue(deliveries, cfg.Dispatch.MaxAttempts, deliveryNotifier).UseSinks(sinks)
-	ingestSvc := appingest.NewService(messages, rules, engine, queue, clk, log)
+
+	// 媒体存储：设置服务提供生效配置（页面保存的设置优先，配置文件作默认），
+	// Manager 支持设置保存后热重载，无需重启。
+	settingsRepo := repository.NewSettingRepository(db, cipher)
+	settingsSvc := appsettings.NewService(settingsRepo, cfg.Media)
+	mediaStore := mediastore.NewManager()
+	mediaSignKey := []byte(cfg.Security.EncryptionKey)
+	reloadMedia := func(ms appsettings.MediaSettings, s3Secret string) error {
+		local := mediastore.NewLocal(ms.Dir, ms.PublicBaseURL, mediaSignKey, ms.URLTTL())
+		var store mediastore.Store = local
+		if ms.S3.Enabled {
+			s3Store, err := mediastore.NewS3(mediaS3Options(ms, s3Secret), local)
+			if err != nil {
+				return fmt.Errorf("初始化 S3 媒体存储失败: %w", err)
+			}
+			store = s3Store
+		}
+		mediaStore.Swap(store, local, ms.Retention())
+		return nil
+	}
+	settingsSvc.SetMediaReloader(reloadMedia)
+	settingsSvc.SetMediaTester(func(ctx context.Context, ms appsettings.MediaSettings, s3Secret string) error {
+		return mediastore.TestS3(ctx, mediaS3Options(ms, s3Secret))
+	})
+	initialMedia, initialS3Secret, _, err := settingsSvc.EffectiveMedia(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("加载媒体设置失败: %w", err)
+	}
+	if err := reloadMedia(initialMedia, initialS3Secret); err != nil {
+		// 数据库里存了无效的 S3 配置时不阻止启动，退回本地存储，用户可在页面修复。
+		log.Error("媒体存储初始化失败，暂时退回本地存储", "err", err)
+		local := mediastore.NewLocal(initialMedia.Dir, initialMedia.PublicBaseURL, mediaSignKey, initialMedia.URLTTL())
+		mediaStore.Swap(local, local, initialMedia.Retention())
+	}
+
+	ingestSvc := appingest.NewService(messages, rules, engine, queue, clk, log).UseMediaStore(mediaStore)
 	deliverySvc := appdelivery.NewService(deliveries, appdelivery.DisplayDeps{
 		Messages:  messages,
 		Sources:   sources,
@@ -181,7 +219,7 @@ func Build(cfg *config.Config) (*App, error) {
 		id := fmt.Sprintf("worker-%d", i+1)
 		workers = append(workers, dispatch.NewWorker(
 			id, cfg.Dispatch, deliveries, sinks, templates, messages, renderer, clk, log, deliveryNotifier,
-		))
+		).UseMediaStore(mediaStore))
 	}
 
 	validator := security.TokenValidator{
@@ -229,6 +267,8 @@ func Build(cfg *config.Config) (*App, error) {
 		Delivery:       handler.NewDeliveryHandler(deliverySvc),
 		Token:          handler.NewTokenHandler(tokenSvc),
 		TelegramConfig: handler.NewTelegramConfigHandler(tgConfigSvc),
+		Settings:       handler.NewSettingsHandler(settingsSvc),
+		Media:          handler.NewMediaHandler(mediaStore),
 	})
 
 	server := &http.Server{
@@ -258,7 +298,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Delivery:     deliverySvc,
 	}
 
-	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, tgLogin: tgLoginSvc, deps: deps}, nil
+	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, tgLogin: tgLoginSvc, mediaStore: mediaStore, deps: deps}, nil
 }
 
 // Handler 返回已装配的 HTTP handler，供集成测试使用。
@@ -269,6 +309,52 @@ func (a *App) Handler() http.Handler {
 // Deps 返回已装配的依赖，供集成测试使用。
 func (a *App) Dependencies() *Deps {
 	return a.deps
+}
+
+// mediaS3Options 把媒体设置转换为 mediastore 的 S3 连接参数。
+func mediaS3Options(ms appsettings.MediaSettings, s3Secret string) mediastore.S3Options {
+	return mediastore.S3Options{
+		Endpoint:      ms.S3.Endpoint,
+		Region:        ms.S3.Region,
+		Bucket:        ms.S3.Bucket,
+		AccessKey:     ms.S3.AccessKey,
+		SecretKey:     s3Secret,
+		UseSSL:        ms.S3.UseSSL,
+		KeyPrefix:     ms.S3.KeyPrefix,
+		PublicBaseURL: ms.S3.PublicBaseURL,
+		URLTTL:        ms.URLTTL(),
+		AutoCleanup:   ms.S3.AutoCleanup,
+	}
+}
+
+// runMediaCleanup 启动时先清理一次超过保留期的媒体，之后每小时清理一次。
+// 保留期从设置热读取；<=0 时跳过（页面可随时开关，无需重启）。
+func (a *App) runMediaCleanup(ctx context.Context) {
+	cleanup := func() {
+		retention := a.mediaStore.Retention()
+		if retention <= 0 {
+			return
+		}
+		removed, err := a.mediaStore.Cleanup(ctx, retention)
+		if err != nil {
+			a.log.Warn("清理媒体缓存失败", "err", err)
+		}
+		if removed > 0 {
+			a.log.Info("已清理过期媒体文件", "count", removed)
+		}
+	}
+	cleanup()
+
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cleanup()
+		}
+	}
 }
 
 // Run 启动投递 worker 与 HTTP 服务，阻塞直到 ctx 取消后优雅关闭。
@@ -292,6 +378,13 @@ func (a *App) Run(ctx context.Context) error {
 	if err := a.srcManager.StartAll(ctx); err != nil {
 		a.log.Error("启动监听源失败", "err", err)
 	}
+
+	// 按保留期定时清理本地媒体缓存（保留期在设置里动态调整）。
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		a.runMediaCleanup(ctx)
+	}()
 
 	errCh := make(chan error, 1)
 	go func() {

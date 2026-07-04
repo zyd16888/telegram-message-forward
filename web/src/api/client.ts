@@ -22,6 +22,9 @@ import type {
   TemplatePreview,
   TelegramApp,
   TokenCreated,
+  MediaSettings,
+  MediaSettingsRequest,
+  MediaS3TestResult,
 } from '@/types'
 
 const TOKEN_KEY = 'tmf_api_token'
@@ -311,5 +314,16 @@ export const telegramConfigApi = {
     update: (id: number, body: Record<string, unknown>) =>
       http.put<ApiItem<SharedProxy>>(`/proxies/${id}`, body).then((r) => r.data.data),
     remove: (id: number) => http.delete(`/proxies/${id}`),
+  },
+}
+
+// --- 系统设置 ---
+export const settingsApi = {
+  media: {
+    get: () => http.get<ApiItem<MediaSettings>>('/settings/media').then((r) => r.data.data),
+    update: (body: MediaSettingsRequest) =>
+      http.put<ApiItem<MediaSettings>>('/settings/media', body).then((r) => r.data.data),
+    testS3: (body: MediaSettingsRequest) =>
+      http.post<ApiItem<MediaS3TestResult>>('/settings/media/test-s3', body).then((r) => r.data.data),
   },
 }

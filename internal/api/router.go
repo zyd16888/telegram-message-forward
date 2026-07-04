@@ -29,6 +29,9 @@ type Deps struct {
 	Delivery       *handler.DeliveryHandler
 	Token          *handler.TokenHandler
 	TelegramConfig *handler.TelegramConfigHandler
+	Settings       *handler.SettingsHandler
+	// Media 为 nil 时不挂载 /media 端点。
+	Media *handler.MediaHandler
 }
 
 // NewRouter 构建 gin 引擎并挂载 /api/v1 资源接口。
@@ -52,6 +55,11 @@ func NewRouter(deps Deps) *gin.Engine {
 
 	// Webhook Source 使用每个 source 自己的 token 鉴权，不能依赖管理后台会话 token。
 	r.POST("/api/v1/sources/:id/webhook", deps.Source.Webhook)
+
+	// 媒体文件访问使用 URL 内嵌的 HMAC 签名鉴权（下游渠道服务器直接拉取）。
+	if deps.Media != nil {
+		r.GET("/media/*key", deps.Media.Serve)
+	}
 
 	// 管理 API 需要 token 鉴权；auth_enabled=false 时跳过（开发免鉴权）。
 	v1 := r.Group("/api/v1")
@@ -155,6 +163,15 @@ func NewRouter(deps Deps) *gin.Engine {
 			tgApps.POST("", deps.TelegramConfig.CreateApp)
 			tgApps.PUT("/:id", deps.TelegramConfig.UpdateApp)
 			tgApps.DELETE("/:id", deps.TelegramConfig.DeleteApp)
+		}
+
+		if deps.Settings != nil {
+			settings := v1.Group("/settings")
+			{
+				settings.GET("/media", deps.Settings.GetMedia)
+				settings.PUT("/media", deps.Settings.UpdateMedia)
+				settings.POST("/media/test-s3", deps.Settings.TestMediaS3)
+			}
 		}
 
 		proxies := v1.Group("/proxies")

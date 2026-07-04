@@ -337,3 +337,43 @@ export interface SharedProxy {
   created_at: string
   updated_at: string
 }
+
+// --- 系统设置（对应 internal/api/dto/settings.go） ---
+
+export interface MediaS3Settings {
+  enabled: boolean
+  endpoint: string
+  region: string
+  bucket: string
+  access_key: string
+  use_ssl: boolean
+  key_prefix: string
+  public_base_url: string
+  auto_cleanup: boolean
+}
+
+export interface MediaSettings {
+  dir: string
+  public_base_url: string
+  url_ttl_hours: number
+  retention_hours: number
+  s3: MediaS3Settings
+  has_s3_secret: boolean
+  // database：页面已保存；file：仍在使用配置文件默认值。
+  source: 'database' | 'file'
+}
+
+export interface MediaSettingsRequest {
+  dir: string
+  public_base_url: string
+  url_ttl_hours: number
+  retention_hours: number
+  s3: MediaS3Settings
+  // 省略表示保留已有 secret。
+  s3_secret_key?: string
+}
+
+export interface MediaS3TestResult {
+  success: boolean
+  error?: string
+}
