@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NSpace, NSwitch, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NSwitch, NTag, NText, NTooltip, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import PeerSyncPanel from '@/components/sources/PeerSyncPanel.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 import { accountsApi, rulesApi, sourcesApi } from '@/api/client'
 import type { Account, Rule, Source } from '@/types'
 import { errText } from '@/utils/error'
+
+type SourceKind = 'telegram' | 'rss' | 'webhook'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -18,8 +20,8 @@ const sources = shallowRef<Source[]>([])
 const accounts = shallowRef<Account[]>([])
 const rules = shallowRef<Rule[]>([])
 const loading = shallowRef(false)
+const activeTab = shallowRef<SourceKind>('telegram')
 const sourceSearch = shallowRef('')
-const sourceKindFilter = shallowRef<string | null>(null)
 const rssSubmitting = shallowRef(false)
 const webhookSubmitting = shallowRef(false)
 const rssForm = reactive({
@@ -47,25 +49,29 @@ const ruleCountBySourceId = computed(() => {
   return counts
 })
 
-const visibleSources = computed(() => {
-  const keyword = sourceSearch.value.trim().toLowerCase()
-  return sources.value.filter((source) => {
-    const kind = sourceDisplayType(source)
-    if (sourceKindFilter.value && kind !== sourceKindFilter.value) return false
-    if (!keyword) return true
-    return [String(source.id), source.name, source.username, String(source.peer_id), source.type, kind, source.peer_type, source.config?.feed_url]
-      .filter(Boolean)
-      .some((item) => String(item).toLowerCase().includes(keyword))
-  })
-})
+function sourceKind(source: Source): SourceKind {
+  if (source.type === 'rss') return 'rss'
+  if (source.type === 'webhook') return 'webhook'
+  return 'telegram'
+}
 
-const sourceKindOptions = computed(() => {
-  const kinds = new Set<string>()
-  for (const source of sources.value) {
-    kinds.add(sourceDisplayType(source))
-  }
-  return [...kinds].map((kind) => ({ label: kind, value: kind }))
-})
+const telegramSources = computed(() => sources.value.filter((s) => sourceKind(s) === 'telegram'))
+const rssSources = computed(() => sources.value.filter((s) => sourceKind(s) === 'rss'))
+const webhookSources = computed(() => sources.value.filter((s) => sourceKind(s) === 'webhook'))
+
+function filterByKeyword(list: Source[]): Source[] {
+  const keyword = sourceSearch.value.trim().toLowerCase()
+  if (!keyword) return list
+  return list.filter((source) =>
+    [String(source.id), source.name, source.username, String(source.peer_id), source.config?.feed_url]
+      .filter(Boolean)
+      .some((item) => String(item).toLowerCase().includes(keyword)),
+  )
+}
+
+const visibleTelegramSources = computed(() => filterByKeyword(telegramSources.value))
+const visibleRSSSources = computed(() => filterByKeyword(rssSources.value))
+const visibleWebhookSources = computed(() => filterByKeyword(webhookSources.value))
 
 async function load() {
   loading.value = true
@@ -82,9 +88,7 @@ async function load() {
   }
 }
 
-function sourceDisplayType(source: Source): string {
-  if (source.type === 'rss') return 'RSS Feed'
-  if (source.type === 'webhook') return 'Webhook'
+function telegramPeerLabel(source: Source): string {
   const displayType = source.config?.display_type
   if (typeof displayType === 'string' && displayType) return displayType
   if (source.peer_type === 'user') return '用户'
@@ -93,7 +97,6 @@ function sourceDisplayType(source: Source): string {
 }
 
 function accountName(source: Source): string {
-  if (source.type === 'rss') return '-'
   return accountNameById.value.get(source.account_id) ?? `#${source.account_id}`
 }
 
@@ -201,6 +204,10 @@ async function addWebhookSource() {
   }
 }
 
+function webhookPath(source: Source): string {
+  return `/api/v1/sources/${source.id}/webhook`
+}
+
 function goToRules(sourceId: number) {
   router.push({ name: 'rules', query: { source_id: String(sourceId) } })
 }
@@ -231,156 +238,294 @@ function confirmDelete(row: Source) {
   })
 }
 
-const columns: DataTableColumns<Source> = [
+function actionButton(label: string, icon: string, onClick: () => void, type?: 'error') {
+  return h(
+    NTooltip,
+    { trigger: 'hover' },
+    {
+      trigger: () =>
+        h(
+          NButton,
+          { size: 'small', quaternary: true, circle: true, type, onClick },
+          { icon: () => h(ClayIcon, { name: icon, size: 16 }) },
+        ),
+      default: () => label,
+    },
+  )
+}
+
+// 各类型表格共用的尾部列：运行状态、关联规则、启用、操作。
+function commonTailColumns(): DataTableColumns<Source> {
+  return [
+    {
+      title: '运行',
+      key: 'runner_status',
+      width: 180,
+      render: (row) =>
+        h('div', { class: 'runtime-cell' }, [
+          h(NTag, { size: 'small', type: runnerStatusType(row), bordered: false }, { default: () => runnerStatusLabel(row) }),
+          h(
+            NText,
+            { depth: row.runner_last_error ? 1 : 3 },
+            {
+              default: () =>
+                row.runner_last_error ||
+                (row.runner_recent_message_at
+                  ? `最近 ${formatRuntimeTime(row.runner_recent_message_at)}`
+                  : row.runner_subscriptions
+                    ? `${row.runner_subscriptions} 个订阅`
+                    : '无运行信息'),
+            },
+          ),
+        ]),
+    },
+    {
+      title: '关联规则',
+      key: 'rules',
+      width: 100,
+      render: (row) => {
+        const count = ruleCountBySourceId.value.get(row.id) ?? 0
+        if (!count) return h(NText, { depth: 3 }, { default: () => '无' })
+        return h(
+          NButton,
+          { text: true, type: 'primary', onClick: () => goToRules(row.id) },
+          { default: () => `${count} 条规则` },
+        )
+      },
+    },
+    {
+      title: '启用',
+      key: 'enabled',
+      width: 80,
+      render: (row) => h(NSwitch, { value: row.enabled, onUpdateValue: (value: boolean) => toggle(row, value) }),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 120,
+      render: (row) =>
+        h('div', { class: 'action-row' }, [
+          actionButton('查看编排', 'flow', () => goToFlow(row.id)),
+          actionButton('创建规则', 'plus', () => createRuleForSource(row.id)),
+          actionButton('删除', 'trash', () => confirmDelete(row), 'error'),
+        ]),
+    },
+  ]
+}
+
+const telegramColumns: DataTableColumns<Source> = [
   { title: 'ID', key: 'id', width: 70 },
   { title: '名称', key: 'name', ellipsis: { tooltip: true } },
   {
     title: '类型',
     key: 'peer_type',
-    width: 130,
-    render: (row) => h(NTag, { size: 'small' }, { default: () => sourceDisplayType(row) }),
+    width: 120,
+    render: (row) => h(NTag, { size: 'small' }, { default: () => telegramPeerLabel(row) }),
   },
   { title: 'Peer ID', key: 'peer_id', width: 140 },
-  { title: '账号', key: 'account_id', width: 140, render: (row) => accountName(row) },
-  {
-    title: '运行',
-    key: 'runner_status',
-    width: 180,
-    render: (row) =>
-      h('div', { class: 'runtime-cell' }, [
-        h(NTag, { size: 'small', type: runnerStatusType(row), bordered: false }, { default: () => runnerStatusLabel(row) }),
-        h(
-          NText,
-          { depth: row.runner_last_error ? 1 : 3 },
-          {
-            default: () =>
-              row.runner_last_error ||
-              (row.runner_recent_message_at
-                ? `最近 ${formatRuntimeTime(row.runner_recent_message_at)}`
-                : row.runner_subscriptions
-                  ? `${row.runner_subscriptions} 个订阅`
-                  : '无运行信息'),
-          },
-        ),
-      ]),
-  },
-  {
-    title: '关联规则',
-    key: 'rules',
-    width: 110,
-    render: (row) => {
-      const count = ruleCountBySourceId.value.get(row.id) ?? 0
-      if (!count) return h(NText, { depth: 3 }, { default: () => '无' })
-      return h(
-        NButton,
-        { text: true, type: 'primary', onClick: () => goToRules(row.id) },
-        { default: () => `${count} 条规则` },
-      )
-    },
-  },
-  {
-    title: '启用',
-    key: 'enabled',
-    width: 90,
-    render: (row) => h(NSwitch, { value: row.enabled, onUpdateValue: (value: boolean) => toggle(row, value) }),
-  },
-  {
-    title: '操作',
-    key: 'actions',
-    width: 250,
-    render: (row) =>
-      h(NSpace, {}, {
-        default: () => [
-          h(NButton, { size: 'small', onClick: () => goToFlow(row.id) }, { default: () => '编排' }),
-          h(NButton, { size: 'small', onClick: () => createRuleForSource(row.id) }, { default: () => '建规则' }),
-          h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
-        ],
-      }),
-  },
+  { title: '账号', key: 'account_id', width: 130, render: (row) => accountName(row) },
+  ...commonTailColumns(),
 ]
 
-onMounted(() => {
+const rssColumns: DataTableColumns<Source> = [
+  { title: 'ID', key: 'id', width: 70 },
+  { title: '名称', key: 'name', ellipsis: { tooltip: true } },
+  {
+    title: 'Feed URL',
+    key: 'feed_url',
+    minWidth: 220,
+    ellipsis: { tooltip: true },
+    render: (row) => String(row.config?.feed_url ?? '-'),
+  },
+  {
+    title: '轮询',
+    key: 'poll',
+    width: 140,
+    render: (row) => {
+      const interval = Number(row.config?.poll_interval_seconds ?? 0)
+      const maxItems = Number(row.config?.max_items ?? 0)
+      const parts = [interval ? `${interval}s` : '', maxItems ? `每次 ${maxItems} 条` : '']
+      return parts.filter(Boolean).join(' / ') || '-'
+    },
+  },
+  ...commonTailColumns(),
+]
+
+const webhookColumns: DataTableColumns<Source> = [
+  { title: 'ID', key: 'id', width: 70 },
+  { title: '名称', key: 'name', ellipsis: { tooltip: true } },
+  {
+    title: '接收路径',
+    key: 'webhook_path',
+    minWidth: 240,
+    render: (row) => h(NText, { code: true }, { default: () => webhookPath(row) }),
+  },
+  ...commonTailColumns(),
+]
+
+onMounted(async () => {
   const raw = route.query.source_id
-  const id = Array.isArray(raw) ? raw[0] : raw
-  if (id) sourceSearch.value = String(id)
-  void load()
+  const id = Number(Array.isArray(raw) ? raw[0] : raw)
+  await load()
+  // 从其它页面带 source_id 跳转过来时，切到对应类型的 Tab 并定位该来源。
+  if (Number.isFinite(id) && id > 0) {
+    const target = sources.value.find((s) => s.id === id)
+    if (target) {
+      activeTab.value = sourceKind(target)
+      sourceSearch.value = String(id)
+    }
+  }
 })
 </script>
 
 <template>
   <NSpace vertical size="large">
-    <PageHeader title="监听源" desc="从账号同步会话，管理需要监听的来源" icon="sources" />
+    <PageHeader title="监听源" desc="按类型管理 Telegram、RSS、Webhook 监听来源" icon="sources" />
 
-    <PeerSyncPanel :accounts="accounts" :sources="sources" @added="load" />
+    <NTabs v-model:value="activeTab" type="line" animated>
+      <NTabPane name="telegram">
+        <template #tab>
+          <span class="tab-label">
+            <ClayIcon name="telegram" :size="15" />
+            Telegram（{{ telegramSources.length }}）
+          </span>
+        </template>
+        <NSpace vertical size="large" class="tab-body">
+          <PeerSyncPanel :accounts="accounts" :sources="sources" @added="load" />
+          <div class="list-toolbar">
+            <NText strong class="list-title">已配置 Telegram 监听源</NText>
+            <div class="list-filters">
+              <NInput v-model:value="sourceSearch" clearable class="source-search" placeholder="搜索名称、用户名、Peer ID" />
+              <NButton secondary @click="load">
+                <template #icon><ClayIcon name="refresh" :size="16" /></template>
+                刷新
+              </NButton>
+            </div>
+          </div>
+          <NDataTable
+            :loading="loading"
+            :columns="telegramColumns"
+            :data="visibleTelegramSources"
+            :bordered="false"
+            :scroll-x="1120"
+          />
+        </NSpace>
+      </NTabPane>
 
-    <NCard title="添加 RSS 订阅源">
-      <NForm label-placement="left" label-width="96" class="rss-form">
-        <NFormItem label="名称">
-          <NInput v-model:value="rssForm.name" placeholder="例如：项目发布订阅" />
-        </NFormItem>
-        <NFormItem label="Feed URL">
-          <NInput v-model:value="rssForm.feed_url" placeholder="https://example.com/feed.xml" />
-        </NFormItem>
-        <NFormItem label="轮询秒数">
-          <NInputNumber v-model:value="rssForm.poll_interval_seconds" :min="30" :step="60" />
-        </NFormItem>
-        <NFormItem label="每次条数">
-          <NInputNumber v-model:value="rssForm.max_items" :min="1" :max="100" />
-        </NFormItem>
-        <NFormItem label="启用">
-          <NSwitch v-model:value="rssForm.enabled" />
-        </NFormItem>
-        <NFormItem label=" ">
-          <NButton type="primary" :loading="rssSubmitting" @click="addRSSSource">
-            <template #icon><ClayIcon name="plus" :size="16" /></template>
-            添加 RSS
-          </NButton>
-        </NFormItem>
-      </NForm>
-    </NCard>
+      <NTabPane name="rss">
+        <template #tab>
+          <span class="tab-label">
+            <ClayIcon name="rss" :size="15" />
+            RSS（{{ rssSources.length }}）
+          </span>
+        </template>
+        <NSpace vertical size="large" class="tab-body">
+          <NCard title="添加 RSS 订阅源">
+            <NForm label-placement="left" label-width="96" class="rss-form">
+              <NFormItem label="名称">
+                <NInput v-model:value="rssForm.name" placeholder="例如：项目发布订阅" />
+              </NFormItem>
+              <NFormItem label="Feed URL">
+                <NInput v-model:value="rssForm.feed_url" placeholder="https://example.com/feed.xml" />
+              </NFormItem>
+              <NFormItem label="轮询秒数">
+                <NInputNumber v-model:value="rssForm.poll_interval_seconds" :min="30" :step="60" />
+              </NFormItem>
+              <NFormItem label="每次条数">
+                <NInputNumber v-model:value="rssForm.max_items" :min="1" :max="100" />
+              </NFormItem>
+              <NFormItem label="启用">
+                <NSwitch v-model:value="rssForm.enabled" />
+              </NFormItem>
+              <NFormItem label=" ">
+                <NButton type="primary" :loading="rssSubmitting" @click="addRSSSource">
+                  <template #icon><ClayIcon name="plus" :size="16" /></template>
+                  添加 RSS
+                </NButton>
+              </NFormItem>
+            </NForm>
+          </NCard>
+          <div class="list-toolbar">
+            <NText strong class="list-title">已配置 RSS 订阅源</NText>
+            <div class="list-filters">
+              <NInput v-model:value="sourceSearch" clearable class="source-search" placeholder="搜索名称、Feed URL" />
+              <NButton secondary @click="load">
+                <template #icon><ClayIcon name="refresh" :size="16" /></template>
+                刷新
+              </NButton>
+            </div>
+          </div>
+          <NDataTable
+            :loading="loading"
+            :columns="rssColumns"
+            :data="visibleRSSSources"
+            :bordered="false"
+            :scroll-x="1020"
+          />
+        </NSpace>
+      </NTabPane>
 
-    <NCard title="添加 Webhook Source">
-      <NForm label-placement="left" label-width="96" class="webhook-form">
-        <NFormItem label="名称">
-          <NInput v-model:value="webhookForm.name" placeholder="例如：CI 事件入口" />
-        </NFormItem>
-        <NFormItem label="Token">
-          <NInput v-model:value="webhookForm.token" type="password" show-password-on="click" placeholder="外部请求鉴权 token" />
-        </NFormItem>
-        <NFormItem label="启用">
-          <NSwitch v-model:value="webhookForm.enabled" />
-        </NFormItem>
-        <NFormItem label=" ">
-          <NButton type="primary" :loading="webhookSubmitting" @click="addWebhookSource">
-            <template #icon><ClayIcon name="plus" :size="16" /></template>
-            添加 Webhook
-          </NButton>
-        </NFormItem>
-      </NForm>
-    </NCard>
-
-    <div class="list-toolbar">
-      <NText strong class="list-title">已配置监听源</NText>
-      <div class="list-filters">
-        <NInput v-model:value="sourceSearch" clearable class="source-search" placeholder="搜索名称、用户名、Peer ID" />
-        <NSelect
-          v-model:value="sourceKindFilter"
-          clearable
-          class="source-kind"
-          placeholder="全部类型"
-          :options="sourceKindOptions"
-        />
-        <NButton secondary @click="load">
-          <template #icon><ClayIcon name="refresh" :size="16" /></template>
-          刷新
-        </NButton>
-      </div>
-    </div>
-    <NDataTable :loading="loading" :columns="columns" :data="visibleSources" :bordered="false" :scroll-x="1120" />
+      <NTabPane name="webhook">
+        <template #tab>
+          <span class="tab-label">
+            <ClayIcon name="link" :size="15" />
+            Webhook（{{ webhookSources.length }}）
+          </span>
+        </template>
+        <NSpace vertical size="large" class="tab-body">
+          <NCard title="添加 Webhook Source">
+            <NForm label-placement="left" label-width="96" class="webhook-form">
+              <NFormItem label="名称">
+                <NInput v-model:value="webhookForm.name" placeholder="例如：CI 事件入口" />
+              </NFormItem>
+              <NFormItem label="Token">
+                <NInput v-model:value="webhookForm.token" type="password" show-password-on="click" placeholder="外部请求鉴权 token" />
+              </NFormItem>
+              <NFormItem label="启用">
+                <NSwitch v-model:value="webhookForm.enabled" />
+              </NFormItem>
+              <NFormItem label=" ">
+                <NButton type="primary" :loading="webhookSubmitting" @click="addWebhookSource">
+                  <template #icon><ClayIcon name="plus" :size="16" /></template>
+                  添加 Webhook
+                </NButton>
+              </NFormItem>
+            </NForm>
+          </NCard>
+          <div class="list-toolbar">
+            <NText strong class="list-title">已配置 Webhook Source</NText>
+            <div class="list-filters">
+              <NInput v-model:value="sourceSearch" clearable class="source-search" placeholder="搜索名称" />
+              <NButton secondary @click="load">
+                <template #icon><ClayIcon name="refresh" :size="16" /></template>
+                刷新
+              </NButton>
+            </div>
+          </div>
+          <NDataTable
+            :loading="loading"
+            :columns="webhookColumns"
+            :data="visibleWebhookSources"
+            :bordered="false"
+            :scroll-x="960"
+          />
+        </NSpace>
+      </NTabPane>
+    </NTabs>
   </NSpace>
 </template>
 
 <style scoped>
+.tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab-body {
+  padding-top: 4px;
+}
+
 .list-toolbar {
   display: flex;
   align-items: center;
@@ -400,9 +545,6 @@ onMounted(() => {
 .source-search {
   width: 260px;
 }
-.source-kind {
-  width: 150px;
-}
 
 .rss-form,
 .webhook-form {
@@ -421,16 +563,19 @@ onMounted(() => {
   gap: 4px;
 }
 
+:deep(.action-row) {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: nowrap;
+}
+
 @media (max-width: 640px) {
   .list-filters {
     width: 100%;
   }
   .source-search {
     flex: 1 1 100%;
-    width: auto;
-  }
-  .source-kind {
-    flex: 1;
     width: auto;
   }
   .rss-form,
