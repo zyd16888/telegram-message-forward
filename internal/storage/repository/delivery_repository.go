@@ -30,6 +30,9 @@ var _ domaindelivery.Repository = (*DeliveryRepository)(nil)
 
 // Create 插入投递任务，按 (message_id, rule_id, sink_id) 幂等。
 func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task) error {
+	if t.OriginType == "" {
+		t.OriginType = "rule"
+	}
 	m, err := toDeliveryModel(t)
 	if err != nil {
 		return err
@@ -42,14 +45,17 @@ func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task)
 	if !errors.Is(err, gorm.ErrDuplicatedKey) {
 		return err
 	}
-	var existing model.DeliveryTask
-	if qerr := r.db.WithContext(ctx).
-		Select("id").
-		Where("message_id = ? AND rule_id = ? AND sink_id = ?", t.MessageID, t.RuleID, t.SinkID).
-		First(&existing).Error; qerr != nil {
-		return qerr
+	if t.OriginType == "rule" {
+		var existing model.DeliveryTask
+		if qerr := r.db.WithContext(ctx).
+			Select("id").
+			Where("message_id = ? AND rule_id = ? AND sink_id = ? AND origin_type = ?", t.MessageID, t.RuleID, t.SinkID, "rule").
+			First(&existing).Error; qerr != nil {
+			return qerr
+		}
+		t.ID = existing.ID
+		return nil
 	}
-	t.ID = existing.ID
 	return nil
 }
 
@@ -333,12 +339,21 @@ func toDeliveryModel(t *domaindelivery.Task) (*model.DeliveryTask, error) {
 	if err != nil {
 		return nil, err
 	}
+	messageID := nullablePositive(t.MessageID)
+	ruleID := nullablePositive(t.RuleID)
+	originType := t.OriginType
+	if originType == "" {
+		originType = "rule"
+	}
+	originID := nullablePositive(t.OriginID)
 	return &model.DeliveryTask{
 		ID:              t.ID,
-		MessageID:       t.MessageID,
-		RuleID:          t.RuleID,
+		MessageID:       messageID,
+		RuleID:          ruleID,
 		SinkID:          t.SinkID,
 		TemplateID:      t.TemplateID,
+		OriginType:      originType,
+		OriginID:        originID,
 		Status:          string(t.Status),
 		AttemptCount:    t.AttemptCount,
 		MaxAttempts:     t.MaxAttempts,
@@ -357,12 +372,26 @@ func toDeliveryDomain(m *model.DeliveryTask) (*domaindelivery.Task, error) {
 	if err != nil {
 		return nil, err
 	}
+	messageID := int64(0)
+	if m.MessageID != nil {
+		messageID = *m.MessageID
+	}
+	ruleID := int64(0)
+	if m.RuleID != nil {
+		ruleID = *m.RuleID
+	}
+	originID := int64(0)
+	if m.OriginID != nil {
+		originID = *m.OriginID
+	}
 	return &domaindelivery.Task{
 		ID:              m.ID,
-		MessageID:       m.MessageID,
-		RuleID:          m.RuleID,
+		MessageID:       messageID,
+		RuleID:          ruleID,
 		SinkID:          m.SinkID,
 		TemplateID:      m.TemplateID,
+		OriginType:      m.OriginType,
+		OriginID:        originID,
 		Status:          domaindelivery.Status(m.Status),
 		AttemptCount:    m.AttemptCount,
 		MaxAttempts:     m.MaxAttempts,
@@ -374,6 +403,13 @@ func toDeliveryDomain(m *model.DeliveryTask) (*domaindelivery.Task, error) {
 		CreatedAt:       m.CreatedAt,
 		UpdatedAt:       m.UpdatedAt,
 	}, nil
+}
+
+func nullablePositive(v int64) *int64 {
+	if v <= 0 {
+		return nil
+	}
+	return &v
 }
 
 func toAttemptDomain(m *model.DeliveryAttempt) *domaindelivery.Attempt {

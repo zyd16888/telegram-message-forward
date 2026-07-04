@@ -151,7 +151,7 @@ func (s *Service) enrich(ctx context.Context, task *domaindelivery.Task) (*View,
 		view.Message = msg
 	}
 
-	if view.Message != nil && s.sources != nil {
+	if view.Message != nil && view.Message.SourceID > 0 && s.sources != nil {
 		src, err := s.sources.GetByID(ctx, view.Message.SourceID)
 		if err != nil {
 			return nil, fmt.Errorf("查询投递来源失败 source_id=%d: %w", view.Message.SourceID, err)
@@ -167,7 +167,7 @@ func (s *Service) enrich(ctx context.Context, task *domaindelivery.Task) (*View,
 		view.Sink = sink
 	}
 
-	if s.rules != nil {
+	if task.RuleID > 0 && s.rules != nil {
 		rule, err := s.rules.GetByID(ctx, task.RuleID)
 		if err != nil {
 			return nil, fmt.Errorf("查询投递规则失败 rule_id=%d: %w", task.RuleID, err)

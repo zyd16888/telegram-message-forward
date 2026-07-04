@@ -149,6 +149,9 @@ func (w *Worker) process(ctx context.Context, task *domaindelivery.Task) {
 func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*pluginsink.Result, error) {
 	msg := task.MessageSnapshot
 	if msg == nil {
+		if task.MessageID <= 0 {
+			return nil, errors.New("投递任务缺少 message_snapshot")
+		}
 		var err error
 		msg, err = w.messages.GetByID(ctx, task.MessageID)
 		if err != nil {

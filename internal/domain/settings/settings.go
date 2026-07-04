@@ -13,6 +13,9 @@ import (
 // KeyMedia 是媒体存储设置组。
 const KeyMedia = "media"
 
+// KeyAIProvider 是 AI provider 全局设置组。
+const KeyAIProvider = "ai.provider"
+
 // Setting 是一组系统设置。
 type Setting struct {
 	Key       string

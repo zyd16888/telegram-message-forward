@@ -14,6 +14,7 @@ import (
 	"telegram-message-forward/internal/api"
 	"telegram-message-forward/internal/api/handler"
 	appaccount "telegram-message-forward/internal/app/account"
+	appaidigest "telegram-message-forward/internal/app/aidigest"
 	apptoken "telegram-message-forward/internal/app/apitoken"
 	appauth "telegram-message-forward/internal/app/auth"
 	appdelivery "telegram-message-forward/internal/app/delivery"
@@ -63,6 +64,7 @@ type App struct {
 	workers    []*dispatch.Worker
 	srcManager *appsource.Manager
 	tgLogin    *apptelegramlogin.Service
+	aiSched    *appaidigest.Scheduler
 	mediaStore *mediastore.Manager
 	deps       *Deps
 }
@@ -89,6 +91,7 @@ type Deps struct {
 	Queue    *dispatch.Queue
 	Ingest   *appingest.Service
 	Delivery *appdelivery.Service
+	AIDigest *appaidigest.Service
 }
 
 // Build 根据配置装配 App。
@@ -132,6 +135,7 @@ func Build(cfg *config.Config) (*App, error) {
 	telegramApps := repository.NewTelegramAppRepository(db, cipher)
 	proxies := repository.NewProxyConfigRepository(db, cipher)
 	loginFlows := repository.NewTelegramLoginFlowRepository(db, cipher)
+	aiDigests := repository.NewAIDigestRepository(db)
 
 	// 规则引擎、渲染器、投递队列。
 	engine := ruleengine.NewEngine()
@@ -185,6 +189,18 @@ func Build(cfg *config.Config) (*App, error) {
 		Rules:     rules,
 		Templates: templates,
 	})
+	aiDigestSvc := appaidigest.NewService(appaidigest.Deps{
+		Repo:     aiDigests,
+		Settings: settingsRepo,
+		Messages: messages,
+		Sources:  sources,
+		Sinks:    sinks,
+		Tasks:    deliveries,
+		Clock:    clk,
+		Logger:   log,
+		Wake:     deliveryNotifier.Notify,
+	})
+	aiScheduler := appaidigest.NewScheduler(aiDigestSvc, log)
 
 	// Telegram Source 插件（deps 注入，避免 plugin 直连存储层）。
 	tgPlugin := tgsource.NewPlugin(tgsource.Deps{
@@ -276,6 +292,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Template:       handler.NewTemplateHandler(templateSvc),
 		Rule:           handler.NewRuleHandler(ruleSvc),
 		Delivery:       handler.NewDeliveryHandler(deliverySvc),
+		AIDigest:       handler.NewAIDigestHandler(aiDigestSvc),
 		Token:          handler.NewTokenHandler(tokenSvc),
 		TelegramConfig: handler.NewTelegramConfigHandler(tgConfigSvc),
 		Settings:       handler.NewSettingsHandler(settingsSvc),
@@ -307,9 +324,10 @@ func Build(cfg *config.Config) (*App, error) {
 		Queue:        queue,
 		Ingest:       ingestSvc,
 		Delivery:     deliverySvc,
+		AIDigest:     aiDigestSvc,
 	}
 
-	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, tgLogin: tgLoginSvc, mediaStore: mediaStore, deps: deps}, nil
+	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, tgLogin: tgLoginSvc, aiSched: aiScheduler, mediaStore: mediaStore, deps: deps}, nil
 }
 
 // Handler 返回已装配的 HTTP handler，供集成测试使用。
@@ -410,6 +428,12 @@ func (a *App) Run(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		a.runMediaCleanup(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		a.aiSched.Run(ctx)
 	}()
 
 	errCh := make(chan error, 1)

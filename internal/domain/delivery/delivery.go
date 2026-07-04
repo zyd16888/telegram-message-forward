@@ -36,6 +36,8 @@ type Task struct {
 	RuleID       int64
 	SinkID       int64
 	TemplateID   *int64
+	OriginType   string
+	OriginID     int64
 	Status       Status
 	AttemptCount int
 	MaxAttempts  int

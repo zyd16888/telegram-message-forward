@@ -27,6 +27,7 @@ type Deps struct {
 	Template       *handler.TemplateHandler
 	Rule           *handler.RuleHandler
 	Delivery       *handler.DeliveryHandler
+	AIDigest       *handler.AIDigestHandler
 	Token          *handler.TokenHandler
 	TelegramConfig *handler.TelegramConfigHandler
 	Settings       *handler.SettingsHandler
@@ -148,6 +149,29 @@ func NewRouter(deps Deps) *gin.Engine {
 			deliveries.POST("/retry-dead", deps.Delivery.RetryDeadBatch)
 			deliveries.GET("/:id", deps.Delivery.Get)
 			deliveries.POST("/:id/retry", deps.Delivery.Retry)
+		}
+
+		if deps.AIDigest != nil {
+			ai := v1.Group("/ai")
+			{
+				ai.GET("/provider", deps.AIDigest.GetProvider)
+				ai.PUT("/provider", deps.AIDigest.UpdateProvider)
+				ai.POST("/provider/test", deps.AIDigest.TestProvider)
+
+				ai.GET("/digests", deps.AIDigest.ListProfiles)
+				ai.POST("/digests", deps.AIDigest.CreateProfile)
+				ai.POST("/digests/preview", deps.AIDigest.PreviewDraft)
+				ai.GET("/digests/:id", deps.AIDigest.GetProfile)
+				ai.PUT("/digests/:id", deps.AIDigest.UpdateProfile)
+				ai.DELETE("/digests/:id", deps.AIDigest.DeleteProfile)
+				ai.POST("/digests/:id/preview", deps.AIDigest.PreviewProfile)
+				ai.POST("/digests/:id/run", deps.AIDigest.RunProfile)
+				ai.GET("/digests/:id/runs", deps.AIDigest.ListRuns)
+				ai.GET("/runs/:id", deps.AIDigest.GetRun)
+				ai.POST("/runs/:id/cancel", deps.AIDigest.CancelRun)
+				ai.POST("/runs/:id/deliver", deps.AIDigest.DeliverRun)
+				ai.POST("/runs/cleanup", deps.AIDigest.CleanupRuns)
+			}
 		}
 
 		tokens := v1.Group("/tokens")

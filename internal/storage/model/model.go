@@ -206,10 +206,12 @@ func (Message) TableName() string { return "messages" }
 // DeliveryTask 对应 delivery_tasks 表。
 type DeliveryTask struct {
 	ID              int64 `gorm:"primaryKey"`
-	MessageID       int64
-	RuleID          int64
+	MessageID       *int64
+	RuleID          *int64
 	SinkID          int64
 	TemplateID      *int64
+	OriginType      string
+	OriginID        *int64
 	Status          string
 	AttemptCount    int
 	MaxAttempts     int
@@ -239,6 +241,75 @@ type DeliveryAttempt struct {
 }
 
 func (DeliveryAttempt) TableName() string { return "delivery_attempts" }
+
+// AIDigestProfile 对应 ai_digest_profiles 表。
+type AIDigestProfile struct {
+	ID             int64 `gorm:"primaryKey"`
+	Name           string
+	Enabled        bool
+	SourceIDs      datatypes.JSON
+	Conditions     datatypes.JSON
+	Schedule       datatypes.JSON
+	Window         datatypes.JSON
+	Dedupe         datatypes.JSON
+	PromptTemplate string
+	OutputFormat   string
+	TargetSinkIDs  datatypes.JSON
+	ModelConfig    datatypes.JSON
+	Limits         datatypes.JSON
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func (AIDigestProfile) TableName() string { return "ai_digest_profiles" }
+
+// AIDigestRun 对应 ai_digest_runs 表。
+type AIDigestRun struct {
+	ID                int64 `gorm:"primaryKey"`
+	ProfileID         *int64
+	Status            string
+	TriggerType       string
+	WindowStart       time.Time
+	WindowEnd         time.Time
+	InputMessageCount int
+	IncludedCount     int
+	ExcludedCount     int
+	DeliveryTaskIDs   datatypes.JSON
+	ModelName         string
+	TokenUsage        datatypes.JSON
+	Error             string
+	StartedAt         *time.Time
+	FinishedAt        *time.Time
+	CreatedAt         time.Time
+}
+
+func (AIDigestRun) TableName() string { return "ai_digest_runs" }
+
+// AIDigestRunItem 对应 ai_digest_run_items 表。
+type AIDigestRunItem struct {
+	RunID     int64 `gorm:"primaryKey"`
+	MessageID int64 `gorm:"primaryKey"`
+	SourceID  int64
+	Included  bool
+	Reason    string
+	Score     *float64
+	SortOrder int
+}
+
+func (AIDigestRunItem) TableName() string { return "ai_digest_run_items" }
+
+// AIDigestOutput 对应 ai_digest_outputs 表。
+type AIDigestOutput struct {
+	ID          int64 `gorm:"primaryKey"`
+	RunID       int64
+	Format      string
+	Title       string
+	Content     string
+	RawResponse datatypes.JSON
+	CreatedAt   time.Time
+}
+
+func (AIDigestOutput) TableName() string { return "ai_digest_outputs" }
 
 // APIToken 对应 api_tokens 表。
 type APIToken struct {

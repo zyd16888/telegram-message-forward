@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -60,6 +61,33 @@ func (r *MessageRepository) GetByID(ctx context.Context, id int64) (*domainmessa
 		return nil, err
 	}
 	return toMessageDomain(&mo)
+}
+
+// ListBySourcesAndReceivedAt 查询指定来源在 received_at 窗口内的消息。
+func (r *MessageRepository) ListBySourcesAndReceivedAt(ctx context.Context, sourceIDs []int64, start, end time.Time, limit int) ([]*domainmessage.NormalizedMessage, error) {
+	if len(sourceIDs) == 0 {
+		return []*domainmessage.NormalizedMessage{}, nil
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+	var ms []model.Message
+	if err := r.db.WithContext(ctx).
+		Where("source_id IN ? AND received_at >= ? AND received_at < ?", sourceIDs, start, end).
+		Order("received_at ASC, id ASC").
+		Limit(limit).
+		Find(&ms).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domainmessage.NormalizedMessage, 0, len(ms))
+	for i := range ms {
+		msg, err := toMessageDomain(&ms[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
+	}
+	return out, nil
 }
 
 // ExistsByExternalID 判断消息是否已存在。
