@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, h, onMounted, shallowRef } from 'vue'
-import { NButton, NTag, NText, NTooltip, useMessage, type DataTableColumns, type PaginationProps } from 'naive-ui'
-import { deliveriesApi } from '@/api/client'
-import type { Delivery } from '@/types'
+import { useRoute } from 'vue-router'
+import { NButton, NTag, NText, NTooltip, useMessage, type DataTableColumns, type PaginationProps, type SelectOption } from 'naive-ui'
+import { deliveriesApi, rulesApi, sinksApi, sourcesApi } from '@/api/client'
+import type { Delivery, Rule, Sink, SinkDescriptor, Source } from '@/types'
 import { errText } from '@/utils/error'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 
 const message = useMessage()
+const route = useRoute()
 
 const deliveries = shallowRef<Delivery[]>([])
 const loading = shallowRef(false)
@@ -21,6 +23,22 @@ const total = shallowRef(0)
 const detailShow = shallowRef(false)
 const detailLoading = shallowRef(false)
 const detail = shallowRef<Delivery | null>(null)
+
+const sourceList = shallowRef<Source[]>([])
+const ruleList = shallowRef<Rule[]>([])
+const sinkList = shallowRef<Sink[]>([])
+const sinkDescriptors = shallowRef<SinkDescriptor[]>([])
+
+const sourceOptions = computed<SelectOption[]>(() =>
+  sourceList.value.map((s) => ({ label: s.name, value: s.id })),
+)
+const ruleOptions = computed<SelectOption[]>(() =>
+  ruleList.value.map((r) => ({ label: r.name, value: r.id })),
+)
+const sinkOptions = computed<SelectOption[]>(() =>
+  sinkList.value.map((s) => ({ label: s.name, value: s.id })),
+)
+const sinkTypeLabelByType = computed(() => new Map(sinkDescriptors.value.map((d) => [d.type, d.label])))
 
 const statusOptions = [
   { label: '全部', value: '' },
@@ -61,13 +79,6 @@ const messageTypeLabel: Record<string, string> = {
   voice: '语音',
 }
 
-const sinkTypeLabel: Record<string, string> = {
-  webhook: 'Webhook',
-  wecom_bot: '企业微信机器人',
-  wecom_app: '企业微信应用',
-  dingtalk: '钉钉机器人',
-}
-
 const pagination = computed<PaginationProps>(() => ({
   page: page.value,
   pageSize: pageSize.value,
@@ -96,6 +107,19 @@ async function load() {
     message.error('加载失败：' + errText(e))
   } finally {
     loading.value = false
+  }
+}
+
+async function loadFilterOptions() {
+  try {
+    ;[sourceList.value, ruleList.value, sinkList.value, sinkDescriptors.value] = await Promise.all([
+      sourcesApi.list(),
+      rulesApi.list(),
+      sinksApi.list(),
+      sinksApi.meta(),
+    ])
+  } catch {
+    // 筛选选项加载失败不阻塞记录列表，下拉框保持为空即可。
   }
 }
 
@@ -168,14 +192,30 @@ function targetTitle(row: Delivery): string {
   return row.sink_name || `目标渠道 #${row.sink_id}`
 }
 
+function sinkTypeLabel(row: Delivery): string {
+  if (!row.sink_type) return ''
+  return sinkTypeLabelByType.value.get(row.sink_type) ?? row.sink_type
+}
+
 function targetMeta(row: Delivery): string {
-  const sinkType = row.sink_type ? (sinkTypeLabel[row.sink_type] ?? row.sink_type) : ''
   const parts = [
-    sinkType ? `类型：${sinkType}` : '',
     row.rule_name ? `规则：${row.rule_name}` : '',
     row.template_name ? `模板：${row.template_name}` : '',
   ]
   return parts.filter(Boolean).join(' · ') || '默认文本模板'
+}
+
+function renderTarget(row: Delivery) {
+  const typeLabel = sinkTypeLabel(row)
+  return h('div', { class: 'cell-stack' }, [
+    h('div', { class: 'cell-primary target-line' }, [
+      h('span', { class: 'target-name' }, targetTitle(row)),
+      typeLabel
+        ? h(NTag, { size: 'tiny', round: true, bordered: false, type: 'info' }, { default: () => typeLabel })
+        : null,
+    ]),
+    h('div', { class: 'cell-secondary' }, targetMeta(row)),
+  ])
 }
 
 function messageText(row: Delivery): string {
@@ -227,7 +267,7 @@ const columns: DataTableColumns<Delivery> = [
     title: '目标',
     key: 'target',
     width: 260,
-    render: (row) => renderTwoLine(targetTitle(row), targetMeta(row)),
+    render: renderTarget,
   },
   {
     title: '状态',
@@ -264,32 +304,51 @@ const columns: DataTableColumns<Delivery> = [
   },
 ]
 
-onMounted(load)
+function queryId(key: string): number | null {
+  const raw = route.query[key]
+  const id = Number(Array.isArray(raw) ? raw[0] : raw)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+onMounted(() => {
+  // 支持从编排页等入口带筛选条件跳转。
+  sourceId.value = queryId('source_id')
+  ruleId.value = queryId('rule_id')
+  sinkId.value = queryId('sink_id')
+  void load()
+  void loadFilterOptions()
+})
 </script>
 
 <template>
   <n-space vertical size="large">
     <PageHeader title="投递记录" desc="查看消息投递结果，失败可重新入队" icon="deliveries">
       <template #actions>
-        <n-input-number
+        <n-select
           v-model:value="sourceId"
-          class="id-filter"
+          class="entity-filter"
           clearable
-          placeholder="Source ID"
+          filterable
+          placeholder="全部来源"
+          :options="sourceOptions"
           @update:value="reloadFromFirstPage"
         />
-        <n-input-number
+        <n-select
           v-model:value="ruleId"
-          class="id-filter"
+          class="entity-filter"
           clearable
-          placeholder="Rule ID"
+          filterable
+          placeholder="全部规则"
+          :options="ruleOptions"
           @update:value="reloadFromFirstPage"
         />
-        <n-input-number
+        <n-select
           v-model:value="sinkId"
-          class="id-filter"
+          class="entity-filter"
           clearable
-          placeholder="Sink ID"
+          filterable
+          placeholder="全部渠道"
+          :options="sinkOptions"
           @update:value="reloadFromFirstPage"
         />
         <n-select
@@ -351,8 +410,21 @@ onMounted(load)
   width: 170px;
 }
 
-.id-filter {
-  width: 130px;
+.entity-filter {
+  width: 160px;
+}
+
+.target-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.target-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cell-stack {
@@ -459,7 +531,7 @@ onMounted(load)
     width: auto;
   }
 
-  .id-filter {
+  .entity-filter {
     flex: 1;
     width: auto;
   }
