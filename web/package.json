@@ -13,6 +13,8 @@
   "dependencies": {
     "@types/qrcode": "^1.5.6",
     "axios": "^1.7.9",
+    "dompurify": "^3.4.11",
+    "marked": "^18.0.5",
     "naive-ui": "^2.40.3",
     "pinia": "^2.3.0",
     "qrcode": "^1.5.4",

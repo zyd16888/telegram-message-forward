@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { reactive, shallowRef, watch } from 'vue'
+import { computed, reactive, shallowRef, watch } from 'vue'
 import { useMessage } from 'naive-ui'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { templatesApi } from '@/api/client'
 import type { Template } from '@/types'
 import { errText } from '@/utils/error'
@@ -19,7 +21,21 @@ const message = useMessage()
 
 const form = reactive({ name: '', format: 'text', content: '{{.Text}}' })
 const previewText = shallowRef('')
+// 记录生成预览时所用的格式，避免预览后切换格式导致渲染方式与内容不一致。
+const previewFormat = shallowRef('text')
 const previewing = shallowRef(false)
+const previewTab = shallowRef<'rendered' | 'raw'>('rendered')
+
+const previewHtml = computed(() => {
+  if (!previewText.value) return ''
+  if (previewFormat.value === 'markdown') {
+    return DOMPurify.sanitize(marked.parse(previewText.value, { async: false }))
+  }
+  if (previewFormat.value === 'html') {
+    return DOMPurify.sanitize(previewText.value)
+  }
+  return ''
+})
 
 const formatOptions = [
   { label: 'text', value: 'text' },
@@ -55,6 +71,8 @@ function resetForm() {
     form.content = '{{.Text}}'
   }
   previewText.value = ''
+  previewFormat.value = form.format
+  previewTab.value = 'rendered'
 }
 
 function insertVariable(value: string) {
@@ -82,6 +100,7 @@ async function previewContent(showSuccess: boolean): Promise<boolean> {
   try {
     const result = await templatesApi.preview({ format: form.format, content: form.content })
     previewText.value = result.text
+    previewFormat.value = form.format
     if (showSuccess) message.success('预览已生成')
     return true
   } catch (e) {
@@ -137,8 +156,22 @@ async function submit() {
       </NFormItem>
       <NDivider>预览</NDivider>
       <NSpace vertical>
-        <NButton :loading="previewing" @click="preview">生成预览</NButton>
-        <NInput :value="previewText" type="textarea" readonly :autosize="{ minRows: 5 }" />
+        <NSpace align="center" justify="space-between">
+          <NButton :loading="previewing" @click="preview">生成预览</NButton>
+          <NRadioGroup v-if="previewText && previewFormat !== 'text'" v-model:value="previewTab" size="small">
+            <NRadioButton value="rendered">渲染效果</NRadioButton>
+            <NRadioButton value="raw">原始输出</NRadioButton>
+          </NRadioGroup>
+        </NSpace>
+        <NEmpty v-if="!previewText" size="small" description="点击「生成预览」查看模板渲染结果" />
+        <template v-else>
+          <div
+            v-if="previewFormat !== 'text' && previewTab === 'rendered'"
+            class="preview-rendered"
+            v-html="previewHtml"
+          />
+          <div v-else class="preview-plain">{{ previewText }}</div>
+        </template>
       </NSpace>
     </NForm>
     <template #footer>
@@ -154,5 +187,78 @@ async function submit() {
 .template-modal :deep(.n-card__content) {
   max-height: min(68vh, 680px);
   overflow: auto;
+}
+
+.preview-rendered,
+.preview-plain {
+  max-height: 280px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  background: var(--clay-surface-2);
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.preview-plain {
+  white-space: pre-wrap;
+}
+
+.preview-rendered :deep(p) {
+  margin: 0 0 8px;
+}
+
+.preview-rendered :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.preview-rendered :deep(pre) {
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--clay-surface);
+}
+
+.preview-rendered :deep(code) {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+.preview-rendered :deep(blockquote) {
+  margin: 0 0 8px;
+  padding: 4px 12px;
+  border-left: 3px solid var(--clay-border-strong);
+  color: var(--clay-text-2);
+}
+
+.preview-rendered :deep(img) {
+  max-width: 100%;
+}
+
+.preview-rendered :deep(h1),
+.preview-rendered :deep(h2),
+.preview-rendered :deep(h3),
+.preview-rendered :deep(h4) {
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
+.preview-rendered :deep(ul),
+.preview-rendered :deep(ol) {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.preview-rendered :deep(table) {
+  margin: 0 0 8px;
+  border-collapse: collapse;
+}
+
+.preview-rendered :deep(th),
+.preview-rendered :deep(td) {
+  padding: 4px 8px;
+  border: 1px solid var(--clay-border);
 }
 </style>
