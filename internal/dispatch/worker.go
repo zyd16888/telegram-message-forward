@@ -216,28 +216,49 @@ func supportsFormat(c domainsink.Capabilities, f domaintemplate.Format) bool {
 
 func supportsAllMedia(c domainsink.Capabilities, media []domainmessage.Media) bool {
 	for _, item := range media {
-		switch item.Type {
-		case "photo", "image":
-			if !c.SupportsImage {
-				return false
-			}
-		case "file", "document":
-			if !c.SupportsFile {
-				return false
-			}
-		case "audio", "voice":
-			if !c.SupportsAudio {
-				return false
-			}
-		case "video":
-			if !c.SupportsVideo {
-				return false
-			}
-		default:
+		if !supportsMediaItem(c, item) {
 			return false
 		}
 	}
 	return true
+}
+
+// supportsMediaItem 判断渠道能否真实投递单个媒体。
+// 优先使用 Capabilities.Media[] 细粒度条目（含大小上限与本地文件可用性），
+// 渠道未声明对应条目时回退粗粒度布尔能力。
+func supportsMediaItem(c domainsink.Capabilities, item domainmessage.Media) bool {
+	var kind string
+	var coarse bool
+	switch item.Type {
+	case "photo", "image":
+		kind, coarse = "image", c.SupportsImage
+	case "file", "document":
+		kind, coarse = "file", c.SupportsFile
+	case "audio", "voice":
+		kind, coarse = "audio", c.SupportsAudio
+	case "video":
+		kind, coarse = "video", c.SupportsVideo
+	default:
+		return false
+	}
+	for _, mc := range c.Media {
+		if mc.Type != kind {
+			continue
+		}
+		if !mc.Supported {
+			return false
+		}
+		if mc.MaxSizeMB > 0 && item.Size > int64(mc.MaxSizeMB)*1024*1024 {
+			return false
+		}
+		// 只认二进制/上传的渠道（不支持公网 URL），媒体没有本地文件时无法真实发送，
+		// 提前降级为可读文本，避免 Sink 侧静默丢弃媒体。
+		if !mc.SupportsPublicURL && item.LocalPath == "" && item.RemoteURL == "" {
+			return false
+		}
+		return true
+	}
+	return coarse
 }
 
 // publicMedia 为有 StorageKey 但无公网地址的媒体生成访问 URL。

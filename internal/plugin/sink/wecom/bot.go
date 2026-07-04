@@ -2,7 +2,9 @@ package wecom
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"telegram-message-forward/internal/domain/formschema"
 	domainsink "telegram-message-forward/internal/domain/sink"
@@ -118,6 +120,14 @@ func (s *BotSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 		}
 		return s.sendImage(ctx, url, img.LocalPath)
 	}
+	if file, ok := firstLocalFile(payload); ok {
+		if payload.Text != "" {
+			if res, err := s.sendText(ctx, url, payload); err != nil || res == nil || !res.Success {
+				return res, err
+			}
+		}
+		return s.sendFile(ctx, url, file.LocalPath)
+	}
 	if len(payload.Media) > 0 {
 		payload.Format = "text"
 		payload.Text = fallbackText(payload)
@@ -139,6 +149,56 @@ func (s *BotSink) sendText(ctx context.Context, url string, payload pluginsink.P
 		return failResult(nil, err.Error()), err
 	}
 	summary, ok, _, errMsg := parseResp(resp.Body)
+	if !ok {
+		return failResult(summary, errMsg), nil
+	}
+	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
+}
+
+// botUploadURL 由 webhook send 地址推导 upload_media 地址（沿用同一个 key）。
+func botUploadURL(sendURL string) (string, error) {
+	if !strings.Contains(sendURL, "/webhook/send") {
+		return "", fmt.Errorf("无法从 webhook 地址推导 upload_media 地址，请使用标准 /webhook/send 地址")
+	}
+	uploadURL := strings.Replace(sendURL, "/webhook/send", "/webhook/upload_media", 1)
+	sep := "&"
+	if !strings.Contains(uploadURL, "?") {
+		sep = "?"
+	}
+	return uploadURL + sep + "type=file", nil
+}
+
+// sendFile 先上传文件获取 media_id，再按 msgtype=file 发送。
+func (s *BotSink) sendFile(ctx context.Context, url string, path string) (*pluginsink.Result, error) {
+	uploadURL, err := botUploadURL(url)
+	if err != nil {
+		return failResult(nil, err.Error()), nil
+	}
+	resp, err := s.client.PostMultipartFile(ctx, uploadURL, "media", path, nil)
+	if err != nil {
+		return failResult(nil, "上传文件失败: "+err.Error()), err
+	}
+	var r struct {
+		apiResp
+		MediaID string `json:"media_id"`
+	}
+	if err := json.Unmarshal(resp.Body, &r); err != nil {
+		return failResult(truncate(resp.Body, 512), "解析上传响应失败: "+err.Error()), nil
+	}
+	if r.ErrCode != 0 || r.MediaID == "" {
+		summary, _ := json.Marshal(map[string]any{"errcode": r.ErrCode, "errmsg": r.ErrMsg, "has_media_id": r.MediaID != ""})
+		return failResult(summary, fmt.Sprintf("上传文件失败 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg)), nil
+	}
+
+	body := map[string]any{
+		"msgtype": "file",
+		"file":    fileContent{MediaID: r.MediaID},
+	}
+	sendResp, err := s.client.PostJSON(ctx, url, body, nil)
+	if err != nil {
+		return failResult(nil, err.Error()), err
+	}
+	summary, ok, _, errMsg := parseResp(sendResp.Body)
 	if !ok {
 		return failResult(summary, errMsg), nil
 	}

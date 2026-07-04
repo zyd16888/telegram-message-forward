@@ -71,6 +71,75 @@ func TestBotSendLocalImage(t *testing.T) {
 	}
 }
 
+func TestBotSendLocalFile(t *testing.T) {
+	pdf := t.TempDir() + "/report.pdf"
+	if err := os.WriteFile(pdf, []byte("%PDF-fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var uploadCalled, sendBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/webhook/upload_media"):
+			if r.URL.Query().Get("type") != "file" {
+				t.Errorf("upload type = %q, want file", r.URL.Query().Get("type"))
+			}
+			uploadCalled.Store(true)
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","type":"file","media_id":"MEDIA_FILE"}`)
+		case strings.Contains(r.URL.Path, "/webhook/send"):
+			b, _ := io.ReadAll(r.Body)
+			sendBody.Store(string(b))
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		default:
+			t.Errorf("未预期请求: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	s := NewBot()
+	sink := &domainsink.Sink{Type: "wecom_bot", Config: map[string]any{"webhook_url": srv.URL + "/cgi-bin/webhook/send?key=TEST"}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Media: []domainmessage.Media{{Type: "document", FileName: "report.pdf", LocalPath: pdf}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("文件应发送成功: %+v", res)
+	}
+	if got, _ := uploadCalled.Load().(bool); !got {
+		t.Fatal("应先调用 upload_media")
+	}
+	body, _ := sendBody.Load().(string)
+	if !strings.Contains(body, `"msgtype":"file"`) || !strings.Contains(body, "MEDIA_FILE") {
+		t.Fatalf("文件请求体不正确: %s", body)
+	}
+}
+
+func TestBotSendFileUploadURLUnderivable(t *testing.T) {
+	pdf := t.TempDir() + "/report.pdf"
+	if err := os.WriteFile(pdf, []byte("%PDF-fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+	}))
+	defer srv.Close()
+
+	s := NewBot()
+	// webhook_url 不含 /webhook/send，无法推导 upload_media 地址，应返回可解释错误。
+	sink := &domainsink.Sink{Type: "wecom_bot", Config: map[string]any{"webhook_url": srv.URL}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Media: []domainmessage.Media{{Type: "document", LocalPath: pdf}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Success || !strings.Contains(res.Error, "upload_media") {
+		t.Fatalf("应失败且错误可解释: %+v", res)
+	}
+}
+
 func TestBotSendErrCode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"errcode":93000,"errmsg":"invalid webhook"}`)
@@ -219,5 +288,58 @@ func TestAppSendLocalImageUploadsMedia(t *testing.T) {
 	}
 	if !res.Success || !uploadCalled.Load() || !imageSent.Load() {
 		t.Fatalf("图片上传/发送未完成 res=%+v upload=%v image=%v", res, uploadCalled.Load(), imageSent.Load())
+	}
+}
+
+func TestAppSendLocalFileUploadsMedia(t *testing.T) {
+	tokenMu.Lock()
+	tokenCache = map[string]*cachedToken{}
+	tokenMu.Unlock()
+
+	pdf := t.TempDir() + "/report.pdf"
+	if err := os.WriteFile(pdf, []byte("%PDF-fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var uploadType atomic.Value
+	var fileSent atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gettoken"):
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK","expires_in":7200}`)
+		case strings.Contains(r.URL.Path, "/media/upload"):
+			uploadType.Store(r.URL.Query().Get("type"))
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","media_id":"MEDIA_FILE"}`)
+		case strings.Contains(r.URL.Path, "/message/send"):
+			b, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(b), `"msgtype":"file"`) && strings.Contains(string(b), "MEDIA_FILE") {
+				fileSent.Store(true)
+			}
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		}
+	}))
+	defer srv.Close()
+
+	apiBase = srv.URL
+	defer func() { apiBase = "https://qyapi.weixin.qq.com/cgi-bin" }()
+
+	s := NewApp()
+	sink := &domainsink.Sink{
+		Type:   "wecom_app",
+		Config: map[string]any{"corpid": "corp1", "agentid": "1000002"},
+		Secret: []byte("secret1"),
+	}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Text:  "季度报告",
+		Media: []domainmessage.Media{{Type: "document", FileName: "report.pdf", LocalPath: pdf}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success || !fileSent.Load() {
+		t.Fatalf("文件上传/发送未完成 res=%+v file=%v", res, fileSent.Load())
+	}
+	if got, _ := uploadType.Load().(string); got != "file" {
+		t.Fatalf("上传素材类型 = %q, want file", got)
 	}
 }

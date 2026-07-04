@@ -97,17 +97,15 @@ func (s *AppSink) Capabilities() domainsink.Capabilities {
 		SupportsMarkdown: true,
 		SupportsImage:    true,
 		SupportsFile:     true,
-		SupportsAudio:    true,
-		SupportsVideo:    true,
 		MaxTextLength:    2048,
 		MaxFileSizeMB:    20,
 		Media: []domainsink.MediaCapability{
 			{Type: "image", Supported: true, MaxSizeMB: 10, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为 [图片消息] + caption + 原始链接"},
 			{Type: "file", Supported: true, MaxSizeMB: 20, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为文件名、大小和原始链接摘要"},
-			{Type: "audio", Supported: true, MaxSizeMB: 2, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为音频文件名、大小和原始链接摘要"},
-			{Type: "video", Supported: true, MaxSizeMB: 10, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为视频文件名、大小和原始链接摘要"},
+			{Type: "audio", Supported: false, Fallback: "官方支持 voice 素材，但当前内置实现未接入，降级为音频文件名、大小和原始链接摘要"},
+			{Type: "video", Supported: false, Fallback: "官方支持 video 素材，但当前内置实现未接入，降级为视频文件名、大小和原始链接摘要"},
 		},
-		Notes: []string{"应用消息媒体需先上传临时素材，再用 media_id 发送。"},
+		Notes: []string{"应用消息媒体需先上传临时素材，再用 media_id 发送；音频/视频原生发送后置，当前按文本摘要降级。"},
 	}
 }
 
@@ -233,6 +231,19 @@ func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, ag
 		}
 		return s.sendAppImage(ctx, sink, token, agentid, mediaID)
 	}
+	if file, ok := firstLocalFile(payload); ok {
+		if payload.Text != "" {
+			textResult, expired, err := s.sendAppText(ctx, sink, token, agentid, payload)
+			if err != nil || expired || textResult == nil || !textResult.Success {
+				return textResult, expired, err
+			}
+		}
+		mediaID, summary, err := s.uploadMedia(ctx, token, "file", file.LocalPath)
+		if err != nil {
+			return failResult(summary, err.Error()), false, err
+		}
+		return s.sendAppFile(ctx, sink, token, agentid, mediaID)
+	}
 	if len(payload.Media) > 0 {
 		payload.Format = "text"
 		payload.Text = fallbackText(payload)
@@ -286,6 +297,25 @@ func (s *AppSink) uploadMedia(ctx context.Context, token, mediaType, path string
 		return "", summary, fmt.Errorf("上传临时素材失败 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg)
 	}
 	return r.MediaID, summary, nil
+}
+
+func (s *AppSink) sendAppFile(ctx context.Context, sink *domainsink.Sink, token, agentid, mediaID string) (*pluginsink.Result, bool, error) {
+	body := map[string]any{
+		"touser":  s.toUser(sink),
+		"msgtype": "file",
+		"agentid": agentid,
+		"file":    fileContent{MediaID: mediaID},
+	}
+	url := apiBase + "/message/send?access_token=" + token
+	resp, err := s.client.PostJSON(ctx, url, body, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	summary, ok, expired, errMsg := parseResp(resp.Body)
+	if ok {
+		return &pluginsink.Result{Success: true, ResponseSummary: summary}, false, nil
+	}
+	return failResult(summary, errMsg), expired, nil
 }
 
 func (s *AppSink) sendAppImage(ctx context.Context, sink *domainsink.Sink, token, agentid, mediaID string) (*pluginsink.Result, bool, error) {

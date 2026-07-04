@@ -44,6 +44,10 @@ type imageContent struct {
 	MediaID string `json:"media_id,omitempty"`
 }
 
+type fileContent struct {
+	MediaID string `json:"media_id"`
+}
+
 // buildMessage 根据渲染格式选择 msgtype，返回 (msgtype, contentField)。
 func msgTypeFor(format string) string {
 	if format == "markdown" {
@@ -107,6 +111,15 @@ func failResult(summary []byte, errMsg string) *pluginsink.Result {
 func firstLocalImage(payload pluginsink.Payload) (domainmessage.Media, bool) {
 	for _, item := range payload.Media {
 		if (item.Type == "photo" || item.Type == "image") && item.LocalPath != "" {
+			return item, true
+		}
+	}
+	return domainmessage.Media{}, false
+}
+
+func firstLocalFile(payload pluginsink.Payload) (domainmessage.Media, bool) {
+	for _, item := range payload.Media {
+		if (item.Type == "file" || item.Type == "document") && item.LocalPath != "" {
 			return item, true
 		}
 	}
