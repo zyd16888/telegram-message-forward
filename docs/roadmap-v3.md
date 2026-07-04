@@ -159,6 +159,22 @@ v3 优先完成六条主线：
 
 进度说明（2026-07-03）：V3-3 已完成并验证 `go test ./...`、`go vet ./...`、`go build ./...`、`cd web && npm run build`。Webhook 只外发媒体公开元数据；企业微信群机器人使用 base64/md5 发送本地图片；企业微信应用消息上传临时素材后按 `media_id` 发送图片；钉钉对公网图片使用 markdown 图片链接，本地图片降级为可读文本。真实 Telegram、企业微信、钉钉外部联调需凭证，未纳入本轮自动验证。
 
+### V3-3.5 媒体存储与公网 URL（补充项）
+
+目标：让只认公网图片 URL 的渠道（钉钉、Bark、Gotify 等）也能收到 Telegram 图片，而不是降级为文本。
+
+- [x] 新增 `internal/infra/mediastore`：`Store` 接口 + `Local`（本地目录 + HMAC 签名 URL）+ `S3`（S3 兼容对象存储，minio-go，覆盖 AWS S3 / Cloudflare R2 / MinIO / OSS / COS）。
+- [x] ingest 落库前把 Source 下载到临时目录的媒体收编进媒体目录（`media.dir`，默认 `data/media`），`LocalPath` 指向存储层，替代散落的 `os.TempDir()`。
+- [x] worker 投递时按 `StorageKey` 生成公网 URL 回填 `Media.URL`（投递时生成而非落库时，保证重试拿到未过期 URL）；降级文本同步带上该 URL。
+- [x] 新增 `GET /media/*key` 端点：不走管理鉴权，用 URL 内嵌 HMAC-SHA256 签名 + 过期时间校验（密钥复用 `security.encryption_key`），配置 `media.public_base_url` 后启用。
+- [x] S3 启用时公网 URL 优先用对象存储（`public_base_url` 直拼或预签名），本地目录仍作二进制缓存供企业微信 base64 / 邮件附件等直传渠道使用。
+- [x] 本地媒体按 `media.retention`（默认 168h）由后台每小时清理，服务启动时先清一次。
+- [x] S3 侧清理：`media.s3.auto_cleanup=true` 时由本服务按同一 `media.retention` 定时删除过期对象（共用桶必须设置 `key_prefix`）；默认关闭，交由桶生命周期规则。
+- [x] 系统设置框架：复用 00001 预留的 `settings` 表（补 `secret_encrypted` 列），`internal/app/settings` 提供按组读写；媒体存储作为第一组入驻，页面保存的设置优先于配置文件，S3 secret_key 加密存储、API 脱敏（`has_s3_secret`）。
+- [x] 媒体设置页面化：设置页新增「媒体存储」卡片（公网地址 / 保留时长 / S3 全量参数 / S3 连接测试），保存后通过 `mediastore.Manager` 热重载，无需重启服务。
+
+进度说明（2026-07-04）：V3-3.5 已完成并验证 `go build ./...`、`go vet ./...`、`go test ./...`、`cd web && npm run build`。飞书等渠道的原生上传路径（image_key）仍按原计划后置为独立插件改造，不在本项范围。
+
 ### V3-4 同账号多监听源连接复用
 
 目标：Telegram Source 从“每 source 一个 client”改为“每 account 一个 runner，多 source 订阅分发”。

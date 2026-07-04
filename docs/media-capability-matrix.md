@@ -69,6 +69,15 @@
 - JSON payload 支持 `message_id`、`text`、`sender/sender_name`、`timestamp`、`original_url`、`links[]`、`media[]`；非 JSON body 会按纯文本消息处理。
 - `media[]` 使用内部 `domain/message.Media` 字段结构，支持远程 URL 元数据，不在 Webhook Source 内下载二进制。
 
+## 媒体存储与公网 URL
+
+- 媒体存储推荐在管理后台「设置」页配置：保存后热生效（`mediastore.Manager` 热切换），并优先于配置文件 `media` 段；数据库无记录时回退到配置文件默认值。S3 secret_key 加密存储在 `settings` 表，API 只返回 `has_s3_secret`。
+- 媒体二进制统一由 `internal/infra/mediastore` 管理：Source 下载的临时文件在 ingest 落库前收编到 `media.dir`（默认 `data/media`）。
+- 配置 `media.public_base_url` 后，本地媒体可通过 `GET /media/*key` 生成带 HMAC 签名和过期时间的公网 URL；未配置时行为与之前一致（无公网 URL 的渠道继续降级）。
+- 配置 `media.s3`（S3 兼容：AWS S3 / Cloudflare R2 / MinIO / OSS / COS）后媒体额外上传对象存储，公网 URL 优先使用对象存储地址（公开桶/CDN 直拼或预签名）。
+- 公网 URL 在 worker 投递时按 `StorageKey` 现生成并回填 `Media.URL`，不落库，保证重试时 URL 未过期；钉钉、Bark、Gotify 等「仅公网 URL」渠道由此获得真实图片投递能力。
+- 本地媒体按 `media.retention` 定期清理（服务启动时清一次，之后每小时一次）；对象存储侧开启 `media.s3.auto_cleanup` 后按同一保留期由本服务删除过期对象，未开启时请配置桶生命周期规则。与其他数据共用桶时务必设置 `media.s3.key_prefix`，auto_cleanup 只清理该前缀下的对象。
+
 ## 后续实现要求
 
 - Telegram 下载产物不得直接通过 API 暴露本地路径。
