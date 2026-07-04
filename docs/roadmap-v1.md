@@ -12,7 +12,7 @@
 
 ## 0. 当前状态快照
 
-> 更新日期：2026-07-01（M1–M5 主体落地）
+> 更新日期：2026-07-04（v1 主体已被 v2/v3 增强覆盖）
 
 **已完成（本轮）**
 
@@ -23,15 +23,17 @@
 
 **待真实外部账号联调（代码已就绪）**
 
-- **M2 Telegram**：需真实 Telegram 账号 + `app_id/app_hash` 跑 `cmd/login` 登录、`SyncSources` 拉列表、配置真实频道 source 后端到端收消息。
+- **M2 Telegram**：需真实 Telegram 账号 + `app_id/app_hash` 通过 UI 或 `cmd/login` 登录、`SyncSources` 拉列表、配置真实频道 source 后端到端收消息。
 - **M3 WeCom**：需真实企业微信 `corpid/secret/agentid` 或群机器人 key 做端到端投递联调（请求构造/错误处理/token 刷新已单测覆盖）。
+- **v3 媒体链路**：Telegram 图片下载、媒体存储、公网 URL、企业微信/钉钉/Bark/ntfy/Gotify/Email 等图片投递路径已有单测和构建验证；真实外部渠道仍需凭证联调。
 
 **已知技术债 / 注意**
 
 - [ ] `security.encryption_key` 仍是占位符。**存真实 session/secret 前必须换成 `openssl rand -hex 16`，且一旦启用不可再改**。
-- [ ] Telegram Source 目前「每 source 一个客户端」，多 source 共账号的连接复用（SourceManager 去重）后置。
+- [x] Telegram Source 已在 v3 改为「每 account 一个 runner，多 source 订阅分发」。
 - [ ] Telegram 历史补拉后置排期：基于 `sources.last_message_id` 设计手动回捞、启动补漏和断线恢复后的增量追平，不混入媒体转发主线。
-- [ ] http 代理未实现（仅 socks5）；媒体仅记录轻量描述，不下载文件。
+- [ ] http/https 代理未实现（仅 socks5）。
+- [x] Telegram 图片媒体已可下载并收编到媒体存储；文件、音频、视频等复杂媒体下载与原生投递仍后置。
 - [ ] 前端 naive-ui 单 chunk 体积告警（未做手动分包）。
 
 **模块现状**

@@ -13,6 +13,13 @@ v2 优先解决四件事：
 
 本轮不是重做权限系统，也不是引入复杂多用户 RBAC。`cmd/login` 和 `cmd/token` 可以保留为运维兜底入口，但不再作为普通使用主路径。
 
+当前实现对齐（2026-07-04）：
+
+- 管理后台登录已从最初设想的“输入管理 token”演进为单管理员账号模型：`admin_users` 保存用户名与 bcrypt 密码哈希，`admin_sessions` 保存浏览器会话 token hash。
+- `cmd/token` 与 Settings 页的 API Token 仍保留，定位为脚本、运维或 CI 调用管理 API 的凭证，不再作为普通 UI 首屏登录方式。
+- `auth_enabled=false` 仍是显式开发免鉴权开关；默认生产口径仍启用鉴权。
+- 该实现仍不是多用户 RBAC：没有角色、权限点或租户边界，后续如需团队化使用应另开权限模型阶段。
+
 ## 2. 设计原则
 
 - 保持 v1 分层边界：handler 只调 app service，gotd/td 只留在 `internal/infra/telegram` 与 `internal/plugin/source/telegram`。
@@ -29,7 +36,7 @@ v2 优先解决四件事：
 
 目标：管理后台有自己的登录页；开发或单人本地使用时，也可以通过配置关闭 `/api/v1` 的 Bearer Token 鉴权。
 
-管理 UI 登录不引入多用户 RBAC。首版按单管理员模型实现，复用现有 API token 哈希校验能力即可：用户在登录页输入管理 token，后端校验有效后返回当前身份状态，前端保存访问凭证并进入后台。后续如果要改成用户名/密码或多用户，可以在此基础上演进。
+管理 UI 登录不引入多用户 RBAC。当前实现按单管理员账号模型推进：首次初始化创建管理员用户名和密码，后端签发浏览器会话 token；API token 仅作为运维凭证保留。后续如果要改成多管理员或 RBAC，应在 `admin_users/admin_sessions` 基础上演进，而不是把 API token 重新作为 UI 登录主路径。
 
 建议后端 API：
 
@@ -43,8 +50,8 @@ POST /api/v1/auth/logout
 
 说明：
 
-- `bootstrap` 只在没有任何 active 管理 token 时开放，用于 UI 首次初始化管理员凭证；创建成功后立即关闭该入口。
-- `login` 只校验 token 是否有效，不返回 token 明文，不创建新的长期 secret。
+- `bootstrap` 只在没有任何 active 管理员账号时开放，用于 UI 首次初始化管理员用户名和密码；创建成功后立即关闭该入口。
+- `login` 校验用户名和密码，成功后签发浏览器会话 token；会话 token 只保存 hash，前端保存明文用于后续 Bearer 请求。
 - `me` 用于前端启动时判断当前凭证是否仍有效。
 - `logout` 前端清理本地凭证；如后端改为 cookie/session 模式，也在这里失效会话。
 - `auth_enabled=false` 时，`me` 返回开发免鉴权状态，登录页可以直接进入或显示“开发免鉴权”。
@@ -69,9 +76,9 @@ TMF_SECURITY_AUTH_ENABLED=false
 - `/healthz` 仍保持无鉴权。
 - `auth_enabled=true` 时现有 token 行为不变，原有 `TestAPIAuthAndCRUD` 不应破坏。
 - 前端新增 `LoginPage`：未登录访问后台时跳转登录页；登录成功后进入 Dashboard。
-- 前端新增首次初始化态：当 `auth/bootstrap` 返回可初始化时，展示“创建首个管理凭证”，创建后自动保存本次返回的明文 token 并进入后台。
+- 前端新增首次初始化态：当 `auth/bootstrap` 返回可初始化时，展示“创建首个管理员”，创建后自动保存本次返回的浏览器会话 token 并进入后台。
 - 前端启动时调用 `auth/me` 或运行时接口识别鉴权模式；免鉴权模式下不应强制要求先保存 token。
-- Settings 保留 token 管理能力，但定位为“管理凭证维护”，不再承担首屏登录入口。
+- Settings 保留 API token 管理能力，但定位为“脚本/运维凭证维护”，不再承担首屏登录入口。
 
 验收：
 
