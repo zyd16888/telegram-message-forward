@@ -29,6 +29,14 @@ import type {
 
 const TOKEN_KEY = 'tmf_api_token'
 
+type UnauthorizedHandler = () => void | Promise<void>
+
+let unauthorizedHandler: UnauthorizedHandler | null = null
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  unauthorizedHandler = handler
+}
+
 export function getToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? ''
 }
@@ -54,7 +62,7 @@ http.interceptors.request.use((config) => {
   return config
 })
 
-// 会话失效（401）时清理本地凭证并跳转登录页；auth 端点自身的 401 由调用方处理。
+// 会话失效（401）时清理本地凭证；跳转由应用入口注入，避免 API 层依赖 router。
 http.interceptors.response.use(
   (resp) => resp,
   (error) => {
@@ -62,11 +70,7 @@ http.interceptors.response.use(
     const status: number | undefined = error?.response?.status
     if (status === 401 && !url.startsWith('/auth/')) {
       setToken('')
-      void import('@/router').then(({ router }) => {
-        if (router.currentRoute.value.name !== 'login') {
-          router.push({ name: 'login' })
-        }
-      })
+      void unauthorizedHandler?.()
     }
     return Promise.reject(error)
   },
