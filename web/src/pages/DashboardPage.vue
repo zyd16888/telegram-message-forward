@@ -283,10 +283,11 @@ onMounted(load)
   box-shadow: var(--clay-out-sm);
 }
 .rate-value {
-  font-size: 40px;
+  font-size: 34px;
   font-weight: 900;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .rate-label {
   margin-top: 8px;
