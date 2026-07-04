@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NSpace, NSwitch, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NSwitch, NTag, NText, NTooltip, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import SinkFormModal from '@/components/sinks/SinkFormModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
@@ -153,6 +153,22 @@ function confirmDelete(row: Sink) {
   })
 }
 
+function actionButton(label: string, icon: string, onClick: () => void, type?: 'error') {
+  return h(
+    NTooltip,
+    { trigger: 'hover' },
+    {
+      trigger: () =>
+        h(
+          NButton,
+          { size: 'small', quaternary: true, circle: true, type, onClick },
+          { icon: () => h(ClayIcon, { name: icon, size: 16 }) },
+        ),
+      default: () => label,
+    },
+  )
+}
+
 const columns: DataTableColumns<Sink> = [
   { title: 'ID', key: 'id', width: 70 },
   {
@@ -227,16 +243,14 @@ const columns: DataTableColumns<Sink> = [
   {
     title: '操作',
     key: 'actions',
-    width: 250,
+    width: 150,
     render: (row) =>
-      h(NSpace, {}, {
-        default: () => [
-          h(NButton, { size: 'small', onClick: () => goToFlow(row.id) }, { default: () => '编排' }),
-          h(NButton, { size: 'small', onClick: () => createRuleForSink(row.id) }, { default: () => '建规则' }),
-          h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(NButton, { size: 'small', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
-        ],
-      }),
+      h('div', { class: 'action-row' }, [
+        actionButton('查看编排', 'flow', () => goToFlow(row.id)),
+        actionButton('创建规则', 'plus', () => createRuleForSink(row.id)),
+        actionButton('编辑', 'edit', () => openEdit(row)),
+        actionButton('删除', 'trash', () => confirmDelete(row), 'error'),
+      ]),
   },
 ]
 
@@ -268,5 +282,12 @@ onMounted(load)
 .observability-cell {
   display: grid;
   gap: 4px;
+}
+
+:deep(.action-row) {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: nowrap;
 }
 </style>
