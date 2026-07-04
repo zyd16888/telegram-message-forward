@@ -11,7 +11,10 @@
 - `需要上传` 表示必须先调用渠道上传接口获得 `media_id`、`image_key` 或同类引用。
 - `公网 URL` 表示渠道可以直接引用外部 URL；本项目不会默认泄露本地临时文件路径。
 - 限制以官方文档或服务默认值为准；不同企业配置、服务端配置或私有部署可能更严格。
-- 截至 2026-07-04，本项目第一轮媒体实现以图片为主：Telegram photo / image document 会下载、收编和投递；文件、音频、视频下载与原生投递属于后续复杂媒体阶段。
+- 截至 2026-07-04，本项目媒体实现覆盖图片与文件两条主线：
+  - 图片：Telegram photo / image document 始终下载（大小上限见设置页「媒体下载策略」，默认 20 MB）、收编和投递。
+  - 文件：PDF 等非图片 document 在监听源开启「文件下载」开关后下载，受设置页文件大小上限（默认 50 MB）与扩展名白名单约束；下载后按 Sink 能力投递（企业微信上传 media_id、邮件附件、ntfy 附件、Webhook 元数据）或降级为带公网 URL 的文本摘要。
+  - 音频、视频下载与原生投递仍属后续复杂媒体阶段。
 
 ## 能力矩阵
 
@@ -38,13 +41,15 @@
 ### 企业微信群机器人
 
 - 当前运行时已实现 `image`：按 base64 + md5 发送，适合 Telegram photo 或小图片 document。
-- 企业微信群机器人官方支持文件上传，但当前内置实现尚未发送 file `media_id`；非图片媒体应按文本摘要降级。
+- 当前运行时已实现 `file`：有本地文件时先调用 `webhook/upload_media?type=file` 获取 `media_id`，再按 `msgtype=file` 发送（上限 20 MB）；upload 地址由 webhook send 地址推导，自定义网关地址不含 `/webhook/send` 时返回可解释错误。
+- 无本地文件（未下载/超限）或超过渠道上限的文件由 worker 统一降级为文本摘要。
 - `audio`、`video` 先降级为文本摘要。
 
 ### 企业微信应用消息
 
 - 当前运行时已实现 `image`：先上传临时素材，再按 `media_id` 发送图片消息。
-- 企业微信应用消息官方支持 file/audio/video 临时素材发送，但当前内置实现尚未接入对应 msgtype；非图片媒体应按文本摘要降级。
+- 当前运行时已实现 `file`：先上传 `type=file` 临时素材，再按 `msgtype=file` 发送（上限 20 MB）。
+- `audio`、`video` 官方支持但当前内置实现未接入，capability 声明为不支持并按文本摘要降级。
 - access_token 缓存和刷新继续由 Sink 内部维护。
 
 ### 钉钉自定义机器人
@@ -68,6 +73,14 @@
 - 每个 Webhook Source 必须配置 `token`；外部请求通过 `X-TMF-Webhook-Token` header 或 `?token=` 传入，错误响应不会回显 token。
 - JSON payload 支持 `message_id`、`text`、`sender/sender_name`、`timestamp`、`original_url`、`links[]`、`media[]`；非 JSON body 会按纯文本消息处理。
 - `media[]` 使用内部 `domain/message.Media` 字段结构，支持远程 URL 元数据，不在 Webhook Source 内下载二进制。
+
+## 媒体下载策略
+
+- 下载策略在管理后台「设置 → 媒体存储 → 媒体下载策略」配置，保存后热生效；配置文件 `media.download` 段仅作页面未保存时的默认值。
+- 图片上限（默认 20 MB）：photo 与 image document 超过后不下载，`download_status=skipped`，按文本摘要降级。
+- 文件上限（默认 50 MB）与扩展名白名单（默认 pdf/doc/docx/xls/xlsx/ppt/pptx/csv/txt/md/epub/zip/rar/7z）：仅约束非图片 document；白名单清空表示不限类型。
+- 文件下载还需要在监听源列表按 source 开启「文件下载」开关（默认关闭），避免所有频道的大文件占满磁盘。
+- 未下载（开关关闭、超限、白名单不命中、下载失败）的文件保留元数据进入投递链路，降级文本包含文件名、大小和原始链接。
 
 ## 媒体存储与公网 URL
 

@@ -26,8 +26,9 @@ v1/v2 已经把消息转发主链路、管理后台登录、Telegram 登录 UI �
 当前边界校准（2026-07-04）：
 
 - v3 第一轮已经闭环的是“图片主线”：Telegram photo / image document 标准化、下载、媒体存储、公网 URL、按 Sink 能力投递或降级。
-- 文件、音频、视频等复杂媒体可以在 `domain/message.Media` 和 capability 矩阵中表达，但当前内置 Telegram Source 尚未下载这些二进制，部分 Sink 也只做文本降级。后续应单独开“复杂媒体”阶段，不把它们算作 v3 第一轮已完成。
-- 企业微信渠道的官方能力覆盖 file/audio/video，但当前内置实现只真正发送本地图片；文件、音频、视频上传发送路径后置，文档和 UI 能力提示必须避免让用户误以为已可用。
+- 文件主线（V3-Media-Advanced 第一子阶段）已完成：Telegram 非图片 document（PDF 等）按 source 级开关下载，大小上限与扩展名白名单在设置页「媒体下载策略」配置并热生效；企业微信群机器人/应用消息支持 file 上传发送；worker 按 `Capabilities.Media[]` 细粒度匹配（含大小上限与本地文件可用性），不可发送时降级为带公网 URL 的文本摘要。
+- 音频、视频等复杂媒体可以在 `domain/message.Media` 和 capability 矩阵中表达，但当前内置 Telegram Source 尚未下载这些二进制，Sink 也只做文本降级；它们仍留在复杂媒体待办。
+- 企业微信应用消息的官方能力覆盖 audio/video，但当前内置实现未接入，capability 已声明为不支持，避免用户误以为已可用。
 - Telegram Source 当前声明了 `SupportsHistory`，但历史补拉接口、游标更新和 UI 预览确认尚未实现；V3-History 开始前需要先把插件能力声明与实际接口对齐。
 
 ## 1. v3 总目标
@@ -378,14 +379,18 @@ v3 优先完成六条主线：
 
 ## 3.1 复杂媒体待办
 
-复杂媒体不进入 v3 第一轮图片主线，后续建议单独开 V3-Media-Advanced：
+复杂媒体分阶段推进；第一子阶段「文件主线」已于 2026-07-04 完成：
 
-- [ ] Telegram document/file/audio/video 下载与大小限制。
-- [ ] 企业微信群机器人文件上传与 `media_id` 发送。
-- [ ] 企业微信应用消息 file/audio/video 上传与对应 msgtype 发送。
+- [x] Telegram document/file 下载与大小限制（source 级「文件下载」开关；设置页可配图片/文件大小上限与扩展名白名单，热生效）。
+- [x] 企业微信群机器人文件上传与 `media_id` 发送（`webhook/upload_media?type=file` + `msgtype=file`）。
+- [x] 企业微信应用消息 file 上传与 `msgtype=file` 发送。
+- [x] worker 按 `Capabilities.Media[]` 细粒度匹配媒体（大小上限、本地文件可用性），修复声明支持但无法真实发送时媒体被静默丢弃的问题。
+- [x] 文件主线单测：策略跳过（开关/白名单/超限）、企业微信 bot/app 文件上传发送、worker 细粒度匹配降级。
+- [ ] Telegram audio/video 下载与大小限制。
+- [ ] 企业微信应用消息 voice/video 上传与对应 msgtype 发送。
 - [ ] 飞书应用消息插件，支持 image_key/file_key 上传路径；当前 `feishu_bot` 自定义机器人仍以文本/post 和降级为主。
 - [ ] UI capability 区分“当前已实现”和“渠道官方可支持但本项目后置”。
-- [ ] 为每类复杂媒体补成功、超限、下载失败、上传失败、降级单测。
+- [ ] 为音频/视频补成功、超限、下载失败、上传失败、降级单测。
 
 ## 4. 推荐提交拆分
 
