@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useMessage } from 'naive-ui'
-import { accountsApi, deliveriesApi, rulesApi, sinksApi, sourcesApi } from '@/api/client'
+import { accountsApi, aiApi, deliveriesApi, rulesApi, sinksApi, sourcesApi } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import type { Delivery } from '@/types'
 import { errText } from '@/utils/error'
@@ -12,6 +12,7 @@ const auth = useAuthStore()
 
 const counts = ref({ accounts: 0, sources: 0, sinks: 0, rules: 0 })
 const deliveries = ref<Delivery[]>([])
+const aiStats = ref({ total: 0, success: 0, failed: 0, tokens: 0 })
 const statusTotals = ref<Record<string, number>>({})
 const windowTotal = ref(0)
 const loading = ref(false)
@@ -88,6 +89,7 @@ async function load() {
       deliveriesApi.page('dead', 250, 0, { since_hours: windowHours }),
       deliveriesApi.page('failed', 250, 0, { since_hours: windowHours }),
     ])
+    const aiProfiles = await aiApi.profiles.list()
     counts.value = { accounts: accs.length, sources: srcs.length, sinks: snks.length, rules: rls.length }
     windowTotal.value = all.total
     statusTotals.value = {
@@ -99,6 +101,13 @@ async function load() {
       failed: failed.total,
     }
     deliveries.value = [...dead.data, ...failed.data]
+    const recentRuns = aiProfiles.map((item) => item.recent_run).filter(Boolean)
+    aiStats.value = {
+      total: recentRuns.length,
+      success: recentRuns.filter((item) => item?.status === 'success').length,
+      failed: recentRuns.filter((item) => item?.status === 'failed').length,
+      tokens: recentRuns.reduce((sum, item) => sum + (item?.token_usage.total_tokens ?? 0), 0),
+    }
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
@@ -181,6 +190,31 @@ onMounted(load)
         </div>
       </n-card>
     </div>
+
+    <n-card class="panel" title="AI 整理概况">
+      <div class="status-grid compact-ai">
+        <div class="status-pill tone-blue">
+          <span class="status-dot" />
+          <span class="status-num">{{ aiStats.total }}</span>
+          <span class="status-name">最近运行 Profile</span>
+        </div>
+        <div class="status-pill tone-mint">
+          <span class="status-dot" />
+          <span class="status-num">{{ aiStats.success }}</span>
+          <span class="status-name">成功</span>
+        </div>
+        <div class="status-pill tone-coral">
+          <span class="status-dot" />
+          <span class="status-num">{{ aiStats.failed }}</span>
+          <span class="status-name">失败</span>
+        </div>
+        <div class="status-pill tone-peach">
+          <span class="status-dot" />
+          <span class="status-num">{{ aiStats.tokens }}</span>
+          <span class="status-name">Token</span>
+        </div>
+      </div>
+    </n-card>
   </n-spin>
 </template>
 
@@ -306,6 +340,10 @@ onMounted(load)
 .status-grid.compact {
   grid-template-columns: 1fr;
 }
+
+.status-grid.compact-ai {
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+}
 .status-total {
   grid-column: 1 / -1;
   display: flex;
@@ -380,7 +418,8 @@ onMounted(load)
 
 @media (max-width: 900px) {
   .ops-grid,
-  .top-grid {
+  .top-grid,
+  .status-grid.compact-ai {
     grid-template-columns: 1fr;
   }
 }

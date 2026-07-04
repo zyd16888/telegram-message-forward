@@ -53,6 +53,7 @@ const menuOptions: MenuOption[] = [
   { label: '规则', key: 'rules', icon: icon('rules') },
   { label: '模板', key: 'templates', icon: icon('templates') },
   { label: '投递记录', key: 'deliveries', icon: icon('deliveries') },
+  { label: 'AI 整理', key: 'ai-digests', icon: icon('ai') },
   { label: '设置', key: 'settings', icon: icon('settings') },
 ]
 

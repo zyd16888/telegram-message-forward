@@ -25,6 +25,13 @@ import type {
   MediaSettings,
   MediaSettingsRequest,
   MediaS3TestResult,
+  AIProvider,
+  AIProviderRequest,
+  AIProviderTestResult,
+  AIDigestProfile,
+  AIDigestProfileRequest,
+  AIDigestRun,
+  AIDigestRunDetail,
 } from '@/types'
 
 const TOKEN_KEY = 'tmf_api_token'
@@ -329,5 +336,40 @@ export const settingsApi = {
       http.put<ApiItem<MediaSettings>>('/settings/media', body).then((r) => r.data.data),
     testS3: (body: MediaSettingsRequest) =>
       http.post<ApiItem<MediaS3TestResult>>('/settings/media/test-s3', body).then((r) => r.data.data),
+  },
+}
+
+// --- AI 整理 ---
+export const aiApi = {
+  provider: {
+    get: () => http.get<ApiItem<AIProvider>>('/ai/provider').then((r) => r.data.data),
+    update: (body: AIProviderRequest) =>
+      http.put<ApiItem<AIProvider>>('/ai/provider', body).then((r) => r.data.data),
+    test: () => http.post<ApiItem<AIProviderTestResult>>('/ai/provider/test').then((r) => r.data.data),
+  },
+  profiles: {
+    list: () => http.get<ApiList<AIDigestProfile>>('/ai/digests').then((r) => r.data.data),
+    get: (id: number) => http.get<ApiItem<AIDigestProfile>>(`/ai/digests/${id}`).then((r) => r.data.data),
+    create: (body: AIDigestProfileRequest) =>
+      http.post<ApiItem<AIDigestProfile>>('/ai/digests', body).then((r) => r.data.data),
+    update: (id: number, body: AIDigestProfileRequest) =>
+      http.put<ApiItem<AIDigestProfile>>(`/ai/digests/${id}`, body).then((r) => r.data.data),
+    remove: (id: number) => http.delete(`/ai/digests/${id}`),
+    previewDraft: (body: AIDigestProfileRequest) =>
+      http.post<ApiItem<AIDigestRunDetail>>('/ai/digests/preview', body, { timeout: 180000 }).then((r) => r.data.data),
+    preview: (id: number) =>
+      http.post<ApiItem<AIDigestRunDetail>>(`/ai/digests/${id}/preview`, undefined, { timeout: 180000 }).then((r) => r.data.data),
+    run: (id: number) =>
+      http.post<ApiItem<AIDigestRunDetail>>(`/ai/digests/${id}/run`, undefined, { timeout: 180000 }).then((r) => r.data.data),
+    runs: (id: number, limit = 30, offset = 0) =>
+      http.get<ApiList<AIDigestRun>>(`/ai/digests/${id}/runs`, { params: { limit, offset } }).then((r) => r.data.data),
+  },
+  runs: {
+    get: (id: number) => http.get<ApiItem<AIDigestRunDetail>>(`/ai/runs/${id}`).then((r) => r.data.data),
+    cancel: (id: number) => http.post(`/ai/runs/${id}/cancel`),
+    deliver: (id: number) =>
+      http.post<ApiItem<{ delivery_task_ids: number[] }>>(`/ai/runs/${id}/deliver`).then((r) => r.data.data),
+    cleanup: (retentionDays = 30) =>
+      http.post<ApiItem<{ deleted: number }>>('/ai/runs/cleanup', undefined, { params: { retention_days: retentionDays } }).then((r) => r.data.data),
   },
 }

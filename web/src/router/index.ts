@@ -18,6 +18,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/rules', name: 'rules', component: () => import('@/pages/RulesPage.vue'), meta: { title: '规则' } },
   { path: '/templates', name: 'templates', component: () => import('@/pages/TemplatesPage.vue'), meta: { title: '模板' } },
   { path: '/deliveries', name: 'deliveries', component: () => import('@/pages/DeliveriesPage.vue'), meta: { title: '投递记录' } },
+  { path: '/ai-digests', name: 'ai-digests', component: () => import('@/pages/AIDigestsPage.vue'), meta: { title: 'AI 整理' } },
   { path: '/settings', name: 'settings', component: () => import('@/pages/SettingsPage.vue'), meta: { title: '设置' } },
 ]
 

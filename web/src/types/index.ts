@@ -386,3 +386,137 @@ export interface MediaS3TestResult {
   success: boolean
   error?: string
 }
+
+// --- AI 整理 ---
+
+export interface AIProvider {
+  provider_type: string
+  base_url: string
+  model: string
+  timeout_seconds: number
+  max_retries: number
+  default_temperature: number
+  has_api_key: boolean
+}
+
+export interface AIProviderRequest {
+  provider_type: string
+  base_url: string
+  model: string
+  timeout_seconds: number
+  max_retries: number
+  default_temperature: number
+  api_key?: string
+}
+
+export interface AIDigestSchedule {
+  type: 'manual' | 'interval' | 'daily' | string
+  interval_minutes?: number
+  time?: string
+  timezone?: string
+  next_run_at?: string
+}
+
+export interface AIDigestWindow {
+  type: 'last_duration' | 'since_last_run' | string
+  duration_minutes?: number
+}
+
+export interface AIDigestModelConfig {
+  model?: string
+  temperature?: number
+  max_tokens?: number
+}
+
+export interface AIDigestLimits {
+  max_messages_per_run?: number
+  max_chars_per_message?: number
+  max_prompt_chars?: number
+}
+
+export interface AIDigestProfile {
+  id: number
+  name: string
+  enabled: boolean
+  source_ids: number[]
+  conditions: ConditionConfig[]
+  schedule: AIDigestSchedule
+  window: AIDigestWindow
+  dedupe: { enabled: boolean }
+  prompt_template: string
+  output_format: string
+  target_sink_ids: number[]
+  model_config: AIDigestModelConfig
+  limits: AIDigestLimits
+  recent_run?: AIDigestRun
+  created_at: string
+  updated_at: string
+}
+
+export type AIDigestProfileRequest = Omit<AIDigestProfile, 'id' | 'recent_run' | 'created_at' | 'updated_at'>
+
+export interface AIDigestRun {
+  id: number
+  profile_id?: number
+  status: string
+  trigger_type: string
+  window_start: string
+  window_end: string
+  input_message_count: number
+  included_count: number
+  excluded_count: number
+  delivery_task_ids: number[]
+  model_name?: string
+  token_usage: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  }
+  error?: string
+  started_at?: string
+  finished_at?: string
+  created_at: string
+}
+
+export interface AIDigestMessageRef {
+  id: number
+  source_id: number
+  message_type: string
+  sender_name?: string
+  text?: string
+  original_url?: string
+  sent_at?: string
+  received_at: string
+  media?: unknown[]
+}
+
+export interface AIDigestRunItem {
+  message_id: number
+  source_id: number
+  included: boolean
+  reason?: string
+  sort_order: number
+  message?: AIDigestMessageRef
+}
+
+export interface AIDigestOutput {
+  id: number
+  run_id: number
+  format: string
+  title?: string
+  content: string
+  raw_response?: unknown
+  created_at: string
+}
+
+export interface AIDigestRunDetail {
+  run: AIDigestRun
+  items: AIDigestRunItem[]
+  output?: AIDigestOutput
+}
+
+export interface AIProviderTestResult {
+  success: boolean
+  text?: string
+  error?: string
+}
