@@ -253,41 +253,41 @@ const columns: DataTableColumns<Delivery> = [
   {
     title: '来源',
     key: 'source',
-    width: 220,
+    width: 190,
     fixed: 'left',
     render: (row) => renderTwoLine(sourceTitle(row), sourceMeta(row)),
   },
   {
     title: '内容',
     key: 'message_text',
-    minWidth: 320,
+    minWidth: 240,
     render: renderMessage,
   },
   {
     title: '目标',
     key: 'target',
-    width: 260,
+    width: 210,
     render: renderTarget,
   },
   {
     title: '状态',
     key: 'status',
-    width: 100,
+    width: 88,
     render: (r) => h(NTag, { size: 'small', type: statusType[r.status] ?? 'default' }, { default: () => statusLabel[r.status] ?? r.status }),
   },
-  { title: '尝试', key: 'attempt_count', width: 80, render: (r) => `${r.attempt_count}/${r.max_attempts}` },
+  { title: '尝试', key: 'attempt_count', width: 70, render: (r) => `${r.attempt_count}/${r.max_attempts}` },
   {
     title: '错误',
     key: 'last_error',
-    width: 220,
+    width: 150,
     ellipsis: { tooltip: true },
     render: (r) => r.last_error || h(NText, { depth: 3 }, { default: () => '无' }),
   },
-  { title: '时间', key: 'created_at', width: 130, render: (r) => formatTime(r.created_at) },
+  { title: '时间', key: 'created_at', width: 110, render: (r) => formatTime(r.created_at) },
   {
     title: '操作',
     key: 'actions',
-    width: 150,
+    width: 140,
     render: (r) =>
       h('div', { class: 'action-row' }, [
         h(NButton, { size: 'small', secondary: true, onClick: () => openDetail(r) }, { default: () => '详情' }),
@@ -366,12 +366,13 @@ onMounted(() => {
     </PageHeader>
     <n-data-table
       remote
+      class="deliveries-table"
       :loading="loading"
       :columns="columns"
       :data="deliveries"
       :bordered="false"
       :pagination="pagination"
-      :scroll-x="1200"
+      :scroll-x="1080"
     />
     <n-modal v-model:show="detailShow" preset="card" title="投递详情" class="delivery-modal" :style="{ width: 'min(760px, calc(100vw - 32px))' }">
       <n-spin :show="detailLoading">
@@ -414,24 +415,25 @@ onMounted(() => {
   width: 160px;
 }
 
-.target-line {
+/* 表格单元格由 NDataTable 的 render 回调生成，拿不到本组件的 scopeId，须用 :deep() 下穿。 */
+.deliveries-table :deep(.target-line) {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
-.target-name {
+.deliveries-table :deep(.target-name) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cell-stack {
+.deliveries-table :deep(.cell-stack) {
   min-width: 0;
 }
 
-.cell-primary {
+.deliveries-table :deep(.cell-primary) {
   overflow: hidden;
   color: var(--clay-text);
   font-weight: 700;
@@ -439,7 +441,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.cell-secondary {
+.deliveries-table :deep(.cell-secondary) {
   margin-top: 3px;
   overflow: hidden;
   color: var(--clay-muted);
@@ -448,7 +450,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.message-preview {
+.deliveries-table :deep(.message-preview) {
   display: -webkit-box;
   max-width: 100%;
   overflow: hidden;
@@ -459,14 +461,7 @@ onMounted(() => {
   word-break: break-word;
 }
 
-.message-tooltip {
-  max-height: 360px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.action-row {
+.deliveries-table :deep(.action-row) {
   display: flex;
   gap: 8px;
 }
@@ -539,5 +534,15 @@ onMounted(() => {
   .detail-grid {
     grid-template-columns: 1fr;
   }
+}
+</style>
+
+<style>
+/* NTooltip 内容挂载在 body 下，scoped 样式作用不到。 */
+.message-tooltip {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>
