@@ -96,45 +96,14 @@ const promptVariables = [
   { token: '{{output_format}}', label: 'AI 输出格式', desc: '由下方「AI 输出格式」选择项决定。' },
   { token: '{{output_template}}', label: '输出结构模板', desc: '由「输出结构」区选择共享模板或自定义。' },
 ]
-const baseInputVolumeOptions = [
-  { label: '少量消息（最多 30 条）', value: 30 },
-  { label: '常规窗口（最多 50 条）', value: 50 },
-  { label: '大型群聊（最多 80 条）', value: 80 },
-  { label: '资讯频道（最多 120 条）', value: 120 },
+// 输入消息量 / 单条字数的快捷预设，点击填入，数值本身可自由编辑（不设前端上限）。
+const inputVolumePresets = [30, 50, 100, 200, 500]
+const messageLengthPresets = [
+  { label: '短', value: 600 },
+  { label: '常规', value: 1200 },
+  { label: '较长', value: 2500 },
+  { label: '完整', value: 5000 },
 ]
-const baseMessageLengthOptions = [
-  { label: '短消息优先（每条 600 字）', value: 'short', maxChars: 600 },
-  { label: '常规消息（每条 1200 字）', value: 'normal', maxChars: 1200 },
-  { label: '保留长消息（每条 2500 字）', value: 'long', maxChars: 2500 },
-  { label: '尽量完整（每条 5000 字）', value: 'full', maxChars: 5000 },
-]
-const inputVolumeOptions = computed(() => withCustomNumberOption(baseInputVolumeOptions, form.limits.max_messages_per_run, '当前自定义消息量'))
-const messageLengthOptions = computed(() => {
-  const selected = selectedMessageLength.value
-  if (selected !== 'custom') return baseMessageLengthOptions
-  return [
-    {
-      label: `当前自定义（每条 ${form.limits.max_chars_per_message ?? '-'} 字）`,
-      value: 'custom',
-      maxChars: form.limits.max_chars_per_message ?? 0,
-    },
-    ...baseMessageLengthOptions,
-  ]
-})
-const selectedMessageLength = computed({
-  get: () => {
-    const matched = baseMessageLengthOptions.find(
-      (item) => item.maxChars === form.limits.max_chars_per_message,
-    )
-    return matched?.value ?? 'custom'
-  },
-  set: (value: string) => {
-    const matched = baseMessageLengthOptions.find((item) => item.value === value)
-    if (!matched) return
-    form.limits.max_chars_per_message = matched.maxChars
-  },
-})
-const promptCharCount = computed(() => [...form.prompt_template].length)
 const hasMessagesVariable = computed(() => form.prompt_template.includes(requiredMessagesVariable))
 
 // 输出模板：0 = 自定义内联；否则引用共享模板 id。
@@ -262,11 +231,6 @@ function copySharedTemplateToInline(): void {
     form.output_format = selectedTemplate.value.format || form.output_format
   }
   form.output_template_id = 0
-}
-
-function withCustomNumberOption<T extends { label: string; value: number }>(options: T[], value: number | undefined, label: string): T[] {
-  if (!value || options.some((item) => item.value === value)) return options
-  return [{ label: `${label}（${value}）`, value } as T, ...options]
 }
 
 function insertPromptVariable(token: string): void {
@@ -436,25 +400,30 @@ function defaultOutputTemplate(): string {
               @keyup="rememberPromptSelection"
               @select="rememberPromptSelection"
             />
-            <div class="variable-bar">
-              <span class="variable-bar-label">点击插入变量：</span>
-              <button
-                v-for="item in promptVariables"
-                :key="item.token"
-                class="variable-chip"
-                type="button"
-                :title="`${item.label} — ${item.desc}`"
-                @click="insertPromptVariable(item.token)"
-              >
-                {{ item.token }}
-              </button>
-            </div>
             <NAlert v-if="!hasMessagesVariable" type="warning" :show-icon="false" class="prompt-alert">
               当前 Prompt 没有 <code>{{ requiredMessagesVariable }}</code>，AI 可能拿不到具体消息内容。后端会兜底追加消息，但建议你显式放在希望的位置。
             </NAlert>
+            <div class="variable-ref">
+              <div class="variable-ref-title">可用变量（点击插入到光标处）</div>
+              <div class="variable-grid">
+                <button
+                  v-for="item in promptVariables"
+                  :key="item.token"
+                  class="variable-cell"
+                  type="button"
+                  @click="insertPromptVariable(item.token)"
+                >
+                  <span class="variable-cell-head">
+                    <span class="variable-token">{{ item.token }}</span>
+                    <span class="variable-cell-label">{{ item.label }}</span>
+                  </span>
+                  <span class="variable-cell-desc" :title="item.desc">{{ item.desc }}</span>
+                </button>
+              </div>
+            </div>
 
-            <div class="field-label field-gap">模型与输出</div>
-            <div class="model-grid">
+            <div class="field-label field-gap">模型</div>
+            <div class="triple-grid">
               <NFormItem label="Provider">
                 <NSelect v-model:value="form.model_config.provider_id" filterable clearable :options="providerOptions" />
               </NFormItem>
@@ -471,31 +440,48 @@ function defaultOutputTemplate(): string {
                   ]"
                 />
               </NFormItem>
+            </div>
+
+            <div class="field-label field-gap">输出与输入限制</div>
+            <div class="triple-grid">
               <NFormItem label="AI 输出格式">
                 <NSelect v-model:value="form.output_format" :options="outputFormatOptions" />
               </NFormItem>
-              <NFormItem label="输入消息量">
-                <NSelect v-model:value="form.limits.max_messages_per_run" :options="inputVolumeOptions" />
+              <NFormItem label="输入消息量（条）">
+                <NInputNumber v-model:value="form.limits.max_messages_per_run" :min="1" class="full-input" placeholder="按需填写，如 500" />
               </NFormItem>
-              <NFormItem label="消息长度处理">
-                <NSelect v-model:value="selectedMessageLength" :options="messageLengthOptions" />
+              <NFormItem label="单条消息字符上限">
+                <NInputNumber v-model:value="form.limits.max_chars_per_message" :min="100" :step="100" class="full-input" />
               </NFormItem>
             </div>
-            <NCollapse class="advanced-collapse">
-              <NCollapseItem title="高级限制（一般不用改）" name="limits">
-                <div class="limit-grid">
-                  <NFormItem label="最大消息数">
-                    <NInputNumber v-model:value="form.limits.max_messages_per_run" :min="1" class="full-input" />
-                  </NFormItem>
-                  <NFormItem label="单条消息字符上限">
-                    <NInputNumber v-model:value="form.limits.max_chars_per_message" :min="100" class="full-input" />
-                  </NFormItem>
-                </div>
-                <div class="limit-note">
-                  当前 Prompt 模板约 {{ promptCharCount }} 字。系统不再硬切提示词；如需保护请求体大小，只会优先缩减消息变量内容。
-                </div>
-              </NCollapseItem>
-            </NCollapse>
+            <div class="quick-presets">
+              <span class="quick-label">消息量快捷：</span>
+              <button
+                v-for="n in inputVolumePresets"
+                :key="n"
+                type="button"
+                class="mini-chip"
+                :class="{ active: form.limits.max_messages_per_run === n }"
+                @click="form.limits.max_messages_per_run = n"
+              >
+                {{ n }}
+              </button>
+              <span class="quick-label quick-gap">单条字数：</span>
+              <button
+                v-for="p in messageLengthPresets"
+                :key="p.value"
+                type="button"
+                class="mini-chip"
+                :class="{ active: form.limits.max_chars_per_message === p.value }"
+                @click="form.limits.max_chars_per_message = p.value"
+              >
+                {{ p.label }}
+              </button>
+            </div>
+            <div class="field-hint">
+              输入消息量没有前端上限，可自定义（资讯频道更新快时可调大，如 300–500）。
+              单条超过字数上限的消息会被自动截断并标注「已按单条消息字数上限截断」，不影响其他消息；Prompt 本身不会被截断。
+            </div>
           </NTabPane>
 
           <!-- Tab 3：输出与投递 -->
@@ -539,13 +525,16 @@ function defaultOutputTemplate(): string {
       </NForm>
     </div>
     <template #footer>
-      <NSpace justify="space-between">
-        <NButton :loading="previewing" @click="preview">生成预览</NButton>
+      <div class="modal-footer">
+        <div class="footer-trial">
+          <NButton :loading="previewing" secondary @click="preview">试运行</NButton>
+          <span class="footer-hint">用当前完整配置（来源 → 过滤 → Prompt → 模型 → 输出）试跑一次，仅查看结果，不投递、不保存。</span>
+        </div>
         <NSpace>
           <NButton @click="show = false">取消</NButton>
           <NButton type="primary" :loading="saving" @click="save">保存</NButton>
         </NSpace>
-      </NSpace>
+      </div>
     </template>
   </NModal>
 </template>
@@ -593,44 +582,50 @@ function defaultOutputTemplate(): string {
 }
 
 .base-grid,
-.schedule-grid {
+.schedule-grid,
+.triple-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(160px, 1fr));
   gap: 12px 14px;
   align-items: start;
 }
 
-.model-grid,
-.limit-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(170px, 1fr));
-  gap: 12px 14px;
-  align-items: start;
+.prompt-alert {
+  margin-top: 12px;
 }
 
-/* Prompt 变量：文本框下方紧凑标签行 */
-.variable-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.variable-bar-label {
-  color: var(--clay-text-3);
-  font-size: 12px;
-}
-
-.variable-chip {
+/* Prompt 变量：文本框下方紧凑网格，带名称与说明 */
+.variable-ref {
+  margin-top: 12px;
   border: 1px solid var(--clay-border);
-  border-radius: 6px;
-  background: var(--clay-surface-2);
-  padding: 3px 8px;
-  color: var(--clay-primary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  border-radius: 8px;
+  background: var(--clay-surface);
+  padding: 12px;
+}
+
+.variable-ref-title {
+  margin-bottom: 10px;
+  color: var(--clay-text-2);
   font-size: 12px;
   font-weight: 700;
+}
+
+.variable-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.variable-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  background: var(--clay-surface-2);
+  padding: 7px 10px;
+  text-align: left;
   cursor: pointer;
   transition:
     border-color 0.16s ease,
@@ -638,15 +633,87 @@ function defaultOutputTemplate(): string {
     transform 0.16s ease;
 }
 
-.variable-chip:hover {
+.variable-cell:hover {
   border-color: var(--clay-primary);
   background: var(--clay-surface);
   transform: translateY(-1px);
 }
 
-.prompt-alert,
-.advanced-collapse {
-  margin-top: 12px;
+.variable-cell-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.variable-token {
+  flex-shrink: 0;
+  color: var(--clay-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.variable-cell-label {
+  color: var(--clay-text);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.variable-cell-desc {
+  color: var(--clay-text-3);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 快捷预设小标签 */
+.quick-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  margin-bottom: 8px;
+}
+
+.quick-label {
+  color: var(--clay-text-3);
+  font-size: 12px;
+}
+
+.quick-gap {
+  margin-left: 8px;
+}
+
+.mini-chip {
+  border: 1px solid var(--clay-border);
+  border-radius: 6px;
+  background: var(--clay-surface-2);
+  padding: 2px 10px;
+  color: var(--clay-text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease,
+    background 0.16s ease;
+}
+
+.mini-chip:hover {
+  border-color: var(--clay-primary);
+}
+
+.mini-chip.active {
+  border-color: var(--clay-primary);
+  background: var(--clay-primary-soft);
+  color: var(--clay-primary);
+  font-weight: 700;
 }
 
 .shared-template {
@@ -676,13 +743,6 @@ function defaultOutputTemplate(): string {
   color: var(--clay-text-2);
 }
 
-.limit-note {
-  margin-top: 2px;
-  color: var(--clay-text-3);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
 .condition-block {
   border: 1px solid var(--clay-border);
   border-radius: 8px;
@@ -696,12 +756,39 @@ function defaultOutputTemplate(): string {
   width: 100%;
 }
 
+/* 底部：试运行独立于三个标签，作用于整份配置 */
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.footer-trial {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.footer-hint {
+  color: var(--clay-text-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 @media (max-width: 760px) {
   .base-grid,
   .schedule-grid,
-  .model-grid,
-  .limit-grid {
+  .triple-grid,
+  .variable-grid {
     grid-template-columns: 1fr;
+  }
+
+  .footer-hint {
+    display: none;
   }
 }
 </style>
