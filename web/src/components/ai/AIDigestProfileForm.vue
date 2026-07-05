@@ -5,6 +5,8 @@ import ConfigFormRenderer from '@/components/ConfigFormRenderer.vue'
 import type {
   AIDigestProfile,
   AIDigestProfileRequest,
+  AIDigestPreset,
+  AIProvider,
   ConditionConfig,
   RuleItemDescriptor,
   Sink,
@@ -17,6 +19,8 @@ const props = defineProps<{
   profile?: AIDigestProfile | null
   sources: Source[]
   sinks: Sink[]
+  providers: AIProvider[]
+  presets: AIDigestPreset[]
   conditionDescriptors: RuleItemDescriptor[]
   saving?: boolean
   previewing?: boolean
@@ -34,19 +38,26 @@ const form = reactive<AIDigestProfileRequest>({
   enabled: false,
   source_ids: [],
   conditions: [],
-  schedule: { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai' },
+  schedule: { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai', cron: '0 9 * * *' },
   window: { type: 'last_duration', duration_minutes: 60 },
   dedupe: { enabled: true },
   prompt_template:
     '请整理以下窗口内的消息，输出重点摘要、分类列表和来源编号。\n\n{{messages}}\n\n输出格式：{{output_format}}',
   output_format: 'markdown',
   target_sink_ids: [],
-  model_config: { model: '', temperature: 0.2, max_tokens: 1200 },
+  model_config: { provider_id: '', model: '', temperature: 0.2, max_tokens: 1200 },
   limits: { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 30000 },
 })
 
 const sourceOptions = computed(() => props.sources.map((item) => ({ label: `${item.name} (#${item.id})`, value: item.id })))
 const sinkOptions = computed(() => props.sinks.map((item) => ({ label: `${item.name} (${item.type})`, value: item.id })))
+const providerOptions = computed(() =>
+  props.providers.map((item) => ({
+    label: `${item.name || item.id}${item.is_default ? '（默认）' : ''} · ${item.model}`,
+    value: item.id,
+  })),
+)
+const presetOptions = computed(() => props.presets.map((item) => ({ label: item.name, value: item.id })))
 const conditionOptions = computed(() => props.conditionDescriptors.map((item) => ({ label: item.label, value: item.type })))
 const outputFormatOptions = [
   { label: 'Markdown', value: 'markdown' },
@@ -57,6 +68,7 @@ const scheduleOptions = [
   { label: '仅手动', value: 'manual' },
   { label: '间隔执行', value: 'interval' },
   { label: '每日固定时间', value: 'daily' },
+  { label: 'Cron 表达式', value: 'cron' },
 ]
 const windowOptions = [
   { label: '最近一段时间', value: 'last_duration' },
@@ -78,14 +90,14 @@ function reset(): void {
     form.enabled = false
     form.source_ids = []
     form.conditions = []
-    form.schedule = { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai' }
+    form.schedule = { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai', cron: '0 9 * * *' }
     form.window = { type: 'last_duration', duration_minutes: 60 }
     form.dedupe = { enabled: true }
     form.prompt_template =
       '请整理以下窗口内的消息，输出重点摘要、分类列表和来源编号。\n\n{{messages}}\n\n输出格式：{{output_format}}'
     form.output_format = 'markdown'
     form.target_sink_ids = []
-    form.model_config = { model: '', temperature: 0.2, max_tokens: 1200 }
+    form.model_config = { provider_id: defaultProviderID(), model: '', temperature: 0.2, max_tokens: 1200 }
     form.limits = { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 30000 }
     return
   }
@@ -103,6 +115,19 @@ function reset(): void {
     model_config: { ...props.profile.model_config },
     limits: { ...props.profile.limits },
   })
+}
+
+watch(
+  () => props.providers,
+  () => {
+    if (show.value && !form.model_config.provider_id) {
+      form.model_config.provider_id = defaultProviderID()
+    }
+  },
+)
+
+function defaultProviderID(): string {
+  return props.providers.find((item) => item.is_default)?.id ?? props.providers[0]?.id ?? ''
 }
 
 function conditionDescriptor(type: string): RuleItemDescriptor | undefined {
@@ -130,6 +155,21 @@ function updateConditionType(item: ConditionConfig, type: string): void {
 
 function removeCondition(index: number): void {
   form.conditions.splice(index, 1)
+}
+
+function applyPreset(id: string): void {
+  const preset = props.presets.find((item) => item.id === id)
+  if (!preset) return
+  form.prompt_template = preset.prompt_template
+  form.output_format = preset.output_format
+  form.schedule = { ...preset.schedule }
+  form.window = { ...preset.window }
+  form.dedupe = { ...preset.dedupe }
+  form.model_config = {
+    ...preset.model_config,
+    provider_id: form.model_config.provider_id || defaultProviderID(),
+  }
+  form.limits = { ...preset.limits }
 }
 
 function payload(): AIDigestProfileRequest {
@@ -160,6 +200,10 @@ function validate(forPreview = false): boolean {
   }
   if (!form.prompt_template.trim()) {
     message.warning('请填写 Prompt')
+    return false
+  }
+  if (form.schedule.type === 'cron' && !form.schedule.cron?.trim()) {
+    message.warning('请填写 Cron 表达式')
     return false
   }
   return true
@@ -255,15 +299,24 @@ function preview(): void {
             <NFormItem label="时区">
               <NInput v-model:value="form.schedule.timezone" placeholder="Asia/Shanghai" />
             </NFormItem>
+            <NFormItem v-if="form.schedule.type === 'cron'" label="Cron 表达式">
+              <NInput v-model:value="form.schedule.cron" placeholder="0 9 * * *" />
+            </NFormItem>
           </div>
         </section>
 
         <section class="form-section">
           <div class="section-title">Prompt 与模型限制</div>
+          <NFormItem label="常用预设">
+            <NSelect :options="presetOptions" clearable placeholder="选择后会套用 Prompt、窗口、调度和限制" @update:value="applyPreset" />
+          </NFormItem>
           <NFormItem label="Prompt">
             <NInput v-model:value="form.prompt_template" type="textarea" :autosize="{ minRows: 8, maxRows: 16 }" />
           </NFormItem>
           <div class="schedule-grid">
+            <NFormItem label="Provider">
+              <NSelect v-model:value="form.model_config.provider_id" filterable clearable :options="providerOptions" />
+            </NFormItem>
             <NFormItem label="模型（可空=Provider 默认）">
               <NInput v-model:value="form.model_config.model" placeholder="gpt-4o-mini" />
             </NFormItem>

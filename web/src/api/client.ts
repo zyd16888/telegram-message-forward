@@ -28,6 +28,7 @@ import type {
   AIProvider,
   AIProviderRequest,
   AIProviderTestResult,
+  AIDigestPreset,
   AIDigestProfile,
   AIDigestProfileRequest,
   AIDigestRun,
@@ -346,6 +347,19 @@ export const aiApi = {
     update: (body: AIProviderRequest) =>
       http.put<ApiItem<AIProvider>>('/ai/provider', body).then((r) => r.data.data),
     test: () => http.post<ApiItem<AIProviderTestResult>>('/ai/provider/test').then((r) => r.data.data),
+  },
+  providers: {
+    list: () => http.get<ApiList<AIProvider>>('/ai/providers').then((r) => r.data.data),
+    create: (body: AIProviderRequest) =>
+      http.post<ApiItem<AIProvider>>('/ai/providers', body).then((r) => r.data.data),
+    get: (id: string) => http.get<ApiItem<AIProvider>>(`/ai/providers/${id}`).then((r) => r.data.data),
+    update: (id: string, body: AIProviderRequest) =>
+      http.put<ApiItem<AIProvider>>(`/ai/providers/${id}`, body).then((r) => r.data.data),
+    remove: (id: string) => http.delete(`/ai/providers/${id}`),
+    test: (id: string) => http.post<ApiItem<AIProviderTestResult>>(`/ai/providers/${id}/test`).then((r) => r.data.data),
+  },
+  presets: {
+    list: () => http.get<ApiList<AIDigestPreset>>('/ai/presets').then((r) => r.data.data),
   },
   profiles: {
     list: () => http.get<ApiList<AIDigestProfile>>('/ai/digests').then((r) => r.data.data),

@@ -390,30 +390,38 @@ export interface MediaS3TestResult {
 // --- AI 整理 ---
 
 export interface AIProvider {
+  id: string
+  name: string
   provider_type: string
   base_url: string
   model: string
   timeout_seconds: number
   max_retries: number
   default_temperature: number
+  enabled: boolean
+  is_default: boolean
   has_api_key: boolean
 }
 
 export interface AIProviderRequest {
+  name: string
   provider_type: string
   base_url: string
   model: string
   timeout_seconds: number
   max_retries: number
   default_temperature: number
+  enabled?: boolean
+  is_default?: boolean
   api_key?: string
 }
 
 export interface AIDigestSchedule {
-  type: 'manual' | 'interval' | 'daily' | string
+  type: 'manual' | 'interval' | 'daily' | 'cron' | string
   interval_minutes?: number
   time?: string
   timezone?: string
+  cron?: string
   next_run_at?: string
 }
 
@@ -423,6 +431,7 @@ export interface AIDigestWindow {
 }
 
 export interface AIDigestModelConfig {
+  provider_id?: string
   model?: string
   temperature?: number
   max_tokens?: number
@@ -466,6 +475,8 @@ export interface AIDigestRun {
   included_count: number
   excluded_count: number
   delivery_task_ids: number[]
+  provider_id?: string
+  provider_name?: string
   model_name?: string
   token_usage: {
     prompt_tokens?: number
@@ -519,4 +530,17 @@ export interface AIProviderTestResult {
   success: boolean
   text?: string
   error?: string
+}
+
+export interface AIDigestPreset {
+  id: string
+  name: string
+  description: string
+  prompt_template: string
+  output_format: string
+  schedule: AIDigestSchedule
+  window: AIDigestWindow
+  dedupe: { enabled: boolean }
+  model_config: AIDigestModelConfig
+  limits: AIDigestLimits
 }
