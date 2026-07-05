@@ -204,7 +204,7 @@ onMounted(load)
 
 <template>
   <NSpace vertical size="large">
-    <PageHeader title="规则" desc="定义监听源到目标渠道的匹配、处理与投递规则" icon="rules">
+    <PageHeader title="过滤规则" desc="定义监听源到目标渠道的匹配、处理与投递规则" icon="rules">
       <template #actions>
         <NButton type="primary" @click="openCreate">
           <template #icon><ClayIcon name="plus" :size="16" /></template>

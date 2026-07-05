@@ -112,7 +112,7 @@ onMounted(load)
 
 <template>
   <NSpace vertical size="large">
-    <PageHeader title="模板" desc="定义消息渲染模板，供规则复用" icon="templates">
+    <PageHeader title="渲染模板" desc="定义消息渲染模板，供规则复用" icon="templates">
       <template #actions>
         <NButton type="primary" @click="openCreate">
           <template #icon><ClayIcon name="plus" :size="16" /></template>

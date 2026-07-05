@@ -162,7 +162,7 @@ onMounted(load)
 
 <template>
   <n-space vertical size="large">
-    <PageHeader title="账号" desc="管理 Telegram 登录账号与代理绑定" icon="accounts">
+    <PageHeader title="TG 账号" desc="管理 Telegram 登录账号与代理绑定" icon="accounts">
       <template #actions>
         <n-button type="primary" @click="showCreate = true">
           <template #icon><ClayIcon name="plus" :size="16" /></template>
