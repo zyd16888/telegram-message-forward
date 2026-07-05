@@ -41,6 +41,7 @@ const previewing = ref(false)
 const runs = ref<AIDigestRun[]>([])
 const selectedDetail = ref<AIDigestRunDetailType | null>(null)
 const showDetail = ref(false)
+const detailLoading = ref(false)
 
 const providerForm = reactive<AIProviderRequest>({
   name: '默认 Provider',
@@ -329,34 +330,45 @@ async function saveProfile(payload: AIDigestProfileRequest): Promise<void> {
 
 async function previewDraft(payload: AIDigestProfileRequest): Promise<void> {
   previewing.value = true
+  detailLoading.value = true
+  selectedDetail.value = null
+  showDetail.value = true
   try {
     selectedDetail.value = await aiApi.profiles.previewDraft(payload)
-    showDetail.value = true
   } catch (e) {
     message.error('预览失败：' + errText(e))
   } finally {
+    detailLoading.value = false
     previewing.value = false
   }
 }
 
 async function previewProfile(profile: AIDigestProfile): Promise<void> {
+  detailLoading.value = true
+  selectedDetail.value = null
+  showDetail.value = true
   try {
     selectedDetail.value = await aiApi.profiles.preview(profile.id)
-    showDetail.value = true
     await loadRuns(profile)
   } catch (e) {
     message.error('预览失败：' + errText(e))
+  } finally {
+    detailLoading.value = false
   }
 }
 
 async function runProfile(profile: AIDigestProfile): Promise<void> {
+  detailLoading.value = true
+  selectedDetail.value = null
+  showDetail.value = true
   try {
     selectedDetail.value = await aiApi.profiles.run(profile.id)
-    showDetail.value = true
     await loadAll()
     await loadRuns(profile)
   } catch (e) {
     message.error('执行失败：' + errText(e))
+  } finally {
+    detailLoading.value = false
   }
 }
 
@@ -366,8 +378,16 @@ async function loadRuns(profile: AIDigestProfile): Promise<void> {
 }
 
 async function openRun(id: number): Promise<void> {
-  selectedDetail.value = await aiApi.runs.get(id)
+  detailLoading.value = true
+  selectedDetail.value = null
   showDetail.value = true
+  try {
+    selectedDetail.value = await aiApi.runs.get(id)
+  } catch (e) {
+    message.error('加载运行详情失败：' + errText(e))
+  } finally {
+    detailLoading.value = false
+  }
 }
 
 async function deliverRun(id: number): Promise<void> {
@@ -465,7 +485,7 @@ onMounted(loadAll)
       title="AI 运行详情"
       :style="{ width: 'min(1000px, calc(100vw - 32px))' }"
     >
-      <AIDigestRunDetail :detail="selectedDetail" />
+      <AIDigestRunDetail :detail="selectedDetail" :loading="detailLoading" />
     </NModal>
 
     <NModal
