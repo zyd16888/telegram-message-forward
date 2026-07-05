@@ -29,6 +29,8 @@ import type {
   AIProviderRequest,
   AIProviderTestResult,
   AIDigestPreset,
+  AIDigestOutputTemplate,
+  AIDigestOutputTemplateRequest,
   AIDigestProfile,
   AIDigestProfileRequest,
   AIDigestRun,
@@ -363,6 +365,16 @@ export const aiApi = {
   },
   presets: {
     list: () => http.get<ApiList<AIDigestPreset>>('/ai/presets').then((r) => r.data.data),
+  },
+  outputTemplates: {
+    list: () => http.get<ApiList<AIDigestOutputTemplate>>('/ai/output-templates').then((r) => r.data.data),
+    get: (id: number) =>
+      http.get<ApiItem<AIDigestOutputTemplate>>(`/ai/output-templates/${id}`).then((r) => r.data.data),
+    create: (body: AIDigestOutputTemplateRequest) =>
+      http.post<ApiItem<AIDigestOutputTemplate>>('/ai/output-templates', body).then((r) => r.data.data),
+    update: (id: number, body: AIDigestOutputTemplateRequest) =>
+      http.put<ApiItem<AIDigestOutputTemplate>>(`/ai/output-templates/${id}`, body).then((r) => r.data.data),
+    remove: (id: number) => http.delete(`/ai/output-templates/${id}`),
   },
   profiles: {
     list: () => http.get<ApiList<AIDigestProfile>>('/ai/digests').then((r) => r.data.data),

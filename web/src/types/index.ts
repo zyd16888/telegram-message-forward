@@ -456,6 +456,7 @@ export interface AIDigestProfile {
   dedupe: { enabled: boolean }
   prompt_template: string
   output_format: string
+  output_template_id: number
   output_template: string
   target_sink_ids: number[]
   model_config: AIDigestModelConfig
@@ -464,6 +465,19 @@ export interface AIDigestProfile {
   created_at: string
   updated_at: string
 }
+
+export interface AIDigestOutputTemplate {
+  id: number
+  name: string
+  description: string
+  format: string
+  content: string
+  built_in: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type AIDigestOutputTemplateRequest = Pick<AIDigestOutputTemplate, 'name' | 'description' | 'format' | 'content'>
 
 export type AIDigestProfileRequest = Omit<AIDigestProfile, 'id' | 'recent_run' | 'created_at' | 'updated_at'>
 

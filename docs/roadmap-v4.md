@@ -27,6 +27,17 @@ v4 的目标是新增一条通用的 **AI 整理旁路**：原始消息继续按
   - `992d3cb feat: 新增 AI 整理管理页面`
   - `a20aac9 docs: 更新 V4 AI 整理真实进度`
 
+**本轮增强（2026-07-05：输出结构模板复用 + AI 页面重构）**
+
+- **输出结构模板抽成可复用实体**：
+  - `00017_ai_digest_output_templates.sql`：新增 `ai_digest_output_templates` 表（含 `built_in` 标记与 4 个内置模板种子），`ai_digest_profiles` 增加 `output_template_id` 外键（`ON DELETE SET NULL`）。
+  - domain/model/repository/service/dto/handler/router 全链路补齐模板 CRUD；`GET/POST/PUT/DELETE /ai/output-templates`。
+  - Profile 通过 `output_template_id` 引用共享模板，运行时由 `resolveOutputTemplate` 解析最新内容；未选共享模板时回退内联 `output_template`，再回退内置默认。改共享模板会联动所有引用它的 Profile。
+  - 删除保护：内置模板不可删除；被 Profile 引用的模板不可删除（返回引用数）。
+- **AI 页面重构**：`AIDigestsPage.vue` 由三卡片竖排改为单页 Tab 分区（整理任务 / 输出模板 / AI 服务）；运行记录从常驻卡片改为从 Profile 打开的右侧抽屉；Provider/模板/Profile 删除统一走确认弹窗。
+- **Profile 表单精简**：`AIDigestProfileForm.vue` 拆分区块（基础 / 输入与过滤 / 窗口与调度 / Prompt / 模型与输出 / 输出结构 / 输出渠道）；输出结构改为「选共享模板（含预览）/ 自定义内联」两态，并提供「复制为自定义」与「管理模板」入口。
+- **验证**：`go build ./...`、`go vet ./...`、`go test ./...`、`cd web && npm run build` 均通过。**注意：`00017` 迁移尚未对真实库执行**，联调前需 `go run ./cmd/migrate -config ./configs/config.yaml up`。
+
 **待真实外部联调**
 
 - [ ] 真实 AI provider key 联调：当前仅用本地 mock 验证 OpenAI-compatible 协议路径，未调用真实模型供应商。

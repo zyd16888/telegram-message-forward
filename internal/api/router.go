@@ -166,6 +166,12 @@ func NewRouter(deps Deps) *gin.Engine {
 				ai.POST("/providers/:id/test", deps.AIDigest.TestProviderByID)
 				ai.GET("/presets", deps.AIDigest.ListPresets)
 
+				ai.GET("/output-templates", deps.AIDigest.ListOutputTemplates)
+				ai.POST("/output-templates", deps.AIDigest.CreateOutputTemplate)
+				ai.GET("/output-templates/:id", deps.AIDigest.GetOutputTemplate)
+				ai.PUT("/output-templates/:id", deps.AIDigest.UpdateOutputTemplate)
+				ai.DELETE("/output-templates/:id", deps.AIDigest.DeleteOutputTemplate)
+
 				ai.GET("/digests", deps.AIDigest.ListProfiles)
 				ai.POST("/digests", deps.AIDigest.CreateProfile)
 				ai.POST("/digests/preview", deps.AIDigest.PreviewDraft)

@@ -49,20 +49,21 @@ func (r *AIDigestRepository) UpdateProfile(ctx context.Context, p *domainaidiges
 	if err := r.db.WithContext(ctx).Model(&model.AIDigestProfile{}).
 		Where("id = ?", p.ID).
 		Updates(map[string]any{
-			"name":            m.Name,
-			"enabled":         m.Enabled,
-			"source_ids":      m.SourceIDs,
-			"conditions":      m.Conditions,
-			"schedule":        m.Schedule,
-			"window":          m.Window,
-			"dedupe":          m.Dedupe,
-			"prompt_template": m.PromptTemplate,
-			"output_format":   m.OutputFormat,
-			"output_template": m.OutputTemplate,
-			"target_sink_ids": m.TargetSinkIDs,
-			"model_config":    m.ModelConfig,
-			"limits":          m.Limits,
-			"updated_at":      m.UpdatedAt,
+			"name":               m.Name,
+			"enabled":            m.Enabled,
+			"source_ids":         m.SourceIDs,
+			"conditions":         m.Conditions,
+			"schedule":           m.Schedule,
+			"window":             m.Window,
+			"dedupe":             m.Dedupe,
+			"prompt_template":    m.PromptTemplate,
+			"output_format":      m.OutputFormat,
+			"output_template_id": m.OutputTemplateID,
+			"output_template":    m.OutputTemplate,
+			"target_sink_ids":    m.TargetSinkIDs,
+			"model_config":       m.ModelConfig,
+			"limits":             m.Limits,
+			"updated_at":         m.UpdatedAt,
 		}).Error; err != nil {
 		return err
 	}
@@ -102,6 +103,85 @@ func (r *AIDigestRepository) ListProfiles(ctx context.Context) ([]*domainaidiges
 
 func (r *AIDigestRepository) DeleteProfile(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.AIDigestProfile{}, id).Error
+}
+
+func (r *AIDigestRepository) ListOutputTemplates(ctx context.Context) ([]*domainaidigest.OutputTemplate, error) {
+	var ms []model.AIDigestOutputTemplate
+	if err := r.db.WithContext(ctx).Order("built_in DESC, id ASC").Find(&ms).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domainaidigest.OutputTemplate, 0, len(ms))
+	for i := range ms {
+		out = append(out, toAIDigestOutputTemplateDomain(&ms[i]))
+	}
+	return out, nil
+}
+
+func (r *AIDigestRepository) GetOutputTemplate(ctx context.Context, id int64) (*domainaidigest.OutputTemplate, error) {
+	var m model.AIDigestOutputTemplate
+	if err := r.db.WithContext(ctx).First(&m, id).Error; err != nil {
+		return nil, err
+	}
+	return toAIDigestOutputTemplateDomain(&m), nil
+}
+
+func (r *AIDigestRepository) CreateOutputTemplate(ctx context.Context, t *domainaidigest.OutputTemplate) error {
+	m := &model.AIDigestOutputTemplate{
+		Name:        t.Name,
+		Description: t.Description,
+		Format:      t.Format,
+		Content:     t.Content,
+		BuiltIn:     t.BuiltIn,
+	}
+	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		return err
+	}
+	t.ID = m.ID
+	t.CreatedAt = m.CreatedAt
+	t.UpdatedAt = m.UpdatedAt
+	return nil
+}
+
+func (r *AIDigestRepository) UpdateOutputTemplate(ctx context.Context, t *domainaidigest.OutputTemplate) error {
+	now := time.Now()
+	if err := r.db.WithContext(ctx).Model(&model.AIDigestOutputTemplate{}).
+		Where("id = ?", t.ID).
+		Updates(map[string]any{
+			"name":        t.Name,
+			"description": t.Description,
+			"format":      t.Format,
+			"content":     t.Content,
+			"updated_at":  now,
+		}).Error; err != nil {
+		return err
+	}
+	t.UpdatedAt = now
+	return nil
+}
+
+func (r *AIDigestRepository) DeleteOutputTemplate(ctx context.Context, id int64) error {
+	return r.db.WithContext(ctx).Delete(&model.AIDigestOutputTemplate{}, id).Error
+}
+
+func (r *AIDigestRepository) CountProfilesUsingTemplate(ctx context.Context, templateID int64) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.AIDigestProfile{}).
+		Where("output_template_id = ?", templateID).
+		Count(&count).Error
+	return count, err
+}
+
+func toAIDigestOutputTemplateDomain(m *model.AIDigestOutputTemplate) *domainaidigest.OutputTemplate {
+	return &domainaidigest.OutputTemplate{
+		ID:          m.ID,
+		Name:        m.Name,
+		Description: m.Description,
+		Format:      m.Format,
+		Content:     m.Content,
+		BuiltIn:     m.BuiltIn,
+		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
+	}
 }
 
 func (r *AIDigestRepository) CreateRun(ctx context.Context, run *domainaidigest.Run) error {
@@ -323,22 +403,23 @@ func toAIDigestProfileModel(p *domainaidigest.Profile) (*model.AIDigestProfile, 
 		return nil, err
 	}
 	return &model.AIDigestProfile{
-		ID:             p.ID,
-		Name:           p.Name,
-		Enabled:        p.Enabled,
-		SourceIDs:      sourceIDs,
-		Conditions:     conditions,
-		Schedule:       schedule,
-		Window:         window,
-		Dedupe:         dedupe,
-		PromptTemplate: p.PromptTemplate,
-		OutputFormat:   p.OutputFormat,
-		OutputTemplate: p.OutputTemplate,
-		TargetSinkIDs:  targets,
-		ModelConfig:    modelCfg,
-		Limits:         limits,
-		CreatedAt:      p.CreatedAt,
-		UpdatedAt:      p.UpdatedAt,
+		ID:               p.ID,
+		Name:             p.Name,
+		Enabled:          p.Enabled,
+		SourceIDs:        sourceIDs,
+		Conditions:       conditions,
+		Schedule:         schedule,
+		Window:           window,
+		Dedupe:           dedupe,
+		PromptTemplate:   p.PromptTemplate,
+		OutputFormat:     p.OutputFormat,
+		OutputTemplateID: nullablePositive(p.OutputTemplateID),
+		OutputTemplate:   p.OutputTemplate,
+		TargetSinkIDs:    targets,
+		ModelConfig:      modelCfg,
+		Limits:           limits,
+		CreatedAt:        p.CreatedAt,
+		UpdatedAt:        p.UpdatedAt,
 	}, nil
 }
 
@@ -349,6 +430,9 @@ func toAIDigestProfileDomain(m *model.AIDigestProfile) (*domainaidigest.Profile,
 	p.Enabled = m.Enabled
 	p.PromptTemplate = m.PromptTemplate
 	p.OutputFormat = m.OutputFormat
+	if m.OutputTemplateID != nil {
+		p.OutputTemplateID = *m.OutputTemplateID
+	}
 	p.OutputTemplate = m.OutputTemplate
 	p.CreatedAt = m.CreatedAt
 	p.UpdatedAt = m.UpdatedAt

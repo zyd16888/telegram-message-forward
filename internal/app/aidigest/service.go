@@ -336,20 +336,127 @@ func (s *Service) ListPresets(ctx context.Context) []domainaidigest.Preset {
 	return defaultPresets()
 }
 
+// OutputTemplateInput 是创建/更新共享输出结构模板的输入。
+type OutputTemplateInput struct {
+	Name        string
+	Description string
+	Format      string
+	Content     string
+}
+
+func (s *Service) ListOutputTemplates(ctx context.Context) ([]*domainaidigest.OutputTemplate, error) {
+	return s.repo.ListOutputTemplates(ctx)
+}
+
+func (s *Service) GetOutputTemplate(ctx context.Context, id int64) (*domainaidigest.OutputTemplate, error) {
+	return s.repo.GetOutputTemplate(ctx, id)
+}
+
+func (s *Service) CreateOutputTemplate(ctx context.Context, in OutputTemplateInput) (*domainaidigest.OutputTemplate, error) {
+	t := outputTemplateFromInput(0, in)
+	if err := validateOutputTemplate(t); err != nil {
+		return nil, err
+	}
+	if err := s.repo.CreateOutputTemplate(ctx, t); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (s *Service) UpdateOutputTemplate(ctx context.Context, id int64, in OutputTemplateInput) (*domainaidigest.OutputTemplate, error) {
+	existing, err := s.repo.GetOutputTemplate(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	t := outputTemplateFromInput(id, in)
+	t.BuiltIn = existing.BuiltIn
+	t.CreatedAt = existing.CreatedAt
+	if err := validateOutputTemplate(t); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateOutputTemplate(ctx, t); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (s *Service) DeleteOutputTemplate(ctx context.Context, id int64) error {
+	existing, err := s.repo.GetOutputTemplate(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing.BuiltIn {
+		return errors.New("内置模板不可删除")
+	}
+	count, err := s.repo.CountProfilesUsingTemplate(ctx, id)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("该模板仍被 %d 个 Profile 引用，无法删除", count)
+	}
+	return s.repo.DeleteOutputTemplate(ctx, id)
+}
+
+func outputTemplateFromInput(id int64, in OutputTemplateInput) *domainaidigest.OutputTemplate {
+	format := strings.TrimSpace(in.Format)
+	if format == "" {
+		format = "markdown"
+	}
+	return &domainaidigest.OutputTemplate{
+		ID:          id,
+		Name:        strings.TrimSpace(in.Name),
+		Description: strings.TrimSpace(in.Description),
+		Format:      format,
+		Content:     in.Content,
+	}
+}
+
+func validateOutputTemplate(t *domainaidigest.OutputTemplate) error {
+	if t.Name == "" {
+		return errors.New("模板名称不能为空")
+	}
+	if strings.TrimSpace(t.Content) == "" {
+		return errors.New("模板内容不能为空")
+	}
+	switch t.Format {
+	case "markdown", "text", "html":
+	default:
+		return fmt.Errorf("不支持的模板格式: %s", t.Format)
+	}
+	return nil
+}
+
+// resolveOutputTemplate 优先返回引用的共享模板内容，否则回退内联自定义，最后回退内置默认。
+func (s *Service) resolveOutputTemplate(ctx context.Context, p *domainaidigest.Profile) string {
+	if p.OutputTemplateID > 0 && s.repo != nil {
+		if t, err := s.repo.GetOutputTemplate(ctx, p.OutputTemplateID); err == nil && t != nil {
+			if strings.TrimSpace(t.Content) != "" {
+				return t.Content
+			}
+		}
+	}
+	if strings.TrimSpace(p.OutputTemplate) != "" {
+		return p.OutputTemplate
+	}
+	return defaultOutputTemplate
+}
+
 type ProfileInput struct {
-	Name           string
-	Enabled        bool
-	SourceIDs      []int64
-	Conditions     []domainrule.ConditionConfig
-	Schedule       domainaidigest.ScheduleConfig
-	Window         domainaidigest.WindowConfig
-	Dedupe         domainaidigest.DedupeConfig
-	PromptTemplate string
-	OutputFormat   string
-	OutputTemplate string
-	TargetSinkIDs  []int64
-	ModelConfig    domainaidigest.ModelConfig
-	Limits         domainaidigest.LimitsConfig
+	Name             string
+	Enabled          bool
+	SourceIDs        []int64
+	Conditions       []domainrule.ConditionConfig
+	Schedule         domainaidigest.ScheduleConfig
+	Window           domainaidigest.WindowConfig
+	Dedupe           domainaidigest.DedupeConfig
+	PromptTemplate   string
+	OutputFormat     string
+	OutputTemplateID int64
+	OutputTemplate   string
+	TargetSinkIDs    []int64
+	ModelConfig      domainaidigest.ModelConfig
+	Limits           domainaidigest.LimitsConfig
 }
 
 func (s *Service) CreateProfile(ctx context.Context, in ProfileInput) (*domainaidigest.Profile, error) {
@@ -716,10 +823,7 @@ func (s *Service) buildPrompt(ctx context.Context, p *domainaidigest.Profile, ru
 	if !strings.Contains(tmpl, "{{output_template}}") {
 		tmpl += "\n\n输出结构模板：\n{{output_template}}"
 	}
-	outputTemplate := strings.TrimSpace(p.OutputTemplate)
-	if outputTemplate == "" {
-		outputTemplate = defaultOutputTemplate
-	}
+	outputTemplate := s.resolveOutputTemplate(ctx, p)
 	sourceList := make([]string, 0, len(sourceNames))
 	for _, name := range sourceNames {
 		sourceList = append(sourceList, name)
@@ -941,6 +1045,11 @@ func (s *Service) validateProfile(ctx context.Context, p *domainaidigest.Profile
 	if _, _, err := s.providerForModelConfig(ctx, p.ModelConfig); err != nil {
 		return err
 	}
+	if p.OutputTemplateID > 0 {
+		if _, err := s.repo.GetOutputTemplate(ctx, p.OutputTemplateID); err != nil {
+			return fmt.Errorf("引用的输出模板不存在 (id=%d): %w", p.OutputTemplateID, err)
+		}
+	}
 	p.Dedupe.Enabled = true
 	p.Limits = normalizedLimits(p.Limits)
 	for _, cfg := range p.Conditions {
@@ -1124,20 +1233,21 @@ func providerFromInput(in ProviderInput) domainaidigest.ProviderConfig {
 
 func profileFromInput(id int64, in ProfileInput) *domainaidigest.Profile {
 	return &domainaidigest.Profile{
-		ID:             id,
-		Name:           in.Name,
-		Enabled:        in.Enabled,
-		SourceIDs:      in.SourceIDs,
-		Conditions:     in.Conditions,
-		Schedule:       in.Schedule,
-		Window:         in.Window,
-		Dedupe:         in.Dedupe,
-		PromptTemplate: in.PromptTemplate,
-		OutputFormat:   in.OutputFormat,
-		OutputTemplate: in.OutputTemplate,
-		TargetSinkIDs:  in.TargetSinkIDs,
-		ModelConfig:    in.ModelConfig,
-		Limits:         in.Limits,
+		ID:               id,
+		Name:             in.Name,
+		Enabled:          in.Enabled,
+		SourceIDs:        in.SourceIDs,
+		Conditions:       in.Conditions,
+		Schedule:         in.Schedule,
+		Window:           in.Window,
+		Dedupe:           in.Dedupe,
+		PromptTemplate:   in.PromptTemplate,
+		OutputFormat:     in.OutputFormat,
+		OutputTemplateID: in.OutputTemplateID,
+		OutputTemplate:   in.OutputTemplate,
+		TargetSinkIDs:    in.TargetSinkIDs,
+		ModelConfig:      in.ModelConfig,
+		Limits:           in.Limits,
 	}
 }
 
@@ -1155,7 +1265,7 @@ func normalizeProfileDefaults(p *domainaidigest.Profile) {
 	if strings.TrimSpace(p.PromptTemplate) == "" {
 		p.PromptTemplate = defaultPrompt
 	}
-	if strings.TrimSpace(p.OutputTemplate) == "" {
+	if strings.TrimSpace(p.OutputTemplate) == "" && p.OutputTemplateID == 0 {
 		p.OutputTemplate = defaultOutputTemplate
 	}
 }

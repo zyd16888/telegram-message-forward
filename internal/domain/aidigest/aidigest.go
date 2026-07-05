@@ -43,13 +43,27 @@ type Profile struct {
 	Dedupe         DedupeConfig
 	PromptTemplate string
 	OutputFormat   string
-	OutputTemplate string
-	TargetSinkIDs  []int64
-	ModelConfig    ModelConfig
-	Limits         LimitsConfig
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	RecentRun      *Run
+	// OutputTemplateID 引用共享输出结构模板；为 0 表示使用内联自定义 OutputTemplate。
+	OutputTemplateID int64
+	OutputTemplate   string
+	TargetSinkIDs    []int64
+	ModelConfig      ModelConfig
+	Limits           LimitsConfig
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	RecentRun        *Run
+}
+
+// OutputTemplate 是可被多个 Profile 复用的输出结构模板。
+type OutputTemplate struct {
+	ID          int64
+	Name        string
+	Description string
+	Format      string
+	Content     string
+	BuiltIn     bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type ScheduleConfig struct {
@@ -181,6 +195,12 @@ type Repository interface {
 	GetProfile(ctx context.Context, id int64) (*Profile, error)
 	ListProfiles(ctx context.Context) ([]*Profile, error)
 	DeleteProfile(ctx context.Context, id int64) error
+	ListOutputTemplates(ctx context.Context) ([]*OutputTemplate, error)
+	GetOutputTemplate(ctx context.Context, id int64) (*OutputTemplate, error)
+	CreateOutputTemplate(ctx context.Context, t *OutputTemplate) error
+	UpdateOutputTemplate(ctx context.Context, t *OutputTemplate) error
+	DeleteOutputTemplate(ctx context.Context, id int64) error
+	CountProfilesUsingTemplate(ctx context.Context, templateID int64) (int64, error)
 	CreateRun(ctx context.Context, r *Run) error
 	UpdateRun(ctx context.Context, r *Run) error
 	HasRunningRun(ctx context.Context, profileID int64) (bool, error)

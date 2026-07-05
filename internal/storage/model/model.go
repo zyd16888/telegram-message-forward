@@ -244,25 +244,40 @@ func (DeliveryAttempt) TableName() string { return "delivery_attempts" }
 
 // AIDigestProfile 对应 ai_digest_profiles 表。
 type AIDigestProfile struct {
-	ID             int64 `gorm:"primaryKey"`
-	Name           string
-	Enabled        bool
-	SourceIDs      datatypes.JSON
-	Conditions     datatypes.JSON
-	Schedule       datatypes.JSON
-	Window         datatypes.JSON
-	Dedupe         datatypes.JSON
-	PromptTemplate string
-	OutputFormat   string
-	OutputTemplate string
-	TargetSinkIDs  datatypes.JSON
-	ModelConfig    datatypes.JSON
-	Limits         datatypes.JSON
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID               int64 `gorm:"primaryKey"`
+	Name             string
+	Enabled          bool
+	SourceIDs        datatypes.JSON
+	Conditions       datatypes.JSON
+	Schedule         datatypes.JSON
+	Window           datatypes.JSON
+	Dedupe           datatypes.JSON
+	PromptTemplate   string
+	OutputFormat     string
+	OutputTemplateID *int64
+	OutputTemplate   string
+	TargetSinkIDs    datatypes.JSON
+	ModelConfig      datatypes.JSON
+	Limits           datatypes.JSON
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 func (AIDigestProfile) TableName() string { return "ai_digest_profiles" }
+
+// AIDigestOutputTemplate 对应 ai_digest_output_templates 表。
+type AIDigestOutputTemplate struct {
+	ID          int64 `gorm:"primaryKey"`
+	Name        string
+	Description string
+	Format      string
+	Content     string
+	BuiltIn     bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (AIDigestOutputTemplate) TableName() string { return "ai_digest_output_templates" }
 
 // AIDigestRun 对应 ai_digest_runs 表。
 type AIDigestRun struct {

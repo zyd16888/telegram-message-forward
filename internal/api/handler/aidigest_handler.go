@@ -149,6 +149,74 @@ func (h *AIDigestHandler) ListPresets(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": h.svc.ListPresets(c.Request.Context())})
 }
 
+func (h *AIDigestHandler) ListOutputTemplates(c *gin.Context) {
+	templates, err := h.svc.ListOutputTemplates(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	out := make([]dto.AIDigestOutputTemplateDTO, 0, len(templates))
+	for _, t := range templates {
+		out = append(out, dto.NewAIDigestOutputTemplateDTO(t))
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+func (h *AIDigestHandler) CreateOutputTemplate(c *gin.Context) {
+	var req dto.AIDigestOutputTemplateRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	t, err := h.svc.CreateOutputTemplate(c.Request.Context(), req.ToInput())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": dto.NewAIDigestOutputTemplateDTO(t)})
+}
+
+func (h *AIDigestHandler) GetOutputTemplate(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	t, err := h.svc.GetOutputTemplate(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewAIDigestOutputTemplateDTO(t)})
+}
+
+func (h *AIDigestHandler) UpdateOutputTemplate(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	var req dto.AIDigestOutputTemplateRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	t, err := h.svc.UpdateOutputTemplate(c.Request.Context(), id, req.ToInput())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewAIDigestOutputTemplateDTO(t)})
+}
+
+func (h *AIDigestHandler) DeleteOutputTemplate(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteOutputTemplate(c.Request.Context(), id); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *AIDigestHandler) ListProfiles(c *gin.Context) {
 	profiles, err := h.svc.ListProfiles(c.Request.Context())
 	if err != nil {

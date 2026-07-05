@@ -74,40 +74,82 @@ func (r AIProviderRequest) ToInput() appaidigest.ProviderInput {
 
 type AIDigestPresetDTO = domainaidigest.Preset
 
+type AIDigestOutputTemplateDTO struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Format      string    `json:"format"`
+	Content     string    `json:"content"`
+	BuiltIn     bool      `json:"built_in"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type AIDigestOutputTemplateRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Format      string `json:"format"`
+	Content     string `json:"content"`
+}
+
+func NewAIDigestOutputTemplateDTO(t *domainaidigest.OutputTemplate) AIDigestOutputTemplateDTO {
+	return AIDigestOutputTemplateDTO{
+		ID:          t.ID,
+		Name:        t.Name,
+		Description: t.Description,
+		Format:      t.Format,
+		Content:     t.Content,
+		BuiltIn:     t.BuiltIn,
+		CreatedAt:   t.CreatedAt,
+		UpdatedAt:   t.UpdatedAt,
+	}
+}
+
+func (r AIDigestOutputTemplateRequest) ToInput() appaidigest.OutputTemplateInput {
+	return appaidigest.OutputTemplateInput{
+		Name:        r.Name,
+		Description: r.Description,
+		Format:      r.Format,
+		Content:     r.Content,
+	}
+}
+
 type AIDigestProfileDTO struct {
-	ID             int64                         `json:"id"`
-	Name           string                        `json:"name"`
-	Enabled        bool                          `json:"enabled"`
-	SourceIDs      []int64                       `json:"source_ids"`
-	Conditions     []domainrule.ConditionConfig  `json:"conditions"`
-	Schedule       domainaidigest.ScheduleConfig `json:"schedule"`
-	Window         domainaidigest.WindowConfig   `json:"window"`
-	Dedupe         domainaidigest.DedupeConfig   `json:"dedupe"`
-	PromptTemplate string                        `json:"prompt_template"`
-	OutputFormat   string                        `json:"output_format"`
-	OutputTemplate string                        `json:"output_template"`
-	TargetSinkIDs  []int64                       `json:"target_sink_ids"`
-	ModelConfig    domainaidigest.ModelConfig    `json:"model_config"`
-	Limits         domainaidigest.LimitsConfig   `json:"limits"`
-	RecentRun      *AIDigestRunDTO               `json:"recent_run,omitempty"`
-	CreatedAt      time.Time                     `json:"created_at"`
-	UpdatedAt      time.Time                     `json:"updated_at"`
+	ID               int64                         `json:"id"`
+	Name             string                        `json:"name"`
+	Enabled          bool                          `json:"enabled"`
+	SourceIDs        []int64                       `json:"source_ids"`
+	Conditions       []domainrule.ConditionConfig  `json:"conditions"`
+	Schedule         domainaidigest.ScheduleConfig `json:"schedule"`
+	Window           domainaidigest.WindowConfig   `json:"window"`
+	Dedupe           domainaidigest.DedupeConfig   `json:"dedupe"`
+	PromptTemplate   string                        `json:"prompt_template"`
+	OutputFormat     string                        `json:"output_format"`
+	OutputTemplateID int64                         `json:"output_template_id"`
+	OutputTemplate   string                        `json:"output_template"`
+	TargetSinkIDs    []int64                       `json:"target_sink_ids"`
+	ModelConfig      domainaidigest.ModelConfig    `json:"model_config"`
+	Limits           domainaidigest.LimitsConfig   `json:"limits"`
+	RecentRun        *AIDigestRunDTO               `json:"recent_run,omitempty"`
+	CreatedAt        time.Time                     `json:"created_at"`
+	UpdatedAt        time.Time                     `json:"updated_at"`
 }
 
 type AIDigestProfileRequest struct {
-	Name           string                        `json:"name"`
-	Enabled        bool                          `json:"enabled"`
-	SourceIDs      []int64                       `json:"source_ids"`
-	Conditions     []domainrule.ConditionConfig  `json:"conditions"`
-	Schedule       domainaidigest.ScheduleConfig `json:"schedule"`
-	Window         domainaidigest.WindowConfig   `json:"window"`
-	Dedupe         domainaidigest.DedupeConfig   `json:"dedupe"`
-	PromptTemplate string                        `json:"prompt_template"`
-	OutputFormat   string                        `json:"output_format"`
-	OutputTemplate string                        `json:"output_template"`
-	TargetSinkIDs  []int64                       `json:"target_sink_ids"`
-	ModelConfig    domainaidigest.ModelConfig    `json:"model_config"`
-	Limits         domainaidigest.LimitsConfig   `json:"limits"`
+	Name             string                        `json:"name"`
+	Enabled          bool                          `json:"enabled"`
+	SourceIDs        []int64                       `json:"source_ids"`
+	Conditions       []domainrule.ConditionConfig  `json:"conditions"`
+	Schedule         domainaidigest.ScheduleConfig `json:"schedule"`
+	Window           domainaidigest.WindowConfig   `json:"window"`
+	Dedupe           domainaidigest.DedupeConfig   `json:"dedupe"`
+	PromptTemplate   string                        `json:"prompt_template"`
+	OutputFormat     string                        `json:"output_format"`
+	OutputTemplateID int64                         `json:"output_template_id"`
+	OutputTemplate   string                        `json:"output_template"`
+	TargetSinkIDs    []int64                       `json:"target_sink_ids"`
+	ModelConfig      domainaidigest.ModelConfig    `json:"model_config"`
+	Limits           domainaidigest.LimitsConfig   `json:"limits"`
 }
 
 func NewAIDigestProfileDTO(p *domainaidigest.Profile) AIDigestProfileDTO {
@@ -117,41 +159,43 @@ func NewAIDigestProfileDTO(p *domainaidigest.Profile) AIDigestProfileDTO {
 		recent = &dto
 	}
 	return AIDigestProfileDTO{
-		ID:             p.ID,
-		Name:           p.Name,
-		Enabled:        p.Enabled,
-		SourceIDs:      p.SourceIDs,
-		Conditions:     p.Conditions,
-		Schedule:       p.Schedule,
-		Window:         p.Window,
-		Dedupe:         p.Dedupe,
-		PromptTemplate: p.PromptTemplate,
-		OutputFormat:   p.OutputFormat,
-		OutputTemplate: p.OutputTemplate,
-		TargetSinkIDs:  p.TargetSinkIDs,
-		ModelConfig:    p.ModelConfig,
-		Limits:         p.Limits,
-		RecentRun:      recent,
-		CreatedAt:      p.CreatedAt,
-		UpdatedAt:      p.UpdatedAt,
+		ID:               p.ID,
+		Name:             p.Name,
+		Enabled:          p.Enabled,
+		SourceIDs:        p.SourceIDs,
+		Conditions:       p.Conditions,
+		Schedule:         p.Schedule,
+		Window:           p.Window,
+		Dedupe:           p.Dedupe,
+		PromptTemplate:   p.PromptTemplate,
+		OutputFormat:     p.OutputFormat,
+		OutputTemplateID: p.OutputTemplateID,
+		OutputTemplate:   p.OutputTemplate,
+		TargetSinkIDs:    p.TargetSinkIDs,
+		ModelConfig:      p.ModelConfig,
+		Limits:           p.Limits,
+		RecentRun:        recent,
+		CreatedAt:        p.CreatedAt,
+		UpdatedAt:        p.UpdatedAt,
 	}
 }
 
 func (r AIDigestProfileRequest) ToInput() appaidigest.ProfileInput {
 	return appaidigest.ProfileInput{
-		Name:           r.Name,
-		Enabled:        r.Enabled,
-		SourceIDs:      r.SourceIDs,
-		Conditions:     r.Conditions,
-		Schedule:       r.Schedule,
-		Window:         r.Window,
-		Dedupe:         r.Dedupe,
-		PromptTemplate: r.PromptTemplate,
-		OutputFormat:   r.OutputFormat,
-		OutputTemplate: r.OutputTemplate,
-		TargetSinkIDs:  r.TargetSinkIDs,
-		ModelConfig:    r.ModelConfig,
-		Limits:         r.Limits,
+		Name:             r.Name,
+		Enabled:          r.Enabled,
+		SourceIDs:        r.SourceIDs,
+		Conditions:       r.Conditions,
+		Schedule:         r.Schedule,
+		Window:           r.Window,
+		Dedupe:           r.Dedupe,
+		PromptTemplate:   r.PromptTemplate,
+		OutputFormat:     r.OutputFormat,
+		OutputTemplateID: r.OutputTemplateID,
+		OutputTemplate:   r.OutputTemplate,
+		TargetSinkIDs:    r.TargetSinkIDs,
+		ModelConfig:      r.ModelConfig,
+		Limits:           r.Limits,
 	}
 }
 

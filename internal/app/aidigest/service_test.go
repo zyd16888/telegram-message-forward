@@ -204,6 +204,22 @@ func (r *memoryDigestRepo) ListProfiles(context.Context) ([]*domainaidigest.Prof
 	return nil, nil
 }
 func (r *memoryDigestRepo) DeleteProfile(context.Context, int64) error { return nil }
+func (r *memoryDigestRepo) ListOutputTemplates(context.Context) ([]*domainaidigest.OutputTemplate, error) {
+	return nil, nil
+}
+func (r *memoryDigestRepo) GetOutputTemplate(context.Context, int64) (*domainaidigest.OutputTemplate, error) {
+	return nil, nil
+}
+func (r *memoryDigestRepo) CreateOutputTemplate(context.Context, *domainaidigest.OutputTemplate) error {
+	return nil
+}
+func (r *memoryDigestRepo) UpdateOutputTemplate(context.Context, *domainaidigest.OutputTemplate) error {
+	return nil
+}
+func (r *memoryDigestRepo) DeleteOutputTemplate(context.Context, int64) error { return nil }
+func (r *memoryDigestRepo) CountProfilesUsingTemplate(context.Context, int64) (int64, error) {
+	return 0, nil
+}
 func (r *memoryDigestRepo) CreateRun(context.Context, *domainaidigest.Run) error {
 	return nil
 }

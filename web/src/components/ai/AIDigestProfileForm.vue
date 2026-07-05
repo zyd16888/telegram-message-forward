@@ -6,6 +6,7 @@ import type {
   AIDigestProfile,
   AIDigestProfileRequest,
   AIDigestPreset,
+  AIDigestOutputTemplate,
   AIProvider,
   ConditionConfig,
   RuleItemDescriptor,
@@ -21,6 +22,7 @@ const props = defineProps<{
   sinks: Sink[]
   providers: AIProvider[]
   presets: AIDigestPreset[]
+  templates: AIDigestOutputTemplate[]
   conditionDescriptors: RuleItemDescriptor[]
   saving?: boolean
   previewing?: boolean
@@ -29,6 +31,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   save: [payload: AIDigestProfileRequest]
   preview: [payload: AIDigestProfileRequest]
+  manageTemplates: []
 }>()
 
 const message = useMessage()
@@ -44,6 +47,7 @@ const form = reactive<AIDigestProfileRequest>({
   prompt_template:
     '请整理以下窗口内的消息，严格按照输出结构模板组织内容。\n\n输出结构模板：\n{{output_template}}\n\n{{messages}}\n\n输出格式：{{output_format}}',
   output_format: 'markdown',
+  output_template_id: 0,
   output_template: defaultOutputTemplate(),
   target_sink_ids: [],
   model_config: { provider_id: '', model: '', temperature: 0.2, max_tokens: 0 },
@@ -87,37 +91,8 @@ const promptVariables = [
   { token: '{{window_end}}', label: '窗口结束', desc: '本次整理窗口的结束时间。' },
   { token: '{{message_count}}', label: '消息数量', desc: '最终纳入 Prompt 的消息条数。' },
   { token: '{{source_list}}', label: '来源列表', desc: '所选 Source 的名称列表。' },
-  { token: '{{output_format}}', label: 'AI 输出格式', desc: '由本区域下方的“AI 输出格式”选择项决定。' },
-  { token: '{{output_template}}', label: '输出结构模板', desc: '由下方“结构模板”选择或自定义编辑。' },
-]
-const outputTemplatePresets = [
-  {
-    id: 'default',
-    name: '通用简报',
-    description: '适合大多数消息窗口，包含总结、摘要、分类和待关注事项。',
-    template: defaultOutputTemplate(),
-  },
-  {
-    id: 'news',
-    name: '新闻简报',
-    description: '适合资讯源、新闻频道和 RSS 摘要。',
-    template:
-      '# 今日新闻总结\n\n## 今日要点\n用 3-7 条概括最重要的新闻，每条都标注来源编号。\n\n## 分主题整理\n按主题分组，例如国际、国内、科技、财经、行业动态；没有对应内容的主题不要硬凑。\n每个主题包含：\n- 重点事实\n- 简短背景\n- 来源编号\n\n## 进展与重复报道\n标出同一事件的进展关系、重复报道和仍不确定的信息。\n\n## 值得继续关注\n列出 3-5 项值得继续关注的事件、风险或后续进展。',
-  },
-  {
-    id: 'group',
-    name: '群聊摘要',
-    description: '适合群聊和频道消息，突出讨论主题、待办和风险。',
-    template:
-      '# {{profile_name}}\n\n## 重点摘要\n- 输出 3-7 条重点摘要。\n- 每条摘要必须标注来源编号，例如 [#1]。\n\n## 主题归类\n按讨论主题分组，每组包含：\n- 主题名称\n- 关键内容\n- 相关来源编号\n\n## 待办与风险\n- 单独列出明确的待办、风险、问题和需要跟进的人或事项。\n- 如果没有明确待办或风险，写“暂无明确待办或风险”。\n\n## 低价值内容\n用一句话说明被忽略的寒暄、表情、重复转发或无上下文短句。',
-  },
-  {
-    id: 'tasks',
-    name: '待办提取',
-    description: '适合从聊天记录中提取事项、负责人和风险。',
-    template:
-      '# 待办提取\n\n## 结论摘要\n用 1 段话说明本窗口内最重要的事项。\n\n## 明确待办\n每项包含：\n- 事项\n- 负责人或相关人\n- 截止时间或触发条件\n- 来源编号\n\n## 待确认问题\n列出信息不足、需要追问或依赖外部确认的问题。\n\n## 风险提示\n列出可能影响执行的风险或阻塞点。',
-  },
+  { token: '{{output_format}}', label: 'AI 输出格式', desc: '由下方「AI 输出格式」选择项决定。' },
+  { token: '{{output_template}}', label: '输出结构模板', desc: '由「输出结构」区选择共享模板或自定义。' },
 ]
 const baseInputVolumeOptions = [
   { label: '少量消息（最多 30 条）', value: 30 },
@@ -159,27 +134,18 @@ const selectedMessageLength = computed({
 })
 const promptCharCount = computed(() => [...form.prompt_template].length)
 const hasMessagesVariable = computed(() => form.prompt_template.includes(requiredMessagesVariable))
-const selectedOutputTemplatePreset = computed({
-  get: () => {
-    const matched = outputTemplatePresets.find((item) => item.template === form.output_template)
-    return matched?.id ?? 'custom'
-  },
-  set: (id: string) => {
-    const preset = outputTemplatePresets.find((item) => item.id === id)
-    if (!preset) return
-    form.output_template = preset.template
-  },
-})
-const outputTemplateOptions = computed(() => {
-  const options = outputTemplatePresets.map((item) => ({
-    label: `${item.name} - ${item.description}`,
-    value: item.id,
-  }))
-  if (selectedOutputTemplatePreset.value === 'custom') {
-    return [{ label: '自定义结构', value: 'custom' }, ...options]
-  }
-  return options
-})
+
+// 输出模板：0 = 自定义内联；否则引用共享模板 id。
+const templateSelectOptions = computed(() => [
+  { label: '自定义（本 Profile 专用）', value: 0 },
+  ...props.templates.map((t) => ({
+    label: t.description ? `${t.name} — ${t.description}` : t.name,
+    value: t.id,
+  })),
+])
+const selectedTemplate = computed(() => props.templates.find((t) => t.id === form.output_template_id) ?? null)
+const usingSharedTemplate = computed(() => form.output_template_id > 0)
+
 const promptSelection = reactive({ start: -1, end: -1 })
 
 watch(
@@ -203,6 +169,7 @@ function reset(): void {
     form.prompt_template =
       '请整理以下窗口内的消息，严格按照输出结构模板组织内容。\n\n输出结构模板：\n{{output_template}}\n\n{{messages}}\n\n输出格式：{{output_format}}'
     form.output_format = 'markdown'
+    form.output_template_id = props.templates[0]?.id ?? 0
     form.output_template = defaultOutputTemplate()
     form.target_sink_ids = []
     form.model_config = { provider_id: defaultProviderID(), model: '', temperature: 0.2, max_tokens: 0 }
@@ -219,6 +186,7 @@ function reset(): void {
     dedupe: { ...props.profile.dedupe },
     prompt_template: props.profile.prompt_template,
     output_format: props.profile.output_format,
+    output_template_id: props.profile.output_template_id ?? 0,
     output_template: props.profile.output_template || defaultOutputTemplate(),
     target_sink_ids: [...props.profile.target_sink_ids],
     model_config: { ...props.profile.model_config },
@@ -271,6 +239,8 @@ function applyPreset(id: string): void {
   if (!preset) return
   form.prompt_template = preset.prompt_template
   form.output_format = preset.output_format
+  // 预设内置的是内联模板文本，套用后切换为自定义模式。
+  form.output_template_id = 0
   form.output_template = preset.output_template || defaultOutputTemplate()
   form.schedule = { ...preset.schedule }
   form.window = { ...preset.window }
@@ -281,6 +251,14 @@ function applyPreset(id: string): void {
     provider_id: form.model_config.provider_id || defaultProviderID(),
   }
   form.limits = { ...preset.limits, max_prompt_chars: 0 }
+}
+
+function copySharedTemplateToInline(): void {
+  if (selectedTemplate.value) {
+    form.output_template = selectedTemplate.value.content
+    form.output_format = selectedTemplate.value.format || form.output_format
+  }
+  form.output_template_id = 0
 }
 
 function withCustomNumberOption<T extends { label: string; value: number }>(options: T[], value: number | undefined, label: string): T[] {
@@ -316,7 +294,8 @@ function payload(): AIDigestProfileRequest {
     dedupe: { ...form.dedupe },
     prompt_template: form.prompt_template,
     output_format: form.output_format,
-    output_template: form.output_template,
+    output_template_id: form.output_template_id,
+    output_template: usingSharedTemplate.value ? '' : form.output_template,
     target_sink_ids: [...form.target_sink_ids],
     model_config: { ...form.model_config, max_tokens: 0 },
     limits: { ...form.limits, max_prompt_chars: 0 },
@@ -336,8 +315,8 @@ function validate(forPreview = false): boolean {
     message.warning('请填写 Prompt')
     return false
   }
-  if (!form.output_template.trim()) {
-    message.warning('请填写输出结构模板')
+  if (!usingSharedTemplate.value && !form.output_template.trim()) {
+    message.warning('请选择共享模板或填写自定义输出结构')
     return false
   }
   if (form.schedule.type === 'cron' && !form.schedule.cron?.trim()) {
@@ -384,20 +363,16 @@ function defaultOutputTemplate(): string {
         </section>
 
         <section class="form-section">
-          <div class="section-title">输入来源</div>
-          <NFormItem label="Source">
-            <NSelect v-model:value="form.source_ids" multiple filterable :options="sourceOptions" />
-          </NFormItem>
-        </section>
-
-        <section class="form-section">
           <div class="section-head">
             <div>
-              <div class="section-title">过滤条件</div>
-              <div class="section-desc">只影响 AI 输入，不影响原始消息实时转发。</div>
+              <div class="section-title">输入与过滤</div>
+              <div class="section-desc">选择来源，可选加过滤条件；过滤只影响 AI 输入，不影响原始转发。</div>
             </div>
             <NButton size="small" dashed @click="addCondition">添加条件</NButton>
           </div>
+          <NFormItem label="Source">
+            <NSelect v-model:value="form.source_ids" multiple filterable :options="sourceOptions" />
+          </NFormItem>
           <div v-for="(condition, index) in form.conditions" :key="index" class="condition-block">
             <NSpace align="center" justify="space-between">
               <NSelect
@@ -414,7 +389,7 @@ function defaultOutputTemplate(): string {
               :fields="conditionDescriptor(condition.type)?.fields ?? []"
             />
           </div>
-          <NEmpty v-if="!form.conditions.length" size="small" description="未添加条件" />
+          <NEmpty v-if="!form.conditions.length" size="small" description="未添加过滤条件" />
         </section>
 
         <section class="form-section">
@@ -447,7 +422,7 @@ function defaultOutputTemplate(): string {
         <section class="form-section">
           <div class="section-head">
             <div>
-              <div class="section-title">Prompt 与 AI 输出</div>
+              <div class="section-title">Prompt</div>
               <div class="section-desc">先选整理风格，再用变量把窗口消息、来源和时间放进 Prompt。</div>
             </div>
           </div>
@@ -494,24 +469,16 @@ function defaultOutputTemplate(): string {
           <NAlert v-if="!hasMessagesVariable" type="warning" :show-icon="false" class="prompt-alert">
             当前 Prompt 没有 <code>{{ requiredMessagesVariable }}</code>，AI 可能拿不到具体消息内容。后端会兜底追加消息，但建议你显式放在希望的位置。
           </NAlert>
+        </section>
+
+        <section class="form-section">
+          <div class="section-title">模型与输出</div>
           <div class="model-grid">
             <NFormItem label="Provider">
               <NSelect v-model:value="form.model_config.provider_id" filterable clearable :options="providerOptions" />
             </NFormItem>
             <NFormItem label="模型（可空=Provider 默认）">
               <NInput v-model:value="form.model_config.model" placeholder="gpt-4o-mini" />
-            </NFormItem>
-            <NFormItem label="AI 输出格式">
-              <NSelect v-model:value="form.output_format" :options="outputFormatOptions" />
-            </NFormItem>
-            <NFormItem label="结构模板">
-              <NSelect v-model:value="selectedOutputTemplatePreset" :options="outputTemplateOptions" />
-            </NFormItem>
-            <NFormItem label="输入消息量">
-              <NSelect v-model:value="form.limits.max_messages_per_run" :options="inputVolumeOptions" />
-            </NFormItem>
-            <NFormItem label="消息长度处理">
-              <NSelect v-model:value="selectedMessageLength" :options="messageLengthOptions" />
             </NFormItem>
             <NFormItem label="创造性">
               <NSelect
@@ -523,18 +490,16 @@ function defaultOutputTemplate(): string {
                 ]"
               />
             </NFormItem>
+            <NFormItem label="AI 输出格式">
+              <NSelect v-model:value="form.output_format" :options="outputFormatOptions" />
+            </NFormItem>
+            <NFormItem label="输入消息量">
+              <NSelect v-model:value="form.limits.max_messages_per_run" :options="inputVolumeOptions" />
+            </NFormItem>
+            <NFormItem label="消息长度处理">
+              <NSelect v-model:value="selectedMessageLength" :options="messageLengthOptions" />
+            </NFormItem>
           </div>
-          <NFormItem label="输出结构模板">
-            <NInput
-              v-model:value="form.output_template"
-              type="textarea"
-              placeholder="定义 AI 输出的标题、章节、列表、来源标注等结构规范"
-              :autosize="{ minRows: 8, maxRows: 16 }"
-            />
-          </NFormItem>
-          <NAlert type="default" :show-icon="false" class="template-note">
-            这里定义“内容长什么样”，例如标题、摘要、分类、待办、风险和来源标注；上面的 AI 输出格式只决定用 Markdown、Text 还是 HTML 作为载体。
-          </NAlert>
           <NCollapse class="advanced-collapse">
             <NCollapseItem title="高级限制（一般不用改）" name="limits">
               <div class="limit-grid">
@@ -550,6 +515,42 @@ function defaultOutputTemplate(): string {
               </div>
             </NCollapseItem>
           </NCollapse>
+        </section>
+
+        <section class="form-section">
+          <div class="section-head">
+            <div>
+              <div class="section-title">输出结构</div>
+              <div class="section-desc">选择一个共享模板（多个 Profile 可复用），或为本 Profile 单独编写结构。</div>
+            </div>
+            <NButton size="small" text type="primary" @click="emit('manageTemplates'); show = false">管理模板</NButton>
+          </div>
+          <NFormItem label="结构模板">
+            <NSelect v-model:value="form.output_template_id" :options="templateSelectOptions" />
+          </NFormItem>
+
+          <div v-if="usingSharedTemplate" class="shared-template">
+            <div class="shared-template-head">
+              <NTag type="info" size="small" :bordered="false">共享模板 · {{ selectedTemplate?.format?.toUpperCase() }}</NTag>
+              <NButton size="tiny" secondary @click="copySharedTemplateToInline">复制为自定义并编辑</NButton>
+            </div>
+            <pre class="shared-template-preview">{{ selectedTemplate?.content }}</pre>
+            <div class="section-desc">修改共享模板会影响所有引用它的 Profile；如需单独调整，请复制为自定义。</div>
+          </div>
+
+          <template v-else>
+            <NFormItem label="自定义输出结构">
+              <NInput
+                v-model:value="form.output_template"
+                type="textarea"
+                placeholder="定义 AI 输出的标题、章节、列表、来源标注等结构规范"
+                :autosize="{ minRows: 8, maxRows: 16 }"
+              />
+            </NFormItem>
+            <NAlert type="default" :show-icon="false" class="template-note">
+              这里定义「内容长什么样」（标题、摘要、分类、待办、来源标注等）；上面的 AI 输出格式只决定用 Markdown / Text / HTML 作为载体。
+            </NAlert>
+          </template>
         </section>
 
         <section class="form-section">
@@ -718,6 +719,33 @@ function defaultOutputTemplate(): string {
   margin-top: 12px;
 }
 
+.shared-template {
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  background: var(--clay-surface);
+  padding: 12px;
+}
+
+.shared-template-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.shared-template-preview {
+  margin: 0 0 6px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--clay-text-2);
+}
+
 .limit-note {
   margin-top: 2px;
   line-height: 1.5;
@@ -726,7 +754,7 @@ function defaultOutputTemplate(): string {
 .condition-block {
   border: 1px solid var(--clay-border);
   border-radius: 8px;
-  margin-bottom: 10px;
+  margin: 10px 0;
   padding: 12px;
   background: var(--clay-surface);
 }
