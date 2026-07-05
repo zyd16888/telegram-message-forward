@@ -3,6 +3,7 @@ package aidigest
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/robfig/cron/v3"
 
 	domainaidigest "telegram-message-forward/internal/domain/aidigest"
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
@@ -77,12 +80,15 @@ func NewService(deps Deps) *Service {
 }
 
 type ProviderInput struct {
+	Name               string
 	ProviderType       string
 	BaseURL            string
 	Model              string
 	TimeoutSeconds     int
 	MaxRetries         int
 	DefaultTemperature float64
+	Enabled            bool
+	IsDefault          bool
 	APIKey             *string
 }
 
@@ -92,41 +98,17 @@ func (s *Service) GetProvider(ctx context.Context) (domainaidigest.ProviderConfi
 }
 
 func (s *Service) UpdateProvider(ctx context.Context, in ProviderInput) (domainaidigest.ProviderConfig, error) {
-	cfg, currentKey, err := s.effectiveProvider(ctx)
+	cfg, _, err := s.effectiveProvider(ctx)
 	if err != nil {
 		return domainaidigest.ProviderConfig{}, err
 	}
-	cfg.ProviderType = strings.TrimSpace(in.ProviderType)
-	if cfg.ProviderType == "" {
-		cfg.ProviderType = "openai_compatible"
-	}
-	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")
-	cfg.Model = strings.TrimSpace(in.Model)
-	cfg.TimeoutSeconds = in.TimeoutSeconds
-	cfg.MaxRetries = in.MaxRetries
-	cfg.DefaultTemperature = in.DefaultTemperature
-	normalizeProvider(&cfg)
-	apiKey := currentKey
-	if in.APIKey != nil {
-		apiKey = strings.TrimSpace(*in.APIKey)
-	}
-	value, err := providerToMap(cfg)
+	in.Name = firstNonEmpty(in.Name, cfg.Name)
+	in.IsDefault = true
+	out, err := s.UpdateProviderByID(ctx, cfg.ID, in)
 	if err != nil {
 		return domainaidigest.ProviderConfig{}, err
 	}
-	secret, err := json.Marshal(map[string]string{"api_key": apiKey})
-	if err != nil {
-		return domainaidigest.ProviderConfig{}, err
-	}
-	if err := s.settings.Upsert(ctx, &domainsettings.Setting{
-		Key:    domainsettings.KeyAIProvider,
-		Value:  value,
-		Secret: secret,
-	}); err != nil {
-		return domainaidigest.ProviderConfig{}, err
-	}
-	cfg.HasAPIKey = apiKey != ""
-	return cfg, nil
+	return out, nil
 }
 
 func (s *Service) TestProvider(ctx context.Context) (string, error) {
@@ -146,6 +128,131 @@ func (s *Service) TestProvider(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(res.Text), nil
+}
+
+func (s *Service) ListProviders(ctx context.Context) ([]domainaidigest.ProviderConfig, error) {
+	store, secrets, err := s.loadProviderStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.providersForResponse(store, secrets), nil
+}
+
+func (s *Service) CreateProvider(ctx context.Context, in ProviderInput) (domainaidigest.ProviderConfig, error) {
+	store, secrets, err := s.loadProviderStore(ctx)
+	if err != nil {
+		return domainaidigest.ProviderConfig{}, err
+	}
+	cfg := providerFromInput(in)
+	cfg.ID = newProviderID()
+	if cfg.Name == "" {
+		cfg.Name = "AI Provider"
+	}
+	normalizeProvider(&cfg)
+	if len(store.Providers) == 0 || in.IsDefault {
+		store.DefaultProviderID = cfg.ID
+	}
+	store.Providers = append(store.Providers, cfg)
+	if in.APIKey != nil {
+		secrets.APIKeys[cfg.ID] = strings.TrimSpace(*in.APIKey)
+	}
+	if err := s.saveProviderStore(ctx, store, secrets); err != nil {
+		return domainaidigest.ProviderConfig{}, err
+	}
+	cfg.IsDefault = cfg.ID == store.DefaultProviderID
+	cfg.HasAPIKey = secrets.APIKeys[cfg.ID] != ""
+	return cfg, nil
+}
+
+func (s *Service) GetProviderByID(ctx context.Context, id string) (domainaidigest.ProviderConfig, error) {
+	store, secrets, err := s.loadProviderStore(ctx)
+	if err != nil {
+		return domainaidigest.ProviderConfig{}, err
+	}
+	cfg, _, ok := findProvider(store, id)
+	if !ok {
+		return domainaidigest.ProviderConfig{}, fmt.Errorf("AI Provider 不存在: %s", id)
+	}
+	cfg.IsDefault = cfg.ID == store.DefaultProviderID
+	cfg.HasAPIKey = secrets.APIKeys[cfg.ID] != ""
+	return cfg, nil
+}
+
+func (s *Service) UpdateProviderByID(ctx context.Context, id string, in ProviderInput) (domainaidigest.ProviderConfig, error) {
+	store, secrets, err := s.loadProviderStore(ctx)
+	if err != nil {
+		return domainaidigest.ProviderConfig{}, err
+	}
+	cfg, idx, ok := findProvider(store, id)
+	if !ok {
+		return domainaidigest.ProviderConfig{}, fmt.Errorf("AI Provider 不存在: %s", id)
+	}
+	next := providerFromInput(in)
+	next.ID = cfg.ID
+	if next.Name == "" {
+		next.Name = cfg.Name
+	}
+	if next.Name == "" {
+		next.Name = "AI Provider"
+	}
+	normalizeProvider(&next)
+	store.Providers[idx] = next
+	if in.IsDefault || store.DefaultProviderID == "" {
+		store.DefaultProviderID = next.ID
+	}
+	if in.APIKey != nil {
+		secrets.APIKeys[next.ID] = strings.TrimSpace(*in.APIKey)
+	}
+	if err := s.saveProviderStore(ctx, store, secrets); err != nil {
+		return domainaidigest.ProviderConfig{}, err
+	}
+	next.IsDefault = next.ID == store.DefaultProviderID
+	next.HasAPIKey = secrets.APIKeys[next.ID] != ""
+	return next, nil
+}
+
+func (s *Service) DeleteProvider(ctx context.Context, id string) error {
+	store, secrets, err := s.loadProviderStore(ctx)
+	if err != nil {
+		return err
+	}
+	_, idx, ok := findProvider(store, id)
+	if !ok {
+		return fmt.Errorf("AI Provider 不存在: %s", id)
+	}
+	store.Providers = append(store.Providers[:idx], store.Providers[idx+1:]...)
+	delete(secrets.APIKeys, id)
+	if store.DefaultProviderID == id {
+		store.DefaultProviderID = ""
+		if len(store.Providers) > 0 {
+			store.DefaultProviderID = store.Providers[0].ID
+		}
+	}
+	return s.saveProviderStore(ctx, store, secrets)
+}
+
+func (s *Service) TestProviderByID(ctx context.Context, id string) (string, error) {
+	cfg, apiKey, err := s.providerByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	client := s.providerClient(cfg, apiKey)
+	res, err := client.Generate(ctx, ai.GenerateRequest{
+		Model:       cfg.Model,
+		System:      "请用一句中文回复：AI provider 连接测试成功。",
+		User:        "ping",
+		Temperature: cfg.DefaultTemperature,
+		MaxTokens:   80,
+	})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(res.Text), nil
+}
+
+func (s *Service) ListPresets(ctx context.Context) []domainaidigest.Preset {
+	_ = ctx
+	return defaultPresets()
 }
 
 type ProfileInput struct {
@@ -361,7 +468,7 @@ func (s *Service) runAI(ctx context.Context, p *domainaidigest.Profile, run *dom
 	if len(included) == 0 {
 		return &domainaidigest.RunDetail{Run: run, Items: items}, errors.New("窗口内没有符合条件的消息")
 	}
-	cfg, apiKey, err := s.effectiveProvider(ctx)
+	cfg, apiKey, err := s.providerForModelConfig(ctx, p.ModelConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -377,6 +484,8 @@ func (s *Service) runAI(ctx context.Context, p *domainaidigest.Profile, run *dom
 	if err != nil {
 		return nil, err
 	}
+	run.ProviderID = cfg.ID
+	run.ProviderName = cfg.Name
 	run.ModelName = firstNonEmpty(res.Model, p.ModelConfig.Model, cfg.Model)
 	run.TokenUsage = res.Usage
 	output := &domainaidigest.Output{
@@ -632,6 +741,9 @@ func (s *Service) nextRunAfter(ctx context.Context, p *domainaidigest.Profile, f
 	if anchor.IsZero() {
 		anchor = from
 	}
+	if anchor.Before(from) {
+		anchor = from
+	}
 	switch p.Schedule.Type {
 	case "interval":
 		minutes := p.Schedule.IntervalMinutes
@@ -639,11 +751,6 @@ func (s *Service) nextRunAfter(ctx context.Context, p *domainaidigest.Profile, f
 			minutes = 60
 		}
 		next := anchor.Add(time.Duration(minutes) * time.Minute)
-		if next.Before(from) {
-			delta := from.Sub(anchor)
-			steps := int(delta/(time.Duration(minutes)*time.Minute)) + 1
-			next = anchor.Add(time.Duration(steps*minutes) * time.Minute)
-		}
 		return next, true
 	case "daily":
 		loc := time.Local
@@ -653,12 +760,28 @@ func (s *Service) nextRunAfter(ctx context.Context, p *domainaidigest.Profile, f
 			}
 		}
 		hour, minute := parseHHMM(p.Schedule.Time)
-		local := from.In(loc)
+		local := anchor.In(loc)
 		next := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc)
-		if !next.After(from) {
+		if !next.After(anchor) {
 			next = next.Add(24 * time.Hour)
 		}
 		return next, true
+	case "cron":
+		loc := time.Local
+		if p.Schedule.Timezone != "" {
+			if l, err := time.LoadLocation(p.Schedule.Timezone); err == nil {
+				loc = l
+			}
+		}
+		expr := strings.TrimSpace(p.Schedule.Cron)
+		if expr == "" {
+			return time.Time{}, false
+		}
+		sched, err := cron.ParseStandard(expr)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return sched.Next(anchor.In(loc)), true
 	default:
 		return time.Time{}, false
 	}
@@ -681,6 +804,22 @@ func (s *Service) validateProfile(ctx context.Context, p *domainaidigest.Profile
 	if p.PromptTemplate == "" {
 		p.PromptTemplate = defaultPrompt
 	}
+	if p.Schedule.Type == "cron" {
+		if strings.TrimSpace(p.Schedule.Cron) == "" {
+			return errors.New("cron 调度需要填写表达式")
+		}
+		if _, err := cron.ParseStandard(strings.TrimSpace(p.Schedule.Cron)); err != nil {
+			return fmt.Errorf("cron 表达式无效: %w", err)
+		}
+	}
+	if p.Schedule.Timezone != "" {
+		if _, err := time.LoadLocation(p.Schedule.Timezone); err != nil {
+			return fmt.Errorf("时区无效: %w", err)
+		}
+	}
+	if _, _, err := s.providerForModelConfig(ctx, p.ModelConfig); err != nil {
+		return err
+	}
 	p.Dedupe.Enabled = true
 	p.Limits = normalizedLimits(p.Limits)
 	for _, cfg := range p.Conditions {
@@ -700,14 +839,101 @@ func (s *Service) validateProfile(ctx context.Context, p *domainaidigest.Profile
 }
 
 func (s *Service) effectiveProvider(ctx context.Context) (domainaidigest.ProviderConfig, string, error) {
-	cfg := domainaidigest.ProviderConfig{
-		ProviderType:       "openai_compatible",
-		BaseURL:            "https://api.openai.com/v1",
-		Model:              "gpt-4o-mini",
-		TimeoutSeconds:     60,
-		MaxRetries:         1,
-		DefaultTemperature: 0.2,
+	store, _, err := s.loadProviderStore(ctx)
+	if err != nil {
+		return domainaidigest.ProviderConfig{}, "", err
 	}
+	return s.providerByID(ctx, store.DefaultProviderID)
+}
+
+func (s *Service) providerForModelConfig(ctx context.Context, cfg domainaidigest.ModelConfig) (domainaidigest.ProviderConfig, string, error) {
+	return s.providerByID(ctx, cfg.ProviderID)
+}
+
+func (s *Service) providerByID(ctx context.Context, id string) (domainaidigest.ProviderConfig, string, error) {
+	store, secrets, err := s.loadProviderStore(ctx)
+	if err != nil {
+		return domainaidigest.ProviderConfig{}, "", err
+	}
+	if strings.TrimSpace(id) == "" {
+		id = store.DefaultProviderID
+	}
+	cfg, _, ok := findProvider(store, id)
+	if !ok {
+		return domainaidigest.ProviderConfig{}, "", fmt.Errorf("AI Provider 不存在: %s", id)
+	}
+	normalizeProvider(&cfg)
+	cfg.IsDefault = cfg.ID == store.DefaultProviderID
+	apiKey := secrets.APIKeys[cfg.ID]
+	cfg.HasAPIKey = apiKey != ""
+	return cfg, apiKey, nil
+}
+
+func (s *Service) loadProviderStore(ctx context.Context) (domainaidigest.ProviderStore, domainaidigest.ProviderSecretStore, error) {
+	store := domainaidigest.ProviderStore{}
+	secrets := domainaidigest.ProviderSecretStore{APIKeys: map[string]string{}}
+	row, err := s.settings.Get(ctx, domainsettings.KeyAIProviders)
+	if err != nil {
+		return store, secrets, err
+	}
+	if row != nil {
+		raw, _ := json.Marshal(row.Value)
+		if err := json.Unmarshal(raw, &store); err != nil {
+			return store, secrets, fmt.Errorf("解析 AI Provider 设置失败: %w", err)
+		}
+		if len(row.Secret) > 0 {
+			if err := json.Unmarshal(row.Secret, &secrets); err != nil {
+				return store, secrets, fmt.Errorf("解析 AI Provider secret 失败: %w", err)
+			}
+		}
+		if secrets.APIKeys == nil {
+			secrets.APIKeys = map[string]string{}
+		}
+		normalizeProviderStore(&store, secrets)
+		if len(store.Providers) > 0 {
+			return store, secrets, nil
+		}
+	}
+	cfg, apiKey, err := s.loadLegacyProvider(ctx)
+	if err != nil {
+		return store, secrets, err
+	}
+	if cfg.ID == "" {
+		cfg.ID = "default"
+	}
+	if cfg.Name == "" {
+		cfg.Name = "默认 Provider"
+	}
+	cfg.Enabled = true
+	cfg.IsDefault = true
+	normalizeProvider(&cfg)
+	store.DefaultProviderID = cfg.ID
+	store.Providers = []domainaidigest.ProviderConfig{cfg}
+	if apiKey != "" {
+		secrets.APIKeys[cfg.ID] = apiKey
+	}
+	return store, secrets, nil
+}
+
+func (s *Service) saveProviderStore(ctx context.Context, store domainaidigest.ProviderStore, secrets domainaidigest.ProviderSecretStore) error {
+	normalizeProviderStore(&store, secrets)
+	value, err := providerStoreToMap(store)
+	if err != nil {
+		return err
+	}
+	secret, err := json.Marshal(secrets)
+	if err != nil {
+		return err
+	}
+	return s.settings.Upsert(ctx, &domainsettings.Setting{
+		Key:    domainsettings.KeyAIProviders,
+		Value:  value,
+		Secret: secret,
+	})
+}
+
+func (s *Service) loadLegacyProvider(ctx context.Context) (domainaidigest.ProviderConfig, string, error) {
+	cfg := defaultProviderConfig()
 	row, err := s.settings.Get(ctx, domainsettings.KeyAIProvider)
 	if err != nil {
 		return cfg, "", err
@@ -722,6 +948,13 @@ func (s *Service) effectiveProvider(ctx context.Context) (domainaidigest.Provide
 			apiKey = sec["api_key"]
 		}
 	}
+	if cfg.ID == "" {
+		cfg.ID = "default"
+	}
+	if cfg.Name == "" {
+		cfg.Name = "默认 Provider"
+	}
+	cfg.Enabled = true
 	normalizeProvider(&cfg)
 	cfg.HasAPIKey = apiKey != ""
 	return cfg, apiKey, nil
@@ -737,6 +970,33 @@ func (s *Service) providerClient(cfg domainaidigest.ProviderConfig, apiKey strin
 		Temperature:     cfg.DefaultTemperature,
 		DefaultMaxToken: 1000,
 	})
+}
+
+func defaultProviderConfig() domainaidigest.ProviderConfig {
+	return domainaidigest.ProviderConfig{
+		ID:                 "default",
+		Name:               "默认 Provider",
+		ProviderType:       "openai_compatible",
+		BaseURL:            "https://api.openai.com/v1",
+		Model:              "gpt-4o-mini",
+		TimeoutSeconds:     60,
+		MaxRetries:         1,
+		DefaultTemperature: 0.2,
+		Enabled:            true,
+	}
+}
+
+func providerFromInput(in ProviderInput) domainaidigest.ProviderConfig {
+	return domainaidigest.ProviderConfig{
+		Name:               strings.TrimSpace(in.Name),
+		ProviderType:       strings.TrimSpace(in.ProviderType),
+		BaseURL:            strings.TrimRight(strings.TrimSpace(in.BaseURL), "/"),
+		Model:              strings.TrimSpace(in.Model),
+		TimeoutSeconds:     in.TimeoutSeconds,
+		MaxRetries:         in.MaxRetries,
+		DefaultTemperature: in.DefaultTemperature,
+		Enabled:            true,
+	}
 }
 
 func profileFromInput(id int64, in ProfileInput) *domainaidigest.Profile {
@@ -771,6 +1031,8 @@ func normalizedLimits(l domainaidigest.LimitsConfig) domainaidigest.LimitsConfig
 }
 
 func normalizeProvider(cfg *domainaidigest.ProviderConfig) {
+	cfg.ID = strings.TrimSpace(cfg.ID)
+	cfg.Name = strings.TrimSpace(cfg.Name)
 	if cfg.ProviderType == "" {
 		cfg.ProviderType = "openai_compatible"
 	}
@@ -790,16 +1052,81 @@ func normalizeProvider(cfg *domainaidigest.ProviderConfig) {
 	if cfg.DefaultTemperature == 0 {
 		cfg.DefaultTemperature = 0.2
 	}
+	cfg.Enabled = true
 }
 
-func providerToMap(cfg domainaidigest.ProviderConfig) (map[string]any, error) {
-	cfg.HasAPIKey = false
-	raw, err := json.Marshal(cfg)
+func normalizeProviderStore(store *domainaidigest.ProviderStore, secrets domainaidigest.ProviderSecretStore) {
+	seen := map[string]struct{}{}
+	out := make([]domainaidigest.ProviderConfig, 0, len(store.Providers))
+	for _, cfg := range store.Providers {
+		if cfg.ID == "" {
+			cfg.ID = newProviderID()
+		}
+		if _, ok := seen[cfg.ID]; ok {
+			continue
+		}
+		if cfg.Name == "" {
+			cfg.Name = "AI Provider"
+		}
+		normalizeProvider(&cfg)
+		cfg.HasAPIKey = false
+		cfg.IsDefault = false
+		seen[cfg.ID] = struct{}{}
+		out = append(out, cfg)
+	}
+	store.Providers = out
+	if len(store.Providers) == 0 {
+		cfg := defaultProviderConfig()
+		store.DefaultProviderID = cfg.ID
+		store.Providers = []domainaidigest.ProviderConfig{cfg}
+	}
+	if _, _, ok := findProvider(*store, store.DefaultProviderID); !ok {
+		store.DefaultProviderID = store.Providers[0].ID
+	}
+	if secrets.APIKeys == nil {
+		secrets.APIKeys = map[string]string{}
+	}
+}
+
+func (s *Service) providersForResponse(store domainaidigest.ProviderStore, secrets domainaidigest.ProviderSecretStore) []domainaidigest.ProviderConfig {
+	_ = s
+	out := make([]domainaidigest.ProviderConfig, 0, len(store.Providers))
+	for _, cfg := range store.Providers {
+		cfg.IsDefault = cfg.ID == store.DefaultProviderID
+		cfg.HasAPIKey = secrets.APIKeys[cfg.ID] != ""
+		out = append(out, cfg)
+	}
+	return out
+}
+
+func providerStoreToMap(store domainaidigest.ProviderStore) (map[string]any, error) {
+	for i := range store.Providers {
+		store.Providers[i].HasAPIKey = false
+		store.Providers[i].IsDefault = store.Providers[i].ID == store.DefaultProviderID
+	}
+	raw, err := json.Marshal(store)
 	if err != nil {
 		return nil, err
 	}
 	var out map[string]any
 	return out, json.Unmarshal(raw, &out)
+}
+
+func findProvider(store domainaidigest.ProviderStore, id string) (domainaidigest.ProviderConfig, int, bool) {
+	for i, cfg := range store.Providers {
+		if cfg.ID == id {
+			return cfg, i, true
+		}
+	}
+	return domainaidigest.ProviderConfig{}, -1, false
+}
+
+func newProviderID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("p%d", time.Now().UnixNano())
+	}
+	return "p" + hex.EncodeToString(b[:])
 }
 
 func dedupeKey(msg *domainmessage.NormalizedMessage) string {

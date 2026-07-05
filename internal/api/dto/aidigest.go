@@ -11,48 +11,64 @@ import (
 )
 
 type AIProviderDTO struct {
+	ID                 string  `json:"id"`
+	Name               string  `json:"name"`
 	ProviderType       string  `json:"provider_type"`
 	BaseURL            string  `json:"base_url"`
 	Model              string  `json:"model"`
 	TimeoutSeconds     int     `json:"timeout_seconds"`
 	MaxRetries         int     `json:"max_retries"`
 	DefaultTemperature float64 `json:"default_temperature"`
+	Enabled            bool    `json:"enabled"`
+	IsDefault          bool    `json:"is_default"`
 	HasAPIKey          bool    `json:"has_api_key"`
 }
 
 type AIProviderRequest struct {
+	Name               string  `json:"name"`
 	ProviderType       string  `json:"provider_type"`
 	BaseURL            string  `json:"base_url"`
 	Model              string  `json:"model"`
 	TimeoutSeconds     int     `json:"timeout_seconds"`
 	MaxRetries         int     `json:"max_retries"`
 	DefaultTemperature float64 `json:"default_temperature"`
+	Enabled            bool    `json:"enabled"`
+	IsDefault          bool    `json:"is_default"`
 	APIKey             *string `json:"api_key,omitempty"`
 }
 
 func NewAIProviderDTO(cfg domainaidigest.ProviderConfig) AIProviderDTO {
 	return AIProviderDTO{
+		ID:                 cfg.ID,
+		Name:               cfg.Name,
 		ProviderType:       cfg.ProviderType,
 		BaseURL:            cfg.BaseURL,
 		Model:              cfg.Model,
 		TimeoutSeconds:     cfg.TimeoutSeconds,
 		MaxRetries:         cfg.MaxRetries,
 		DefaultTemperature: cfg.DefaultTemperature,
+		Enabled:            cfg.Enabled,
+		IsDefault:          cfg.IsDefault,
 		HasAPIKey:          cfg.HasAPIKey,
 	}
 }
 
 func (r AIProviderRequest) ToInput() appaidigest.ProviderInput {
 	return appaidigest.ProviderInput{
+		Name:               r.Name,
 		ProviderType:       r.ProviderType,
 		BaseURL:            r.BaseURL,
 		Model:              r.Model,
 		TimeoutSeconds:     r.TimeoutSeconds,
 		MaxRetries:         r.MaxRetries,
 		DefaultTemperature: r.DefaultTemperature,
+		Enabled:            r.Enabled,
+		IsDefault:          r.IsDefault,
 		APIKey:             r.APIKey,
 	}
 }
+
+type AIDigestPresetDTO = domainaidigest.Preset
 
 type AIDigestProfileDTO struct {
 	ID             int64                         `json:"id"`
@@ -142,6 +158,8 @@ type AIDigestRunDTO struct {
 	IncludedCount     int                       `json:"included_count"`
 	ExcludedCount     int                       `json:"excluded_count"`
 	DeliveryTaskIDs   []int64                   `json:"delivery_task_ids"`
+	ProviderID        string                    `json:"provider_id,omitempty"`
+	ProviderName      string                    `json:"provider_name,omitempty"`
 	ModelName         string                    `json:"model_name,omitempty"`
 	TokenUsage        domainaidigest.TokenUsage `json:"token_usage"`
 	Error             string                    `json:"error,omitempty"`
@@ -162,6 +180,8 @@ func NewAIDigestRunDTO(r *domainaidigest.Run) AIDigestRunDTO {
 		IncludedCount:     r.IncludedCount,
 		ExcludedCount:     r.ExcludedCount,
 		DeliveryTaskIDs:   r.DeliveryTaskIDs,
+		ProviderID:        r.ProviderID,
+		ProviderName:      r.ProviderName,
 		ModelName:         r.ModelName,
 		TokenUsage:        r.TokenUsage,
 		Error:             r.Error,

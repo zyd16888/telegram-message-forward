@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	ProviderSettingKey = "ai.provider"
+	ProviderSettingKey  = "ai.provider"
+	ProvidersSettingKey = "ai.providers"
 )
 
 type RunStatus string
@@ -55,6 +56,7 @@ type ScheduleConfig struct {
 	IntervalMinutes int    `json:"interval_minutes,omitempty"`
 	Time            string `json:"time,omitempty"`
 	Timezone        string `json:"timezone,omitempty"`
+	Cron            string `json:"cron,omitempty"`
 	NextRunAt       string `json:"next_run_at,omitempty"`
 }
 
@@ -68,6 +70,7 @@ type DedupeConfig struct {
 }
 
 type ModelConfig struct {
+	ProviderID  string  `json:"provider_id,omitempty"`
 	Model       string  `json:"model,omitempty"`
 	Temperature float64 `json:"temperature,omitempty"`
 	MaxTokens   int     `json:"max_tokens,omitempty"`
@@ -80,13 +83,39 @@ type LimitsConfig struct {
 }
 
 type ProviderConfig struct {
+	ID                 string  `json:"id,omitempty"`
+	Name               string  `json:"name,omitempty"`
 	ProviderType       string  `json:"provider_type"`
 	BaseURL            string  `json:"base_url"`
 	Model              string  `json:"model"`
 	TimeoutSeconds     int     `json:"timeout_seconds"`
 	MaxRetries         int     `json:"max_retries"`
 	DefaultTemperature float64 `json:"default_temperature"`
+	Enabled            bool    `json:"enabled"`
+	IsDefault          bool    `json:"is_default,omitempty"`
 	HasAPIKey          bool    `json:"has_api_key"`
+}
+
+type ProviderStore struct {
+	DefaultProviderID string           `json:"default_provider_id"`
+	Providers         []ProviderConfig `json:"providers"`
+}
+
+type ProviderSecretStore struct {
+	APIKeys map[string]string `json:"api_keys"`
+}
+
+type Preset struct {
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	Description    string         `json:"description"`
+	PromptTemplate string         `json:"prompt_template"`
+	OutputFormat   string         `json:"output_format"`
+	Schedule       ScheduleConfig `json:"schedule"`
+	Window         WindowConfig   `json:"window"`
+	Dedupe         DedupeConfig   `json:"dedupe"`
+	ModelConfig    ModelConfig    `json:"model_config"`
+	Limits         LimitsConfig   `json:"limits"`
 }
 
 type Run struct {
@@ -100,6 +129,8 @@ type Run struct {
 	IncludedCount     int
 	ExcludedCount     int
 	DeliveryTaskIDs   []int64
+	ProviderID        string
+	ProviderName      string
 	ModelName         string
 	TokenUsage        TokenUsage
 	Error             string

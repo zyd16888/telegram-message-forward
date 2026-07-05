@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -47,6 +48,79 @@ func (h *AIDigestHandler) TestProvider(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"success": true, "text": text}})
+}
+
+func (h *AIDigestHandler) ListProviders(c *gin.Context) {
+	providers, err := h.svc.ListProviders(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	out := make([]dto.AIProviderDTO, 0, len(providers))
+	for _, cfg := range providers {
+		out = append(out, dto.NewAIProviderDTO(cfg))
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+func (h *AIDigestHandler) CreateProvider(c *gin.Context) {
+	var req dto.AIProviderRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	cfg, err := h.svc.CreateProvider(c.Request.Context(), req.ToInput())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": dto.NewAIProviderDTO(cfg)})
+}
+
+func (h *AIDigestHandler) GetProviderByID(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	cfg, err := h.svc.GetProviderByID(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewAIProviderDTO(cfg)})
+}
+
+func (h *AIDigestHandler) UpdateProviderByID(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	var req dto.AIProviderRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	cfg, err := h.svc.UpdateProviderByID(c.Request.Context(), id, req.ToInput())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewAIProviderDTO(cfg)})
+}
+
+func (h *AIDigestHandler) DeleteProvider(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if err := h.svc.DeleteProvider(c.Request.Context(), id); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *AIDigestHandler) TestProviderByID(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	text, err := h.svc.TestProviderByID(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"success": false, "error": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"success": true, "text": text}})
+}
+
+func (h *AIDigestHandler) ListPresets(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": h.svc.ListPresets(c.Request.Context())})
 }
 
 func (h *AIDigestHandler) ListProfiles(c *gin.Context) {

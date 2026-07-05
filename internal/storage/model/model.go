@@ -275,6 +275,8 @@ type AIDigestRun struct {
 	IncludedCount     int
 	ExcludedCount     int
 	DeliveryTaskIDs   datatypes.JSON
+	ProviderID        string
+	ProviderName      string
 	ModelName         string
 	TokenUsage        datatypes.JSON
 	Error             string

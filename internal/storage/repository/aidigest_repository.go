@@ -129,6 +129,8 @@ func (r *AIDigestRepository) UpdateRun(ctx context.Context, run *domainaidigest.
 			"included_count":      m.IncludedCount,
 			"excluded_count":      m.ExcludedCount,
 			"delivery_task_ids":   m.DeliveryTaskIDs,
+			"provider_id":         m.ProviderID,
+			"provider_name":       m.ProviderName,
 			"model_name":          m.ModelName,
 			"token_usage":         m.TokenUsage,
 			"error":               m.Error,
@@ -394,6 +396,8 @@ func toAIDigestRunModel(r *domainaidigest.Run) (*model.AIDigestRun, error) {
 		IncludedCount:     r.IncludedCount,
 		ExcludedCount:     r.ExcludedCount,
 		DeliveryTaskIDs:   taskIDs,
+		ProviderID:        r.ProviderID,
+		ProviderName:      r.ProviderName,
 		ModelName:         r.ModelName,
 		TokenUsage:        usage,
 		Error:             r.Error,
@@ -416,6 +420,8 @@ func toAIDigestRunDomain(m *model.AIDigestRun) (*domainaidigest.Run, error) {
 	r.InputMessageCount = m.InputMessageCount
 	r.IncludedCount = m.IncludedCount
 	r.ExcludedCount = m.ExcludedCount
+	r.ProviderID = m.ProviderID
+	r.ProviderName = m.ProviderName
 	r.ModelName = m.ModelName
 	r.Error = m.Error
 	r.StartedAt = m.StartedAt
