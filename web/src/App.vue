@@ -188,6 +188,7 @@ async function logout() {
   height: 100vh;
   border-right: 1px solid var(--clay-border);
   background: var(--clay-surface) !important;
+  box-shadow: 6px 0 18px rgba(15, 23, 42, 0.04);
 }
 
 .brand {
@@ -211,9 +212,11 @@ async function logout() {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  border-radius: 9px;
+  border-radius: 11px;
   color: #fff;
   background: linear-gradient(135deg, #45a9ea, #237fc2);
+  box-shadow: var(--clay-extruded-sm);
+  animation: clay-float 3.8s ease-in-out infinite;
 }
 
 .brand-text {
@@ -240,7 +243,18 @@ async function logout() {
 }
 
 .sider :deep(.n-menu-item-content) {
-  border-radius: 8px !important;
+  border-radius: 10px !important;
+  transition: box-shadow 0.16s ease, transform 0.16s ease, background-color 0.16s ease !important;
+}
+
+.sider :deep(.n-menu-item-content:hover) {
+  box-shadow: var(--clay-extruded-sm);
+  transform: translateY(-1px);
+}
+
+.sider :deep(.n-menu-item-content.n-menu-item-content--selected) {
+  box-shadow: var(--clay-inset-sm);
+  transform: none;
 }
 
 .main {
@@ -281,21 +295,35 @@ async function logout() {
 .nav-toggle {
   width: 36px;
   height: 36px;
-  border: 1px solid var(--clay-border);
-  border-radius: 8px;
+  border: none;
+  border-radius: 10px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
   cursor: pointer;
   color: var(--clay-text-2);
   background: var(--clay-surface);
+  box-shadow: var(--clay-extruded-sm);
+  transition: box-shadow 0.15s ease-out, transform 0.15s ease-out, color 0.18s ease;
 }
 
-.nav-toggle:hover,
-.nav-toggle:focus-visible {
-  border-color: var(--clay-border-strong);
+.nav-toggle:hover {
   color: var(--clay-primary);
-  outline: none;
+  box-shadow: var(--clay-extruded-hover);
+  transform: translateY(-1px);
+}
+
+.nav-toggle:focus-visible {
+  color: var(--clay-primary);
+  outline: 2px solid var(--clay-primary);
+  outline-offset: 2px;
+}
+
+.nav-toggle:active {
+  color: var(--clay-primary);
+  box-shadow: var(--clay-inset-deep);
+  transform: scale(0.92);
+  transition-duration: 0.08s;
 }
 
 .route-heading {
@@ -318,10 +346,11 @@ async function logout() {
   gap: 7px;
   min-height: 30px;
   padding: 0 10px;
-  border: 1px solid var(--clay-border);
+  border: 0;
   border-radius: 999px;
   color: var(--clay-text-2);
   background: var(--clay-surface-2);
+  box-shadow: var(--clay-inset-sm);
   font-size: 13px;
   font-weight: 600;
 }
@@ -331,6 +360,7 @@ async function logout() {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
 }
 
 .content {

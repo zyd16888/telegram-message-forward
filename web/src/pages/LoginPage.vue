@@ -161,6 +161,8 @@ async function doBootstrap() {
   justify-content: center;
   padding: 20px;
   overflow: hidden;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--clay-bg) 88%, #ffffff), var(--clay-bg));
 }
 
 /* 背景柔光团 */
@@ -176,6 +178,7 @@ async function doBootstrap() {
   top: -80px;
   left: -60px;
   background: radial-gradient(circle at 35% 35%, rgba(120, 190, 245, 0.55), transparent 68%);
+  animation: clay-float 5.2s ease-in-out infinite;
 }
 .blob-b {
   width: 380px;
@@ -183,6 +186,7 @@ async function doBootstrap() {
   bottom: -110px;
   right: -80px;
   background: radial-gradient(circle at 60% 60%, rgba(180, 235, 215, 0.5), transparent 68%);
+  animation: clay-float 5.8s ease-in-out infinite reverse;
 }
 
 .login-card {
@@ -190,10 +194,10 @@ async function doBootstrap() {
   z-index: 1;
   width: 428px;
   max-width: 100%;
-  padding: 34px 32px;
+  padding: 36px 34px;
   border-radius: 30px;
   background: var(--clay-surface);
-  box-shadow: var(--clay-out), var(--clay-inset-hi);
+  box-shadow: var(--clay-extruded);
 }
 
 .brand {
@@ -216,6 +220,7 @@ async function doBootstrap() {
     inset 2px 2px 5px rgba(255, 255, 255, 0.45),
     inset -3px -3px 6px rgba(18, 90, 150, 0.35);
   flex-shrink: 0;
+  animation: clay-breathe 4.2s ease-in-out infinite;
 }
 .brand-text {
   display: flex;
@@ -235,5 +240,20 @@ async function doBootstrap() {
 }
 .mt {
   margin-top: 16px;
+}
+
+.login-card :deep(.n-input) {
+  min-height: 42px;
+}
+
+.login-card :deep(.n-button) {
+  min-height: 42px;
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 28px 22px;
+    border-radius: 24px;
+  }
 }
 </style>

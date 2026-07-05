@@ -8,7 +8,7 @@
 :root {
   color-scheme: light;
 
-  --clay-bg: #f5f7fb;
+  --clay-bg: #f3f7fb;
   --clay-surface: #ffffff;
   --clay-surface-2: #f8fafc;
   --clay-sunken: #eef2f7;
@@ -29,6 +29,19 @@
   --clay-inset-hi: none;
   --clay-press: inset 0 1px 2px rgba(15, 23, 42, 0.08);
   --clay-primary-shadow: none;
+
+  /* 局部 neumorphism 手法：用于按钮、icon-well、重点节点的触感增强 */
+  --clay-shadow-light: rgba(255, 255, 255, 0.7);
+  --clay-shadow-dark: rgba(163, 177, 198, 0.35);
+  --clay-extruded-sm: 4px 4px 8px var(--clay-shadow-dark), -4px -4px 8px var(--clay-shadow-light);
+  --clay-extruded: 7px 7px 14px var(--clay-shadow-dark), -7px -7px 14px var(--clay-shadow-light);
+  --clay-extruded-hover: 9px 9px 18px rgba(163, 177, 198, 0.42), -9px -9px 18px rgba(255, 255, 255, 0.78);
+  --clay-inset-sm: inset 3px 3px 6px var(--clay-shadow-dark), inset -3px -3px 6px var(--clay-shadow-light);
+  --clay-inset-deep: inset 5px 5px 10px rgba(163, 177, 198, 0.55), inset -5px -5px 10px rgba(255, 255, 255, 0.92);
+  --clay-primary-depth: 5px 5px 12px rgba(32, 117, 179, 0.24), -4px -4px 10px rgba(255, 255, 255, 0.68);
+  --clay-primary-depth-hover: 7px 7px 15px rgba(32, 117, 179, 0.28), -5px -5px 12px rgba(255, 255, 255, 0.72);
+  --clay-primary-press: inset 3px 3px 7px rgba(23, 98, 153, 0.42), inset -3px -3px 7px rgba(255, 255, 255, 0.28);
+  --clay-focus-ring: 0 0 0 3px rgba(47, 143, 214, 0.16);
 }
 
 html[data-clay-theme='dark'] {
@@ -53,6 +66,18 @@ html[data-clay-theme='dark'] {
   --clay-out-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
   --clay-hover: 0 8px 20px rgba(0, 0, 0, 0.28);
   --clay-press: inset 0 1px 2px rgba(0, 0, 0, 0.26);
+
+  --clay-shadow-light: rgba(255, 255, 255, 0.04);
+  --clay-shadow-dark: rgba(0, 0, 0, 0.4);
+  --clay-extruded-sm: 4px 4px 8px var(--clay-shadow-dark), -4px -4px 8px var(--clay-shadow-light);
+  --clay-extruded: 7px 7px 14px var(--clay-shadow-dark), -7px -7px 14px var(--clay-shadow-light);
+  --clay-extruded-hover: 9px 9px 18px rgba(0, 0, 0, 0.46), -9px -9px 18px rgba(255, 255, 255, 0.05);
+  --clay-inset-sm: inset 3px 3px 6px var(--clay-shadow-dark), inset -3px -3px 6px var(--clay-shadow-light);
+  --clay-inset-deep: inset 5px 5px 10px rgba(0, 0, 0, 0.58), inset -5px -5px 10px rgba(255, 255, 255, 0.07);
+  --clay-primary-depth: 5px 5px 12px rgba(0, 0, 0, 0.34), -4px -4px 10px rgba(255, 255, 255, 0.04);
+  --clay-primary-depth-hover: 7px 7px 15px rgba(0, 0, 0, 0.4), -5px -5px 12px rgba(255, 255, 255, 0.05);
+  --clay-primary-press: inset 3px 3px 7px rgba(0, 0, 0, 0.46), inset -3px -3px 7px rgba(255, 255, 255, 0.08);
+  --clay-focus-ring: 0 0 0 3px rgba(91, 180, 238, 0.18);
 }
 
 html,
@@ -94,7 +119,8 @@ body {
 
 .n-card {
   border: 1px solid var(--clay-border) !important;
-  box-shadow: var(--clay-out-sm) !important;
+  box-shadow: var(--clay-extruded-sm) !important;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease !important;
 }
 
 .n-card > .n-card-header {
@@ -122,18 +148,40 @@ body {
 
 .n-button {
   font-weight: 600;
+  transition: box-shadow 0.16s ease-out, transform 0.16s ease-out, color 0.16s ease-out,
+    background-color 0.16s ease-out, border-color 0.16s ease-out !important;
 }
 
-.n-button--default-type,
-.n-button--tertiary-type,
-.n-button.n-button--secondary {
-  box-shadow: none !important;
+.n-button:not(.n-button--text-type):not(.n-button--quaternary-type) {
+  border-color: transparent !important;
+  box-shadow: var(--clay-extruded-sm) !important;
 }
 
-.n-button--default-type:hover,
-.n-button--tertiary-type:hover,
-.n-button.n-button--secondary:hover {
-  transform: none;
+.n-button--primary-type:not(.n-button--disabled):not(.n-button--loading) {
+  box-shadow: var(--clay-primary-depth) !important;
+}
+
+.n-button:not(.n-button--text-type):not(.n-button--quaternary-type):not(.n-button--disabled):not(.n-button--loading):hover {
+  box-shadow: var(--clay-extruded-hover) !important;
+  transform: translateY(-1px);
+}
+
+.n-button--primary-type:not(.n-button--disabled):not(.n-button--loading):hover {
+  box-shadow: var(--clay-primary-depth-hover) !important;
+}
+
+.n-button:not(.n-button--text-type):not(.n-button--quaternary-type):not(.n-button--disabled):active {
+  box-shadow: var(--clay-inset-sm) !important;
+  transform: translateY(1px) scale(0.98);
+}
+
+.n-button--primary-type:not(.n-button--disabled):active {
+  box-shadow: var(--clay-primary-press) !important;
+}
+
+.n-button--quaternary-type:not(.n-button--disabled):active,
+.n-button--text-type:not(.n-button--disabled):active {
+  transform: translateY(1px);
 }
 
 .n-input .n-input__border,
@@ -141,6 +189,17 @@ body {
 .n-base-selection .n-base-selection__border,
 .n-base-selection .n-base-selection__state-border {
   transition: border-color 0.18s ease, box-shadow 0.18s ease !important;
+}
+
+.n-input,
+.n-base-selection {
+  border-radius: 10px !important;
+  box-shadow: var(--clay-inset-sm) !important;
+}
+
+.n-input.n-input--focus,
+.n-base-selection.n-base-selection--active {
+  box-shadow: var(--clay-inset-deep), var(--clay-focus-ring) !important;
 }
 
 .n-data-table {
@@ -172,7 +231,8 @@ body {
 }
 
 .n-alert {
-  border-radius: 8px !important;
+  border-radius: 12px !important;
+  box-shadow: var(--clay-extruded-sm) !important;
 }
 
 .n-divider {
@@ -217,6 +277,36 @@ body {
   .n-modal .n-card {
     width: calc(100vw - 24px) !important;
     max-width: 100% !important;
+  }
+}
+
+@keyframes clay-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes clay-float-scale {
+  0%,
+  100% {
+    transform: translateY(0) scale(1.05);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.05);
+  }
+}
+
+@keyframes clay-breathe {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.015);
   }
 }
 

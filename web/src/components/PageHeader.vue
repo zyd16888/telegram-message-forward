@@ -44,10 +44,17 @@ defineProps<{ title: string; desc?: string; icon?: string }>()
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  border: 1px solid var(--clay-border);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 11px;
   color: var(--clay-primary);
   background: var(--clay-primary-soft);
+  box-shadow: var(--clay-inset-sm);
+  transition: transform 0.22s ease-out, box-shadow 0.22s ease-out;
+}
+
+.page-header:hover .ph-icon {
+  box-shadow: var(--clay-inset-deep);
+  transform: translateY(-1px);
 }
 
 .ph-titles {

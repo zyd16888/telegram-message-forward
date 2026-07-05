@@ -241,7 +241,7 @@ onMounted(load)
 .tiles {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 18px;
+  gap: 20px;
 }
 @media (max-width: 900px) {
   .tiles {
@@ -252,26 +252,31 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 18px;
-  border: 1px solid var(--clay-border);
-  border-radius: 10px;
+  padding: 20px;
+  border: 0;
+  border-radius: 14px;
   background: var(--clay-surface);
-  box-shadow: var(--clay-out-sm);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  box-shadow: var(--clay-extruded);
+  transition: box-shadow 0.22s ease-out, transform 0.22s ease-out;
 }
 .tile:hover {
-  border-color: var(--clay-border-strong);
-  box-shadow: var(--clay-hover);
+  box-shadow: var(--clay-extruded-hover);
+  transform: translateY(-2px);
 }
 .tile-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   display: grid;
   place-items: center;
   color: var(--tone);
   background: var(--tone-soft);
+  box-shadow: var(--clay-inset-sm);
   flex-shrink: 0;
+  transition: transform 0.3s ease-out;
+}
+.tile:hover .tile-icon {
+  animation: clay-float-scale 1.4s ease-in-out infinite;
 }
 .tile-value {
   font-size: 30px;
@@ -306,7 +311,7 @@ onMounted(load)
 .rate-badge {
   flex-shrink: 0;
   width: 150px;
-  border-radius: 10px;
+  border-radius: 18px;
   padding: 22px;
   display: flex;
   flex-direction: column;
@@ -314,7 +319,12 @@ onMounted(load)
   align-items: center;
   color: #fff;
   background: linear-gradient(150deg, #56b0ea, #2f8fd6);
-  box-shadow: var(--clay-out-sm);
+  box-shadow:
+    7px 7px 16px rgba(32, 117, 179, 0.26),
+    -5px -5px 14px rgba(255, 255, 255, 0.7),
+    inset 2px 2px 6px rgba(255, 255, 255, 0.28),
+    inset -4px -4px 10px rgba(22, 100, 160, 0.24);
+  animation: clay-breathe 4.6s ease-in-out infinite;
 }
 .rate-value {
   font-size: 34px;
@@ -366,16 +376,23 @@ onMounted(load)
   align-items: center;
   gap: 10px;
   padding: 14px 16px;
-  border: 1px solid var(--clay-border);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 12px;
   background: var(--clay-surface-2);
+  box-shadow: var(--clay-inset-sm);
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.status-pill:hover {
+  box-shadow: var(--clay-inset-deep);
+  transform: translateY(-1px);
 }
 .status-dot {
   width: 12px;
   height: 12px;
   border-radius: 50%;
   background: var(--tone);
-  box-shadow: 0 2px 5px var(--tone-soft);
+  box-shadow: 0 0 0 4px var(--tone-soft), 0 2px 5px var(--tone-soft);
   flex-shrink: 0;
 }
 .status-num {
@@ -406,8 +423,11 @@ onMounted(load)
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 0;
-  border-top: 1px solid var(--clay-border);
+  padding: 9px 10px;
+  border-top: 0;
+  border-radius: 10px;
+  background: var(--clay-surface-2);
+  box-shadow: var(--clay-inset-sm);
 }
 
 .top-item span {

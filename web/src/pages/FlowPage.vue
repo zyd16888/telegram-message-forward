@@ -504,10 +504,11 @@ onMounted(async () => {
 
 <style scoped>
 .setup-panel {
-  padding: 14px 16px;
-  border: 1px solid var(--clay-border);
-  border-radius: 10px;
+  padding: 16px;
+  border: 0;
+  border-radius: 14px;
   background: var(--clay-surface);
+  box-shadow: var(--clay-extruded-sm);
 }
 
 .setup-title {
@@ -529,19 +530,27 @@ onMounted(async () => {
   gap: 8px;
   min-width: 0;
   padding: 9px 10px;
-  border: 1px solid var(--clay-border);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 11px;
   color: var(--clay-text-2);
   background: var(--clay-surface-2);
+  box-shadow: var(--clay-extruded-sm);
   font-weight: 600;
   cursor: pointer;
   text-align: left;
+  transition: box-shadow 0.16s ease, transform 0.16s ease, color 0.16s ease;
 }
 
 .setup-step:hover,
 .setup-step:focus-visible {
-  border-color: var(--clay-border-strong);
+  box-shadow: var(--clay-extruded-hover);
+  transform: translateY(-1px);
   outline: none;
+}
+
+.setup-step:active {
+  box-shadow: var(--clay-inset-sm);
+  transform: translateY(1px);
 }
 
 .setup-step.done {
@@ -557,6 +566,7 @@ onMounted(async () => {
   place-items: center;
   flex-shrink: 0;
   background: var(--clay-surface);
+  box-shadow: var(--clay-inset-sm);
   font-size: 12px;
   font-weight: 900;
 }
@@ -567,6 +577,10 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 14px;
   flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--clay-surface);
+  box-shadow: var(--clay-extruded-sm);
 }
 
 .toolbar-filters {
@@ -589,6 +603,13 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.toolbar-stats span {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--clay-surface-2);
+  box-shadow: var(--clay-inset-sm);
+}
+
 .stat-warn {
   color: #b45309;
   font-weight: 700;
@@ -601,9 +622,10 @@ onMounted(async () => {
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 14px;
-  border: 1px solid color-mix(in srgb, var(--clay-primary) 35%, var(--clay-border));
-  border-radius: 10px;
+  border: 0;
+  border-radius: 14px;
   background: var(--clay-primary-soft);
+  box-shadow: var(--clay-inset-sm);
 }
 
 .context-label {
@@ -627,9 +649,10 @@ onMounted(async () => {
 }
 
 .board-column {
-  border: 1px solid var(--clay-border);
-  border-radius: 10px;
+  border: 0;
+  border-radius: 14px;
   background: var(--clay-surface);
+  box-shadow: var(--clay-extruded-sm);
   overflow: hidden;
 }
 
@@ -638,8 +661,9 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--clay-border);
+  border-bottom: 0;
   background: var(--clay-surface-2);
+  box-shadow: var(--clay-inset-sm);
 }
 
 .column-title {
@@ -654,7 +678,8 @@ onMounted(async () => {
   border-radius: 999px;
   color: var(--clay-text-2);
   background: var(--clay-surface);
-  border: 1px solid var(--clay-border);
+  border: 0;
+  box-shadow: var(--clay-inset-sm);
   font-size: 12px;
   font-weight: 700;
   text-align: center;
@@ -671,31 +696,33 @@ onMounted(async () => {
 .node-card {
   width: 100%;
   min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--clay-border);
-  border-radius: 8px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 12px;
   color: inherit;
   background: var(--clay-surface);
+  box-shadow: var(--clay-extruded-sm);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+  transition: opacity 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, background-color 0.16s ease;
 }
 
 .node-card:hover,
 .node-card:focus-visible {
-  border-color: var(--clay-border-strong);
+  box-shadow: var(--clay-extruded-hover);
+  transform: translateY(-1px);
   outline: none;
 }
 
 .node-card.selected {
-  border-color: var(--clay-primary);
   background: color-mix(in srgb, var(--clay-primary-soft) 55%, var(--clay-surface));
-  box-shadow: var(--clay-hover);
+  box-shadow: var(--clay-inset-deep), var(--clay-focus-ring);
+  transform: translateY(1px);
 }
 
 .node-card.linked {
-  border-color: color-mix(in srgb, var(--clay-primary) 45%, var(--clay-border));
   background: color-mix(in srgb, var(--clay-primary-soft) 25%, var(--clay-surface));
+  box-shadow: var(--clay-extruded-sm), 0 0 0 1px color-mix(in srgb, var(--clay-primary) 30%, transparent);
 }
 
 .node-card.dimmed {
@@ -715,10 +742,12 @@ onMounted(async () => {
   flex-shrink: 0;
   border-radius: 999px;
   background: var(--clay-border-strong);
+  box-shadow: var(--clay-inset-sm);
 }
 
 .status-dot.on {
   background: #10b981;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.14);
 }
 
 .node-name {
@@ -741,10 +770,11 @@ onMounted(async () => {
 
 .node-tag {
   padding: 1px 8px;
-  border: 1px solid var(--clay-border);
+  border: 0;
   border-radius: 999px;
   color: var(--clay-text-2);
   background: var(--clay-surface-2);
+  box-shadow: var(--clay-inset-sm);
   font-size: 11px;
   font-weight: 600;
 }
@@ -785,6 +815,7 @@ onMounted(async () => {
   flex-shrink: 0;
   color: #b45309;
   background: var(--clay-warning-soft);
+  box-shadow: var(--clay-inset-sm);
   font-size: 12px;
   font-weight: 800;
 }
@@ -817,6 +848,7 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  box-shadow: var(--clay-inset-sm);
 }
 
 .pipe-chip.condition {
@@ -842,9 +874,10 @@ onMounted(async () => {
   gap: 10px;
   min-width: 0;
   padding: 5px 8px;
-  border: 1px solid var(--clay-border);
-  border-radius: 6px;
+  border: 0;
+  border-radius: 10px;
   background: var(--clay-surface-2);
+  box-shadow: var(--clay-inset-sm);
   font-size: 12px;
 }
 
