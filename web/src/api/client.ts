@@ -356,7 +356,10 @@ export const aiApi = {
     update: (id: string, body: AIProviderRequest) =>
       http.put<ApiItem<AIProvider>>(`/ai/providers/${id}`, body).then((r) => r.data.data),
     remove: (id: string) => http.delete(`/ai/providers/${id}`),
-    test: (id: string) => http.post<ApiItem<AIProviderTestResult>>(`/ai/providers/${id}/test`).then((r) => r.data.data),
+    test: (id: string, body?: AIProviderRequest) =>
+      http.post<ApiItem<AIProviderTestResult>>(`/ai/providers/${id}/test`, body).then((r) => r.data.data),
+    testDraft: (body: AIProviderRequest) =>
+      http.post<ApiItem<AIProviderTestResult>>('/ai/providers/test', body).then((r) => r.data.data),
   },
   presets: {
     list: () => http.get<ApiList<AIDigestPreset>>('/ai/presets').then((r) => r.data.data),

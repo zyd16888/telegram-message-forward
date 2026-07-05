@@ -159,6 +159,7 @@ func NewRouter(deps Deps) *gin.Engine {
 				ai.POST("/provider/test", deps.AIDigest.TestProvider)
 				ai.GET("/providers", deps.AIDigest.ListProviders)
 				ai.POST("/providers", deps.AIDigest.CreateProvider)
+				ai.POST("/providers/test", deps.AIDigest.TestProviderDraft)
 				ai.GET("/providers/:id", deps.AIDigest.GetProviderByID)
 				ai.PUT("/providers/:id", deps.AIDigest.UpdateProviderByID)
 				ai.DELETE("/providers/:id", deps.AIDigest.DeleteProvider)

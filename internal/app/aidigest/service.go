@@ -82,6 +82,7 @@ func NewService(deps Deps) *Service {
 type ProviderInput struct {
 	Name               string
 	ProviderType       string
+	APIType            string
 	BaseURL            string
 	Model              string
 	TimeoutSeconds     int
@@ -236,6 +237,56 @@ func (s *Service) TestProviderByID(ctx context.Context, id string) (string, erro
 	if err != nil {
 		return "", err
 	}
+	return s.testProviderConfig(ctx, cfg, apiKey)
+}
+
+func (s *Service) TestProviderDraft(ctx context.Context, id string, in ProviderInput) (string, error) {
+	apiKey := ""
+	var base domainaidigest.ProviderConfig
+	if strings.TrimSpace(id) != "" {
+		cfg, savedKey, err := s.providerByID(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		base = cfg
+		apiKey = savedKey
+	}
+	cfg := providerFromInput(in)
+	if base.ID != "" {
+		cfg.ID = base.ID
+		if cfg.Name == "" {
+			cfg.Name = base.Name
+		}
+		if cfg.ProviderType == "" {
+			cfg.ProviderType = base.ProviderType
+		}
+		if cfg.APIType == "" {
+			cfg.APIType = base.APIType
+		}
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = base.BaseURL
+		}
+		if cfg.Model == "" {
+			cfg.Model = base.Model
+		}
+		if cfg.TimeoutSeconds <= 0 {
+			cfg.TimeoutSeconds = base.TimeoutSeconds
+		}
+		if cfg.MaxRetries < 0 {
+			cfg.MaxRetries = base.MaxRetries
+		}
+		if cfg.DefaultTemperature == 0 {
+			cfg.DefaultTemperature = base.DefaultTemperature
+		}
+	}
+	normalizeProvider(&cfg)
+	if in.APIKey != nil {
+		apiKey = strings.TrimSpace(*in.APIKey)
+	}
+	return s.testProviderConfig(ctx, cfg, apiKey)
+}
+
+func (s *Service) testProviderConfig(ctx context.Context, cfg domainaidigest.ProviderConfig, apiKey string) (string, error) {
 	client := s.providerClient(cfg, apiKey)
 	res, err := client.Generate(ctx, ai.GenerateRequest{
 		Model:       cfg.Model,
@@ -964,6 +1015,7 @@ func (s *Service) providerClient(cfg domainaidigest.ProviderConfig, apiKey strin
 	return ai.NewOpenAICompatibleClient(ai.OpenAICompatibleConfig{
 		BaseURL:         cfg.BaseURL,
 		APIKey:          apiKey,
+		APIType:         cfg.APIType,
 		DefaultModel:    cfg.Model,
 		Timeout:         time.Duration(cfg.TimeoutSeconds) * time.Second,
 		MaxRetries:      cfg.MaxRetries,
@@ -977,6 +1029,7 @@ func defaultProviderConfig() domainaidigest.ProviderConfig {
 		ID:                 "default",
 		Name:               "默认 Provider",
 		ProviderType:       "openai_compatible",
+		APIType:            "chat_completions",
 		BaseURL:            "https://api.openai.com/v1",
 		Model:              "gpt-4o-mini",
 		TimeoutSeconds:     60,
@@ -990,6 +1043,7 @@ func providerFromInput(in ProviderInput) domainaidigest.ProviderConfig {
 	return domainaidigest.ProviderConfig{
 		Name:               strings.TrimSpace(in.Name),
 		ProviderType:       strings.TrimSpace(in.ProviderType),
+		APIType:            strings.TrimSpace(in.APIType),
 		BaseURL:            strings.TrimRight(strings.TrimSpace(in.BaseURL), "/"),
 		Model:              strings.TrimSpace(in.Model),
 		TimeoutSeconds:     in.TimeoutSeconds,
@@ -1035,6 +1089,12 @@ func normalizeProvider(cfg *domainaidigest.ProviderConfig) {
 	cfg.Name = strings.TrimSpace(cfg.Name)
 	if cfg.ProviderType == "" {
 		cfg.ProviderType = "openai_compatible"
+	}
+	if cfg.APIType == "" {
+		cfg.APIType = "chat_completions"
+	}
+	if cfg.APIType != "responses" {
+		cfg.APIType = "chat_completions"
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.openai.com/v1"

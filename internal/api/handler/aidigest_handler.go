@@ -111,7 +111,33 @@ func (h *AIDigestHandler) DeleteProvider(c *gin.Context) {
 
 func (h *AIDigestHandler) TestProviderByID(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
-	text, err := h.svc.TestProviderByID(c.Request.Context(), id)
+	if c.Request.ContentLength == 0 {
+		text, err := h.svc.TestProviderByID(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"data": gin.H{"success": false, "error": err.Error()}})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"success": true, "text": text}})
+		return
+	}
+	var req dto.AIProviderRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	text, err := h.svc.TestProviderDraft(c.Request.Context(), id, req.ToInput())
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"success": false, "error": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"success": true, "text": text}})
+}
+
+func (h *AIDigestHandler) TestProviderDraft(c *gin.Context) {
+	var req dto.AIProviderRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	text, err := h.svc.TestProviderDraft(c.Request.Context(), "", req.ToInput())
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"success": false, "error": err.Error()}})
 		return

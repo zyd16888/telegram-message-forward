@@ -86,6 +86,7 @@ type ProviderConfig struct {
 	ID                 string  `json:"id,omitempty"`
 	Name               string  `json:"name,omitempty"`
 	ProviderType       string  `json:"provider_type"`
+	APIType            string  `json:"api_type,omitempty"`
 	BaseURL            string  `json:"base_url"`
 	Model              string  `json:"model"`
 	TimeoutSeconds     int     `json:"timeout_seconds"`

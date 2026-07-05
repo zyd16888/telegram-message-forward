@@ -71,6 +71,46 @@ func TestProvidersSupportMultipleDefaultsAndTesting(t *testing.T) {
 	}
 }
 
+func TestProviderDraftTestUsesCurrentInput(t *testing.T) {
+	ctx := context.Background()
+	var requestedPath string
+	var requestedModel string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		requestedModel = body.Model
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"` + body.Model + `","choices":[{"message":{"role":"assistant","content":"draft ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`))
+	}))
+	defer mock.Close()
+
+	svc := NewService(Deps{Settings: newMemorySettingsRepo()})
+	text, err := svc.TestProviderDraft(ctx, "", ProviderInput{
+		Name:               "Draft",
+		BaseURL:            mock.URL,
+		Model:              "draft-model",
+		DefaultTemperature: 0.2,
+		APIKey:             strPtr("draft-key"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "draft ok" {
+		t.Fatalf("text = %q, want draft ok", text)
+	}
+	if requestedPath != "/chat/completions" {
+		t.Fatalf("path = %s, want /chat/completions", requestedPath)
+	}
+	if requestedModel != "draft-model" {
+		t.Fatalf("model = %s, want draft-model", requestedModel)
+	}
+}
+
 func TestNextRunAfterCronUsesProfileAnchor(t *testing.T) {
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {

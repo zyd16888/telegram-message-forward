@@ -27,6 +27,7 @@ const providerLoading = ref(false)
 const providerSaving = ref(false)
 const providerTesting = ref(false)
 const editingProviderId = ref<string | null>(null)
+const showProviderForm = ref(false)
 const providers = ref<AIProvider[]>([])
 const presets = ref<AIDigestPreset[]>([])
 const profiles = ref<AIDigestProfile[]>([])
@@ -44,6 +45,7 @@ const showDetail = ref(false)
 const providerForm = reactive<AIProviderRequest>({
   name: '默认 Provider',
   provider_type: 'openai_compatible',
+  api_type: 'chat_completions',
   base_url: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
   timeout_seconds: 60,
@@ -53,6 +55,11 @@ const providerForm = reactive<AIProviderRequest>({
   is_default: false,
   api_key: '',
 })
+
+const apiTypeOptions = [
+  { label: 'Chat Completions (/v1/chat/completions)', value: 'chat_completions' },
+  { label: 'Responses API (/v1/responses)', value: 'responses' },
+]
 
 const providerColumns: DataTableColumns<AIProvider> = [
   {
@@ -64,6 +71,7 @@ const providerColumns: DataTableColumns<AIProvider> = [
         row.is_default ? h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '默认' }) : null,
       ]),
   },
+  { title: '接口', key: 'api_type', width: 150, render: (row) => (row.api_type === 'responses' ? 'Responses' : 'Chat Completions') },
   { title: 'Base URL', key: 'base_url', ellipsis: { tooltip: true } },
   { title: '默认模型', key: 'model' },
   {
@@ -149,6 +157,8 @@ const runColumns: DataTableColumns<AIDigestRun> = [
 ]
 
 const activeProfileName = computed(() => selectedProfile.value?.name ?? '运行记录')
+const providerFormTitle = computed(() => (editingProviderId.value ? '编辑 AI Provider' : '新增 AI Provider'))
+const editingProvider = computed(() => providers.value.find((item) => item.id === editingProviderId.value) ?? null)
 
 async function loadAll(): Promise<void> {
   loading.value = true
@@ -167,9 +177,6 @@ async function loadAll(): Promise<void> {
     conditionDescriptors.value = meta.conditions.filter((item) => item.type !== 'source')
     providers.value = pvds
     presets.value = presetItems
-    if (!editingProviderId.value) {
-      editProvider(pvds.find((item) => item.is_default) ?? pvds[0] ?? null)
-    }
     if (!selectedProfile.value && ps[0]) {
       selectedProfile.value = ps[0]
       await loadRuns(ps[0])
@@ -184,24 +191,13 @@ async function loadAll(): Promise<void> {
 async function saveProvider(): Promise<void> {
   providerSaving.value = true
   try {
-    const body = {
-      name: providerForm.name,
-      provider_type: providerForm.provider_type,
-      base_url: providerForm.base_url,
-      model: providerForm.model,
-      timeout_seconds: providerForm.timeout_seconds,
-      max_retries: providerForm.max_retries,
-      default_temperature: providerForm.default_temperature,
-      enabled: true,
-      is_default: providerForm.is_default,
-      api_key: providerForm.api_key?.trim() ? providerForm.api_key.trim() : undefined,
-    }
+    const body = providerPayload()
     const res = editingProviderId.value
       ? await aiApi.providers.update(editingProviderId.value, body)
       : await aiApi.providers.create(body)
     editingProviderId.value = res.id
     await loadProviders()
-    editProvider(res)
+    showProviderForm.value = false
     message.success('Provider 设置已保存')
   } catch (e) {
     message.error('保存失败：' + errText(e))
@@ -217,6 +213,7 @@ async function loadProviders(): Promise<void> {
 function newProvider(): void {
   editingProviderId.value = null
   Object.assign(providerForm, defaultProviderForm())
+  showProviderForm.value = true
 }
 
 function editProvider(provider: AIProvider | null): void {
@@ -228,6 +225,7 @@ function editProvider(provider: AIProvider | null): void {
   Object.assign(providerForm, {
     name: provider.name,
     provider_type: provider.provider_type,
+    api_type: provider.api_type || 'chat_completions',
     base_url: provider.base_url,
     model: provider.model,
     timeout_seconds: provider.timeout_seconds,
@@ -237,12 +235,14 @@ function editProvider(provider: AIProvider | null): void {
     is_default: provider.is_default,
     api_key: '',
   })
+  showProviderForm.value = true
 }
 
 function defaultProviderForm(): AIProviderRequest {
   return {
     name: '',
     provider_type: 'openai_compatible',
+    api_type: 'chat_completions',
     base_url: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini',
     timeout_seconds: 60,
@@ -255,14 +255,13 @@ function defaultProviderForm(): AIProviderRequest {
 }
 
 async function testProvider(provider?: AIProvider): Promise<void> {
-  const id = provider?.id ?? editingProviderId.value
-  if (!id) {
-    message.warning('请先保存 Provider 再测试')
-    return
-  }
   providerTesting.value = true
   try {
-    const res = await aiApi.providers.test(id)
+    const res = provider
+      ? await aiApi.providers.test(provider.id)
+      : editingProviderId.value
+        ? await aiApi.providers.test(editingProviderId.value, providerPayload())
+        : await aiApi.providers.testDraft(providerPayload())
     if (res.success) message.success(res.text || 'Provider 测试成功')
     else message.error(res.error || 'Provider 测试失败')
   } catch (e) {
@@ -272,13 +271,29 @@ async function testProvider(provider?: AIProvider): Promise<void> {
   }
 }
 
+function providerPayload(): AIProviderRequest {
+  return {
+    name: providerForm.name,
+    provider_type: providerForm.provider_type,
+    api_type: providerForm.api_type,
+    base_url: providerForm.base_url,
+    model: providerForm.model,
+    timeout_seconds: providerForm.timeout_seconds,
+    max_retries: providerForm.max_retries,
+    default_temperature: providerForm.default_temperature,
+    enabled: true,
+    is_default: providerForm.is_default,
+    api_key: providerForm.api_key?.trim() ? providerForm.api_key.trim() : undefined,
+  }
+}
+
 async function removeProvider(provider: AIProvider): Promise<void> {
   try {
     await aiApi.providers.remove(provider.id)
     message.success('已删除 Provider')
     editingProviderId.value = null
     await loadProviders()
-    editProvider(providers.value.find((item) => item.is_default) ?? providers.value[0] ?? null)
+    showProviderForm.value = false
   } catch (e) {
     message.error('删除失败：' + errText(e))
   }
@@ -406,54 +421,10 @@ onMounted(loadAll)
 
     <NCard title="AI Provider">
       <template #header-extra>
-        <NButton size="small" secondary @click="newProvider">新增 Provider</NButton>
+        <NButton type="primary" size="small" @click="newProvider">新增 Provider</NButton>
       </template>
       <NSpin :show="providerLoading">
-        <div class="provider-layout">
-          <NDataTable :columns="providerColumns" :data="providers" :bordered="false" :scroll-x="760" />
-          <NForm label-placement="top" :show-feedback="false">
-            <div class="provider-grid">
-              <NFormItem label="名称">
-                <NInput v-model:value="providerForm.name" placeholder="OpenAI / DeepSeek / Anthropic Gateway" />
-              </NFormItem>
-              <NFormItem label="类型">
-                <NInput v-model:value="providerForm.provider_type" disabled />
-              </NFormItem>
-              <NFormItem label="默认 Provider">
-                <NSwitch v-model:value="providerForm.is_default" />
-              </NFormItem>
-              <NFormItem label="Base URL">
-                <NInput v-model:value="providerForm.base_url" placeholder="https://api.openai.com/v1" />
-              </NFormItem>
-              <NFormItem label="默认模型">
-                <NInput v-model:value="providerForm.model" placeholder="gpt-4o-mini" />
-              </NFormItem>
-              <NFormItem label="API Key">
-                <NInput
-                  v-model:value="providerForm.api_key"
-                  type="password"
-                  show-password-on="click"
-                  placeholder="留空表示不修改已保存 Key"
-                />
-              </NFormItem>
-              <NFormItem label="超时秒数">
-                <NInputNumber v-model:value="providerForm.timeout_seconds" :min="5" class="full-input" />
-              </NFormItem>
-              <NFormItem label="重试次数">
-                <NInputNumber v-model:value="providerForm.max_retries" :min="0" class="full-input" />
-              </NFormItem>
-              <NFormItem label="Temperature">
-                <NInputNumber v-model:value="providerForm.default_temperature" :min="0" :max="2" :step="0.1" class="full-input" />
-              </NFormItem>
-            </div>
-            <NSpace>
-              <NButton type="primary" :loading="providerSaving" @click="saveProvider">
-                {{ editingProviderId ? '保存 Provider' : '创建 Provider' }}
-              </NButton>
-              <NButton secondary :loading="providerTesting" @click="() => testProvider()">测试当前 Provider</NButton>
-            </NSpace>
-          </NForm>
-        </div>
+        <NDataTable :columns="providerColumns" :data="providers" :bordered="false" :scroll-x="900" />
       </NSpin>
     </NCard>
 
@@ -496,6 +467,64 @@ onMounted(loadAll)
     >
       <AIDigestRunDetail :detail="selectedDetail" />
     </NModal>
+
+    <NModal
+      v-model:show="showProviderForm"
+      preset="card"
+      :title="providerFormTitle"
+      :style="{ width: 'min(760px, calc(100vw - 32px))' }"
+    >
+      <NForm label-placement="top" :show-feedback="false">
+        <div class="provider-grid">
+          <NFormItem label="名称">
+            <NInput v-model:value="providerForm.name" placeholder="OpenAI / DeepSeek / Anthropic Gateway" />
+          </NFormItem>
+          <NFormItem label="类型">
+            <NInput v-model:value="providerForm.provider_type" disabled />
+          </NFormItem>
+          <NFormItem label="接口类型">
+            <NSelect v-model:value="providerForm.api_type" :options="apiTypeOptions" />
+          </NFormItem>
+          <NFormItem label="Base URL">
+            <NInput v-model:value="providerForm.base_url" placeholder="https://api.openai.com/v1" />
+          </NFormItem>
+          <NFormItem label="默认模型">
+            <NInput v-model:value="providerForm.model" placeholder="gpt-4o-mini" />
+          </NFormItem>
+          <NFormItem label="API Key">
+            <NInput
+              v-model:value="providerForm.api_key"
+              type="password"
+              show-password-on="click"
+              :placeholder="editingProvider?.has_api_key ? '已配置，留空表示不修改' : 'sk-...'"
+            />
+          </NFormItem>
+          <NFormItem label="默认 Provider">
+            <NSwitch v-model:value="providerForm.is_default" />
+          </NFormItem>
+          <NFormItem label="超时秒数">
+            <NInputNumber v-model:value="providerForm.timeout_seconds" :min="5" class="full-input" />
+          </NFormItem>
+          <NFormItem label="重试次数">
+            <NInputNumber v-model:value="providerForm.max_retries" :min="0" class="full-input" />
+          </NFormItem>
+          <NFormItem label="Temperature">
+            <NInputNumber v-model:value="providerForm.default_temperature" :min="0" :max="2" :step="0.1" class="full-input" />
+          </NFormItem>
+        </div>
+      </NForm>
+      <template #footer>
+        <NSpace justify="space-between">
+          <NButton secondary :loading="providerTesting" @click="() => testProvider()">测试当前配置</NButton>
+          <NSpace>
+            <NButton @click="showProviderForm = false">取消</NButton>
+            <NButton type="primary" :loading="providerSaving" @click="saveProvider">
+              {{ editingProviderId ? '保存' : '创建' }}
+            </NButton>
+          </NSpace>
+        </NSpace>
+      </template>
+    </NModal>
   </NSpace>
 </template>
 
@@ -505,11 +534,6 @@ onMounted(loadAll)
   grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 12px;
   align-items: start;
-}
-
-.provider-layout {
-  display: grid;
-  gap: 16px;
 }
 
 .provider-name {

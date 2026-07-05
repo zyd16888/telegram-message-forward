@@ -14,6 +14,7 @@ type AIProviderDTO struct {
 	ID                 string  `json:"id"`
 	Name               string  `json:"name"`
 	ProviderType       string  `json:"provider_type"`
+	APIType            string  `json:"api_type"`
 	BaseURL            string  `json:"base_url"`
 	Model              string  `json:"model"`
 	TimeoutSeconds     int     `json:"timeout_seconds"`
@@ -27,6 +28,7 @@ type AIProviderDTO struct {
 type AIProviderRequest struct {
 	Name               string  `json:"name"`
 	ProviderType       string  `json:"provider_type"`
+	APIType            string  `json:"api_type"`
 	BaseURL            string  `json:"base_url"`
 	Model              string  `json:"model"`
 	TimeoutSeconds     int     `json:"timeout_seconds"`
@@ -42,6 +44,7 @@ func NewAIProviderDTO(cfg domainaidigest.ProviderConfig) AIProviderDTO {
 		ID:                 cfg.ID,
 		Name:               cfg.Name,
 		ProviderType:       cfg.ProviderType,
+		APIType:            cfg.APIType,
 		BaseURL:            cfg.BaseURL,
 		Model:              cfg.Model,
 		TimeoutSeconds:     cfg.TimeoutSeconds,
@@ -57,6 +60,7 @@ func (r AIProviderRequest) ToInput() appaidigest.ProviderInput {
 	return appaidigest.ProviderInput{
 		Name:               r.Name,
 		ProviderType:       r.ProviderType,
+		APIType:            r.APIType,
 		BaseURL:            r.BaseURL,
 		Model:              r.Model,
 		TimeoutSeconds:     r.TimeoutSeconds,

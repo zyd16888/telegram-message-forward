@@ -393,6 +393,7 @@ export interface AIProvider {
   id: string
   name: string
   provider_type: string
+  api_type: 'chat_completions' | 'responses' | string
   base_url: string
   model: string
   timeout_seconds: number
@@ -406,6 +407,7 @@ export interface AIProvider {
 export interface AIProviderRequest {
   name: string
   provider_type: string
+  api_type: 'chat_completions' | 'responses' | string
   base_url: string
   model: string
   timeout_seconds: number
