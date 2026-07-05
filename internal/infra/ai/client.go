@@ -82,7 +82,7 @@ func (c *OpenAICompatibleClient) Generate(ctx context.Context, req GenerateReque
 		temperature = c.cfg.Temperature
 	}
 	maxTokens := req.MaxTokens
-	if maxTokens <= 0 {
+	if maxTokens <= 0 && c.cfg.DefaultMaxToken > 0 {
 		maxTokens = c.cfg.DefaultMaxToken
 	}
 	body := chatCompletionRequest{

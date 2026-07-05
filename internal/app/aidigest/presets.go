@@ -32,8 +32,8 @@ func defaultPresets() []domainaidigest.Preset {
 			},
 			Window:      domainaidigest.WindowConfig{Type: "last_duration", DurationMinutes: 60},
 			Dedupe:      domainaidigest.DedupeConfig{Enabled: true},
-			ModelConfig: domainaidigest.ModelConfig{Temperature: 0.2, MaxTokens: 1200},
-			Limits:      domainaidigest.LimitsConfig{MaxMessagesPerRun: 80, MaxCharsPerMessage: 1200, MaxPromptChars: 36000},
+			ModelConfig: domainaidigest.ModelConfig{Temperature: 0.2},
+			Limits:      domainaidigest.LimitsConfig{MaxMessagesPerRun: 80, MaxCharsPerMessage: 1200},
 		},
 		{
 			ID:          "daily_news",
@@ -63,8 +63,8 @@ func defaultPresets() []domainaidigest.Preset {
 			},
 			Window:      domainaidigest.WindowConfig{Type: "last_duration", DurationMinutes: 1440},
 			Dedupe:      domainaidigest.DedupeConfig{Enabled: true},
-			ModelConfig: domainaidigest.ModelConfig{Temperature: 0.2, MaxTokens: 1800},
-			Limits:      domainaidigest.LimitsConfig{MaxMessagesPerRun: 120, MaxCharsPerMessage: 1000, MaxPromptChars: 50000},
+			ModelConfig: domainaidigest.ModelConfig{Temperature: 0.2},
+			Limits:      domainaidigest.LimitsConfig{MaxMessagesPerRun: 120, MaxCharsPerMessage: 1000},
 		},
 	}
 }

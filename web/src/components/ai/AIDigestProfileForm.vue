@@ -45,8 +45,8 @@ const form = reactive<AIDigestProfileRequest>({
     '请整理以下窗口内的消息，输出重点摘要、分类列表和来源编号。\n\n{{messages}}\n\n输出格式：{{output_format}}',
   output_format: 'markdown',
   target_sink_ids: [],
-  model_config: { provider_id: '', model: '', temperature: 0.2, max_tokens: 1200 },
-  limits: { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 30000 },
+  model_config: { provider_id: '', model: '', temperature: 0.2, max_tokens: 0 },
+  limits: { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 0 },
 })
 
 const sourceOptions = computed(() => props.sources.map((item) => ({ label: `${item.name} (#${item.id})`, value: item.id })))
@@ -86,13 +86,7 @@ const promptVariables = [
   { token: '{{window_end}}', label: '窗口结束', desc: '本次整理窗口的结束时间。' },
   { token: '{{message_count}}', label: '消息数量', desc: '最终纳入 Prompt 的消息条数。' },
   { token: '{{source_list}}', label: '来源列表', desc: '所选 Source 的名称列表。' },
-  { token: '{{output_format}}', label: '输出格式', desc: '当前选择的 Markdown、Text 或 HTML。' },
-]
-const baseSummaryLengthOptions = [
-  { label: '简短摘要（约 800 tokens）', value: 800 },
-  { label: '标准简报（约 1200 tokens）', value: 1200 },
-  { label: '详细整理（约 1800 tokens）', value: 1800 },
-  { label: '长文汇总（约 2500 tokens）', value: 2500 },
+  { token: '{{output_format}}', label: 'AI 输出格式', desc: '由本区域下方的“AI 输出格式”选择项决定。' },
 ]
 const baseInputVolumeOptions = [
   { label: '少量消息（最多 30 条）', value: 30 },
@@ -101,21 +95,20 @@ const baseInputVolumeOptions = [
   { label: '资讯频道（最多 120 条）', value: 120 },
 ]
 const baseMessageLengthOptions = [
-  { label: '短消息优先（每条 600 字，Prompt 约 2 万字）', value: 'short', maxChars: 600, maxPromptChars: 20000 },
-  { label: '常规消息（每条 1200 字，Prompt 约 3 万字）', value: 'normal', maxChars: 1200, maxPromptChars: 30000 },
-  { label: '保留长消息（每条 2000 字，Prompt 约 5 万字）', value: 'long', maxChars: 2000, maxPromptChars: 50000 },
+  { label: '短消息优先（每条 600 字）', value: 'short', maxChars: 600 },
+  { label: '常规消息（每条 1200 字）', value: 'normal', maxChars: 1200 },
+  { label: '保留长消息（每条 2500 字）', value: 'long', maxChars: 2500 },
+  { label: '尽量完整（每条 5000 字）', value: 'full', maxChars: 5000 },
 ]
-const summaryLengthOptions = computed(() => withCustomNumberOption(baseSummaryLengthOptions, form.model_config.max_tokens, '当前自定义输出长度'))
 const inputVolumeOptions = computed(() => withCustomNumberOption(baseInputVolumeOptions, form.limits.max_messages_per_run, '当前自定义消息量'))
 const messageLengthOptions = computed(() => {
   const selected = selectedMessageLength.value
   if (selected !== 'custom') return baseMessageLengthOptions
   return [
     {
-      label: `当前自定义（每条 ${form.limits.max_chars_per_message ?? '-'} 字，Prompt ${form.limits.max_prompt_chars ?? '-'} 字）`,
+      label: `当前自定义（每条 ${form.limits.max_chars_per_message ?? '-'} 字）`,
       value: 'custom',
       maxChars: form.limits.max_chars_per_message ?? 0,
-      maxPromptChars: form.limits.max_prompt_chars ?? 0,
     },
     ...baseMessageLengthOptions,
   ]
@@ -123,8 +116,7 @@ const messageLengthOptions = computed(() => {
 const selectedMessageLength = computed({
   get: () => {
     const matched = baseMessageLengthOptions.find(
-      (item) =>
-        item.maxChars === form.limits.max_chars_per_message && item.maxPromptChars === form.limits.max_prompt_chars,
+      (item) => item.maxChars === form.limits.max_chars_per_message,
     )
     return matched?.value ?? 'custom'
   },
@@ -132,11 +124,11 @@ const selectedMessageLength = computed({
     const matched = baseMessageLengthOptions.find((item) => item.value === value)
     if (!matched) return
     form.limits.max_chars_per_message = matched.maxChars
-    form.limits.max_prompt_chars = matched.maxPromptChars
   },
 })
 const promptCharCount = computed(() => [...form.prompt_template].length)
 const hasMessagesVariable = computed(() => form.prompt_template.includes(requiredMessagesVariable))
+const promptSelection = reactive({ start: -1, end: -1 })
 
 watch(
   () => [show.value, props.profile] as const,
@@ -160,8 +152,8 @@ function reset(): void {
       '请整理以下窗口内的消息，输出重点摘要、分类列表和来源编号。\n\n{{messages}}\n\n输出格式：{{output_format}}'
     form.output_format = 'markdown'
     form.target_sink_ids = []
-    form.model_config = { provider_id: defaultProviderID(), model: '', temperature: 0.2, max_tokens: 1200 }
-    form.limits = { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 30000 }
+    form.model_config = { provider_id: defaultProviderID(), model: '', temperature: 0.2, max_tokens: 0 }
+    form.limits = { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 0 }
     return
   }
   Object.assign(form, {
@@ -230,9 +222,10 @@ function applyPreset(id: string): void {
   form.dedupe = { ...preset.dedupe }
   form.model_config = {
     ...preset.model_config,
+    max_tokens: 0,
     provider_id: form.model_config.provider_id || defaultProviderID(),
   }
-  form.limits = { ...preset.limits }
+  form.limits = { ...preset.limits, max_prompt_chars: 0 }
 }
 
 function withCustomNumberOption<T extends { label: string; value: number }>(options: T[], value: number | undefined, label: string): T[] {
@@ -241,8 +234,20 @@ function withCustomNumberOption<T extends { label: string; value: number }>(opti
 }
 
 function insertPromptVariable(token: string): void {
-  const prefix = form.prompt_template.trimEnd()
-  form.prompt_template = `${prefix}${prefix ? '\n' : ''}${token}`
+  const chars = [...form.prompt_template]
+  const fallback = chars.length
+  const start = Math.max(0, Math.min(promptSelection.start >= 0 ? promptSelection.start : fallback, chars.length))
+  const end = Math.max(start, Math.min(promptSelection.end, chars.length))
+  form.prompt_template = `${chars.slice(0, start).join('')}${token}${chars.slice(end).join('')}`
+  promptSelection.start = start + [...token].length
+  promptSelection.end = promptSelection.start
+}
+
+function rememberPromptSelection(event: Event): void {
+  const target = event.target
+  if (!(target instanceof HTMLTextAreaElement) && !(target instanceof HTMLInputElement)) return
+  promptSelection.start = target.selectionStart ?? form.prompt_template.length
+  promptSelection.end = target.selectionEnd ?? promptSelection.start
 }
 
 function payload(): AIDigestProfileRequest {
@@ -257,8 +262,8 @@ function payload(): AIDigestProfileRequest {
     prompt_template: form.prompt_template,
     output_format: form.output_format,
     target_sink_ids: [...form.target_sink_ids],
-    model_config: { ...form.model_config },
-    limits: { ...form.limits },
+    model_config: { ...form.model_config, max_tokens: 0 },
+    limits: { ...form.limits, max_prompt_chars: 0 },
   }
 }
 
@@ -310,9 +315,6 @@ function preview(): void {
             </NFormItem>
             <NFormItem label="启用定时">
               <NSwitch v-model:value="form.enabled" />
-            </NFormItem>
-            <NFormItem label="输出格式">
-              <NSelect v-model:value="form.output_format" :options="outputFormatOptions" />
             </NFormItem>
           </div>
         </section>
@@ -390,13 +392,21 @@ function preview(): void {
           </NFormItem>
           <div class="prompt-layout">
             <NFormItem label="Prompt" class="prompt-editor">
-              <NInput v-model:value="form.prompt_template" type="textarea" :autosize="{ minRows: 10, maxRows: 18 }" />
+              <NInput
+                v-model:value="form.prompt_template"
+                type="textarea"
+                :autosize="{ minRows: 10, maxRows: 18 }"
+                @focus="rememberPromptSelection"
+                @click="rememberPromptSelection"
+                @keyup="rememberPromptSelection"
+                @select="rememberPromptSelection"
+              />
             </NFormItem>
             <div class="variable-panel">
               <div class="variable-head">
                 <div>
                   <div class="variable-title">可用变量</div>
-                  <div class="variable-desc">点击变量会追加到 Prompt 末尾。</div>
+                  <div class="variable-desc">点击变量会插入到当前光标处。</div>
                 </div>
                 <NTag :type="hasMessagesVariable ? 'success' : 'warning'" size="small" :bordered="false">
                   {{ hasMessagesVariable ? '已包含消息' : '缺少消息变量' }}
@@ -427,8 +437,8 @@ function preview(): void {
             <NFormItem label="模型（可空=Provider 默认）">
               <NInput v-model:value="form.model_config.model" placeholder="gpt-4o-mini" />
             </NFormItem>
-            <NFormItem label="摘要长度">
-              <NSelect v-model:value="form.model_config.max_tokens" :options="summaryLengthOptions" />
+            <NFormItem label="AI 输出格式">
+              <NSelect v-model:value="form.output_format" :options="outputFormatOptions" />
             </NFormItem>
             <NFormItem label="输入消息量">
               <NSelect v-model:value="form.limits.max_messages_per_run" :options="inputVolumeOptions" />
@@ -450,21 +460,15 @@ function preview(): void {
           <NCollapse class="advanced-collapse">
             <NCollapseItem title="高级限制（一般不用改）" name="limits">
               <div class="limit-grid">
-                <NFormItem label="Max Tokens">
-                  <NInputNumber v-model:value="form.model_config.max_tokens" :min="100" class="full-input" />
-                </NFormItem>
                 <NFormItem label="最大消息数">
                   <NInputNumber v-model:value="form.limits.max_messages_per_run" :min="1" class="full-input" />
                 </NFormItem>
                 <NFormItem label="单条消息字符上限">
                   <NInputNumber v-model:value="form.limits.max_chars_per_message" :min="100" class="full-input" />
                 </NFormItem>
-                <NFormItem label="Prompt 总字符上限">
-                  <NInputNumber v-model:value="form.limits.max_prompt_chars" :min="1000" class="full-input" />
-                </NFormItem>
               </div>
               <div class="limit-note">
-                当前 Prompt 模板约 {{ promptCharCount }} 字。实际发送给 AI 时还会追加被纳入的消息内容，超过上限会被截断。
+                当前 Prompt 模板约 {{ promptCharCount }} 字。系统不再硬切提示词；如需保护请求体大小，只会优先缩减消息变量内容。
               </div>
             </NCollapseItem>
           </NCollapse>

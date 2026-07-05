@@ -530,7 +530,6 @@ func (s *Service) runAI(ctx context.Context, p *domainaidigest.Profile, run *dom
 		System:      systemPrompt,
 		User:        userPrompt,
 		Temperature: firstPositiveFloat(p.ModelConfig.Temperature, cfg.DefaultTemperature),
-		MaxTokens:   firstPositiveInt(p.ModelConfig.MaxTokens, 0),
 	})
 	if err != nil {
 		return nil, err
@@ -679,7 +678,49 @@ func (s *Service) buildPrompt(ctx context.Context, p *domainaidigest.Profile, ru
 	if tmpl == "" {
 		tmpl = defaultPrompt
 	}
+	sourceList := make([]string, 0, len(sourceNames))
+	for _, name := range sourceNames {
+		sourceList = append(sourceList, name)
+	}
+	sort.Strings(sourceList)
+	staticReplacer := strings.NewReplacer(
+		"{{profile_name}}", p.Name,
+		"{{window_start}}", run.WindowStart.Format(time.RFC3339),
+		"{{window_end}}", run.WindowEnd.Format(time.RFC3339),
+		"{{message_count}}", fmt.Sprintf("%d", len(msgs)),
+		"{{messages}}", "",
+		"{{source_list}}", strings.Join(sourceList, ", "),
+		"{{output_format}}", p.OutputFormat,
+	)
+	basePrompt := staticReplacer.Replace(tmpl)
+	messageBudget := -1
+	if limits.MaxPromptChars > 0 {
+		messageBudget = limits.MaxPromptChars - len([]rune(basePrompt))
+		if !strings.Contains(tmpl, "{{messages}}") {
+			messageBudget -= len([]rune("\n\n输入消息：\n"))
+		}
+	}
+	messages := buildMessagePromptBlocks(msgs, sourceNames, messageBudget)
+	replacer := strings.NewReplacer(
+		"{{profile_name}}", p.Name,
+		"{{window_start}}", run.WindowStart.Format(time.RFC3339),
+		"{{window_end}}", run.WindowEnd.Format(time.RFC3339),
+		"{{message_count}}", fmt.Sprintf("%d", len(msgs)),
+		"{{messages}}", messages,
+		"{{source_list}}", strings.Join(sourceList, ", "),
+		"{{output_format}}", p.OutputFormat,
+	)
+	b.WriteString(replacer.Replace(tmpl))
+	if !strings.Contains(tmpl, "{{messages}}") {
+		b.WriteString("\n\n输入消息：\n")
+		b.WriteString(messages)
+	}
+	return b.String()
+}
+
+func buildMessagePromptBlocks(msgs []*domainmessage.NormalizedMessage, sourceNames map[int64]string, budget int) string {
 	var messages strings.Builder
+	used := 0
 	for i, msg := range msgs {
 		sourceName := sourceNames[msg.SourceID]
 		if sourceName == "" {
@@ -689,33 +730,27 @@ func (s *Service) buildPrompt(ctx context.Context, p *domainaidigest.Profile, ru
 		if msg.SentAt != nil {
 			t = *msg.SentAt
 		}
-		fmt.Fprintf(&messages, "#%d\nsource: %s\ntime: %s\nsender: %s\ntype: %s\nurl: %s\ntext:\n%s\n\n",
+		block := fmt.Sprintf("#%d\nsource: %s\ntime: %s\nsender: %s\ntype: %s\nurl: %s\ntext:\n%s\n\n",
 			i+1, sourceName, t.Format(time.RFC3339), emptyDash(msg.SenderName), msg.MessageType, emptyDash(msg.OriginalURL), msg.Text)
+		if budget >= 0 {
+			remain := budget - used
+			if remain <= 0 {
+				messages.WriteString("[后续消息已因消息内容上限省略]")
+				break
+			}
+			blockRunes := []rune(block)
+			if len(blockRunes) > remain {
+				if remain > 0 {
+					messages.WriteString(string(blockRunes[:remain]))
+				}
+				messages.WriteString("\n[已按消息内容上限截断，提示词未截断]")
+				break
+			}
+			used += len(blockRunes)
+		}
+		messages.WriteString(block)
 	}
-	sourceList := make([]string, 0, len(sourceNames))
-	for _, name := range sourceNames {
-		sourceList = append(sourceList, name)
-	}
-	sort.Strings(sourceList)
-	replacer := strings.NewReplacer(
-		"{{profile_name}}", p.Name,
-		"{{window_start}}", run.WindowStart.Format(time.RFC3339),
-		"{{window_end}}", run.WindowEnd.Format(time.RFC3339),
-		"{{message_count}}", fmt.Sprintf("%d", len(msgs)),
-		"{{messages}}", messages.String(),
-		"{{source_list}}", strings.Join(sourceList, ", "),
-		"{{output_format}}", p.OutputFormat,
-	)
-	b.WriteString(replacer.Replace(tmpl))
-	if !strings.Contains(tmpl, "{{messages}}") {
-		b.WriteString("\n\n输入消息：\n")
-		b.WriteString(messages.String())
-	}
-	prompt := b.String()
-	if limits.MaxPromptChars > 0 && len([]rune(prompt)) > limits.MaxPromptChars {
-		prompt = truncateRunes(prompt, limits.MaxPromptChars) + "\n[已按 prompt 总字数上限截断]"
-	}
-	return prompt
+	return messages.String()
 }
 
 func (s *Service) resolveWindow(ctx context.Context, p *domainaidigest.Profile) (time.Time, time.Time, error) {
@@ -1013,14 +1048,13 @@ func (s *Service) loadLegacyProvider(ctx context.Context) (domainaidigest.Provid
 
 func (s *Service) providerClient(cfg domainaidigest.ProviderConfig, apiKey string) ai.Client {
 	return ai.NewOpenAICompatibleClient(ai.OpenAICompatibleConfig{
-		BaseURL:         cfg.BaseURL,
-		APIKey:          apiKey,
-		APIType:         cfg.APIType,
-		DefaultModel:    cfg.Model,
-		Timeout:         time.Duration(cfg.TimeoutSeconds) * time.Second,
-		MaxRetries:      cfg.MaxRetries,
-		Temperature:     cfg.DefaultTemperature,
-		DefaultMaxToken: 1000,
+		BaseURL:      cfg.BaseURL,
+		APIKey:       apiKey,
+		APIType:      cfg.APIType,
+		DefaultModel: cfg.Model,
+		Timeout:      time.Duration(cfg.TimeoutSeconds) * time.Second,
+		MaxRetries:   cfg.MaxRetries,
+		Temperature:  cfg.DefaultTemperature,
 	})
 }
 
@@ -1077,9 +1111,6 @@ func normalizedLimits(l domainaidigest.LimitsConfig) domainaidigest.LimitsConfig
 	}
 	if l.MaxCharsPerMessage <= 0 {
 		l.MaxCharsPerMessage = 1200
-	}
-	if l.MaxPromptChars <= 0 {
-		l.MaxPromptChars = 30000
 	}
 	return l
 }
