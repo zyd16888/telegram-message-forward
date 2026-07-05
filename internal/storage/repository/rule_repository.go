@@ -83,7 +83,14 @@ func (r *RuleRepository) GetByID(ctx context.Context, id int64) (*domainrule.Rul
 	if err := r.db.WithContext(ctx).First(&m, id).Error; err != nil {
 		return nil, err
 	}
-	return r.loadFull(ctx, &m)
+	rule, err := r.loadFull(ctx, &m)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.resolveRuleFilters(ctx, []*domainrule.Rule{rule}); err != nil {
+		return nil, err
+	}
+	return rule, nil
 }
 
 // List 返回全部规则，按 priority、id 排序。
@@ -123,7 +130,39 @@ func (r *RuleRepository) assembleRules(ctx context.Context, ms []model.Rule) ([]
 		}
 		out = append(out, full)
 	}
+	if err := r.resolveRuleFilters(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// resolveRuleFilters 对引用了共享过滤器的规则，用过滤器条件覆盖其内联条件（批量一次查询）。
+func (r *RuleRepository) resolveRuleFilters(ctx context.Context, rules []*domainrule.Rule) error {
+	idset := map[int64]struct{}{}
+	for _, rule := range rules {
+		if rule.FilterID > 0 {
+			idset[rule.FilterID] = struct{}{}
+		}
+	}
+	if len(idset) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(idset))
+	for id := range idset {
+		ids = append(ids, id)
+	}
+	condMap, err := loadFilterConditions(ctx, r.db, ids)
+	if err != nil {
+		return err
+	}
+	for _, rule := range rules {
+		if rule.FilterID > 0 {
+			if conds, ok := condMap[rule.FilterID]; ok {
+				rule.Conditions = conds
+			}
+		}
+	}
+	return nil
 }
 
 func (r *RuleRepository) loadFull(ctx context.Context, m *model.Rule) (*domainrule.Rule, error) {
@@ -174,6 +213,7 @@ func toRuleModel(rule *domainrule.Rule) (*model.Rule, error) {
 		Priority:    rule.Priority,
 		Conditions:  datatypes.JSON(conds),
 		Processors:  datatypes.JSON(procs),
+		FilterID:    nullablePositive(rule.FilterID),
 		StopOnMatch: rule.StopOnMatch,
 		CreatedAt:   rule.CreatedAt,
 		UpdatedAt:   rule.UpdatedAt,
@@ -193,7 +233,7 @@ func toRuleDomain(m *model.Rule) (*domainrule.Rule, error) {
 			return nil, fmt.Errorf("解析 processors 失败: %w", err)
 		}
 	}
-	return &domainrule.Rule{
+	rule := &domainrule.Rule{
 		ID:          m.ID,
 		Name:        m.Name,
 		Enabled:     m.Enabled,
@@ -203,5 +243,9 @@ func toRuleDomain(m *model.Rule) (*domainrule.Rule, error) {
 		StopOnMatch: m.StopOnMatch,
 		CreatedAt:   m.CreatedAt,
 		UpdatedAt:   m.UpdatedAt,
-	}, nil
+	}
+	if m.FilterID != nil {
+		rule.FilterID = *m.FilterID
+	}
+	return rule, nil
 }

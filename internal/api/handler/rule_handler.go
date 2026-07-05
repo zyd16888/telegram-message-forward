@@ -140,6 +140,7 @@ func toRuleInput(req dto.RuleRequest) apprule.Input {
 		Name:        req.Name,
 		Enabled:     req.Enabled,
 		Priority:    req.Priority,
+		FilterID:    req.FilterID,
 		Conditions:  req.Conditions,
 		Processors:  req.Processors,
 		StopOnMatch: req.StopOnMatch,

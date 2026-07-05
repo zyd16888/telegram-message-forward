@@ -28,10 +28,13 @@ type Target struct {
 
 // Rule 是一条路由规则。
 type Rule struct {
-	ID          int64
-	Name        string
-	Enabled     bool
-	Priority    int
+	ID       int64
+	Name     string
+	Enabled  bool
+	Priority int
+	// FilterID 引用共享过滤器；为 0 表示使用内联 Conditions。
+	// 仓储加载时若 FilterID>0，会用过滤器的条件覆盖 Conditions。
+	FilterID    int64
 	Conditions  []ConditionConfig
 	Processors  []ProcessorConfig
 	StopOnMatch bool

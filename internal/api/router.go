@@ -26,6 +26,7 @@ type Deps struct {
 	Source         *handler.SourceHandler
 	Template       *handler.TemplateHandler
 	Rule           *handler.RuleHandler
+	Filter         *handler.FilterHandler
 	Delivery       *handler.DeliveryHandler
 	AIDigest       *handler.AIDigestHandler
 	Token          *handler.TokenHandler
@@ -141,6 +142,17 @@ func NewRouter(deps Deps) *gin.Engine {
 			rules.GET("/:id", deps.Rule.Get)
 			rules.PUT("/:id", deps.Rule.Update)
 			rules.DELETE("/:id", deps.Rule.Delete)
+		}
+
+		if deps.Filter != nil {
+			filters := v1.Group("/filters")
+			{
+				filters.GET("", deps.Filter.List)
+				filters.POST("", deps.Filter.Create)
+				filters.GET("/:id", deps.Filter.Get)
+				filters.PUT("/:id", deps.Filter.Update)
+				filters.DELETE("/:id", deps.Filter.Delete)
+			}
 		}
 
 		deliveries := v1.Group("/deliveries")

@@ -424,6 +424,7 @@ type RuleDTO struct {
 	Name        string                       `json:"name"`
 	Enabled     bool                         `json:"enabled"`
 	Priority    int                          `json:"priority"`
+	FilterID    int64                        `json:"filter_id"`
 	Conditions  []domainrule.ConditionConfig `json:"conditions"`
 	Processors  []domainrule.ProcessorConfig `json:"processors"`
 	StopOnMatch bool                         `json:"stop_on_match"`
@@ -456,6 +457,7 @@ func NewRuleDTO(r *domainrule.Rule) RuleDTO {
 		Name:        r.Name,
 		Enabled:     r.Enabled,
 		Priority:    r.Priority,
+		FilterID:    r.FilterID,
 		Conditions:  conds,
 		Processors:  procs,
 		StopOnMatch: r.StopOnMatch,
@@ -471,6 +473,7 @@ type RuleRequest struct {
 	Name        string                       `json:"name" binding:"required"`
 	Enabled     bool                         `json:"enabled"`
 	Priority    int                          `json:"priority"`
+	FilterID    int64                        `json:"filter_id"`
 	Conditions  []domainrule.ConditionConfig `json:"conditions"`
 	Processors  []domainrule.ProcessorConfig `json:"processors"`
 	StopOnMatch bool                         `json:"stop_on_match"`

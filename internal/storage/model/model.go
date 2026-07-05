@@ -156,12 +156,25 @@ type Rule struct {
 	Priority    int
 	Conditions  datatypes.JSON
 	Processors  datatypes.JSON
+	FilterID    *int64
 	StopOnMatch bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
 
 func (Rule) TableName() string { return "rules" }
+
+// Filter 对应 filters 表：可复用的一组匹配条件。
+type Filter struct {
+	ID          int64 `gorm:"primaryKey"`
+	Name        string
+	Description string
+	Conditions  datatypes.JSON
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (Filter) TableName() string { return "filters" }
 
 // RuleSource 对应 rule_sources 表。
 type RuleSource struct {
@@ -256,6 +269,7 @@ type AIDigestProfile struct {
 	OutputFormat     string
 	OutputTemplateID *int64
 	OutputTemplate   string
+	FilterID         *int64
 	TargetSinkIDs    datatypes.JSON
 	ModelConfig      datatypes.JSON
 	Limits           datatypes.JSON

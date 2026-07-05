@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	domainfilter "telegram-message-forward/internal/domain/filter"
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
@@ -20,12 +21,14 @@ type Service struct {
 	repo      domainrule.Repository
 	sinks     domainsink.Repository
 	templates domaintemplate.Repository
+	filters   domainfilter.Repository
 }
 
 // ValidatorDeps 是规则目标校验所需依赖；测试可不传，此时只做仓储写入。
 type ValidatorDeps struct {
 	Sinks     domainsink.Repository
 	Templates domaintemplate.Repository
+	Filters   domainfilter.Repository
 }
 
 // NewService 创建规则服务。
@@ -34,6 +37,7 @@ func NewService(repo domainrule.Repository, deps ...ValidatorDeps) *Service {
 	if len(deps) > 0 {
 		s.sinks = deps[0].Sinks
 		s.templates = deps[0].Templates
+		s.filters = deps[0].Filters
 	}
 	return s
 }
@@ -53,6 +57,7 @@ type Input struct {
 	Name        string
 	Enabled     bool
 	Priority    int
+	FilterID    int64
 	Conditions  []domainrule.ConditionConfig
 	Processors  []domainrule.ProcessorConfig
 	StopOnMatch bool
@@ -98,6 +103,9 @@ func (s *Service) Create(ctx context.Context, in Input) (*domainrule.Rule, error
 	if err := s.validateTargets(ctx, r.Targets); err != nil {
 		return nil, err
 	}
+	if err := s.validateFilter(ctx, r.FilterID); err != nil {
+		return nil, err
+	}
 	if err := s.repo.Create(ctx, r); err != nil {
 		return nil, err
 	}
@@ -116,6 +124,9 @@ func (s *Service) Update(ctx context.Context, id int64, in Input) (*domainrule.R
 		return nil, err
 	}
 	if err := s.validateTargets(ctx, r.Targets); err != nil {
+		return nil, err
+	}
+	if err := s.validateFilter(ctx, r.FilterID); err != nil {
 		return nil, err
 	}
 	if err := s.repo.Update(ctx, r); err != nil {
@@ -143,6 +154,13 @@ func (s *Service) ProcessorDescriptors() []processor.Descriptor {
 func (s *Service) Preview(ctx context.Context, in PreviewInput) (*PreviewResult, error) {
 	r := toRule(0, in.Rule)
 	r.Enabled = true
+	if r.FilterID > 0 && s.filters != nil {
+		f, err := s.filters.GetByID(ctx, r.FilterID)
+		if err != nil {
+			return nil, fmt.Errorf("引用的过滤器不存在 (id=%d): %w", r.FilterID, err)
+		}
+		r.Conditions = f.Conditions
+	}
 	if err := s.validateRuleConfig(r); err != nil {
 		return nil, err
 	}
@@ -192,6 +210,7 @@ func toRule(id int64, in Input) *domainrule.Rule {
 		Name:        in.Name,
 		Enabled:     in.Enabled,
 		Priority:    in.Priority,
+		FilterID:    in.FilterID,
 		Conditions:  in.Conditions,
 		Processors:  in.Processors,
 		StopOnMatch: in.StopOnMatch,
@@ -210,6 +229,16 @@ func (s *Service) validateRuleConfig(r *domainrule.Rule) error {
 		if err := processor.ValidateConfig(cfg.Type, cfg.Config); err != nil {
 			return fmt.Errorf("处理器 %s 配置无效: %w", cfg.Type, err)
 		}
+	}
+	return nil
+}
+
+func (s *Service) validateFilter(ctx context.Context, filterID int64) error {
+	if filterID <= 0 || s.filters == nil {
+		return nil
+	}
+	if _, err := s.filters.GetByID(ctx, filterID); err != nil {
+		return fmt.Errorf("引用的过滤器不存在 (id=%d): %w", filterID, err)
 	}
 	return nil
 }

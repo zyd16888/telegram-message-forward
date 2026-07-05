@@ -33,10 +33,12 @@ const (
 )
 
 type Profile struct {
-	ID             int64
-	Name           string
-	Enabled        bool
-	SourceIDs      []int64
+	ID        int64
+	Name      string
+	Enabled   bool
+	SourceIDs []int64
+	// FilterID 引用共享过滤器；为 0 表示使用内联 Conditions。
+	FilterID       int64
 	Conditions     []domainrule.ConditionConfig
 	Schedule       ScheduleConfig
 	Window         WindowConfig

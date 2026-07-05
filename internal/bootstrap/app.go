@@ -18,6 +18,7 @@ import (
 	apptoken "telegram-message-forward/internal/app/apitoken"
 	appauth "telegram-message-forward/internal/app/auth"
 	appdelivery "telegram-message-forward/internal/app/delivery"
+	appfilter "telegram-message-forward/internal/app/filter"
 	appingest "telegram-message-forward/internal/app/ingest"
 	apprule "telegram-message-forward/internal/app/rule"
 	appsettings "telegram-message-forward/internal/app/settings"
@@ -127,6 +128,7 @@ func Build(cfg *config.Config) (*App, error) {
 	sinks := repository.NewSinkRepository(db, cipher)
 	templates := repository.NewTemplateRepository(db)
 	rules := repository.NewRuleRepository(db)
+	filters := repository.NewFilterRepository(db)
 	messages := repository.NewMessageRepository(db)
 	deliveries := repository.NewDeliveryRepository(db)
 	peers := repository.NewTelegramPeerRepository(db)
@@ -196,6 +198,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Sources:  sources,
 		Sinks:    sinks,
 		Tasks:    deliveries,
+		Filters:  filters,
 		Clock:    clk,
 		Logger:   log,
 		Wake:     deliveryNotifier.Notify,
@@ -268,7 +271,8 @@ func Build(cfg *config.Config) (*App, error) {
 	accountSvc := appaccount.NewService(accounts, telegramApps, proxies)
 	sinkSvc := appsink.NewService(sinks, deliveries)
 	templateSvc := apptemplate.NewService(templates)
-	ruleSvc := apprule.NewService(rules, apprule.ValidatorDeps{Sinks: sinks, Templates: templates})
+	ruleSvc := apprule.NewService(rules, apprule.ValidatorDeps{Sinks: sinks, Templates: templates, Filters: filters})
+	filterSvc := appfilter.NewService(filters)
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)
 	sourceSvc.RegisterPlugin("rss", rssPlugin)
 	sourceSvc.RegisterPlugin("webhook", webhookPlugin)
@@ -291,6 +295,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Source:         handler.NewSourceHandler(sourceSvc),
 		Template:       handler.NewTemplateHandler(templateSvc),
 		Rule:           handler.NewRuleHandler(ruleSvc),
+		Filter:         handler.NewFilterHandler(filterSvc),
 		Delivery:       handler.NewDeliveryHandler(deliverySvc),
 		AIDigest:       handler.NewAIDigestHandler(aiDigestSvc),
 		Token:          handler.NewTokenHandler(tokenSvc),

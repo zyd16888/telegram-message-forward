@@ -19,6 +19,7 @@ import (
 
 	domainaidigest "telegram-message-forward/internal/domain/aidigest"
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
+	domainfilter "telegram-message-forward/internal/domain/filter"
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsettings "telegram-message-forward/internal/domain/settings"
@@ -80,6 +81,7 @@ type Service struct {
 	sources  domainsource.Repository
 	sinks    domainsink.Repository
 	tasks    domaindelivery.Repository
+	filters  domainfilter.Repository
 	clk      clock.Clock
 	log      *slog.Logger
 	wake     func()
@@ -93,6 +95,7 @@ type Deps struct {
 	Sources  domainsource.Repository
 	Sinks    domainsink.Repository
 	Tasks    domaindelivery.Repository
+	Filters  domainfilter.Repository
 	Clock    clock.Clock
 	Logger   *slog.Logger
 	Wake     func()
@@ -105,7 +108,8 @@ type messageWindowRepository interface {
 func NewService(deps Deps) *Service {
 	return &Service{
 		repo: deps.Repo, settings: deps.Settings, messages: deps.Messages, sources: deps.Sources,
-		sinks: deps.Sinks, tasks: deps.Tasks, clk: deps.Clock, log: deps.Logger, wake: deps.Wake,
+		sinks: deps.Sinks, tasks: deps.Tasks, filters: deps.Filters,
+		clk: deps.Clock, log: deps.Logger, wake: deps.Wake,
 	}
 }
 
@@ -427,6 +431,16 @@ func validateOutputTemplate(t *domainaidigest.OutputTemplate) error {
 	return nil
 }
 
+// resolveConditions 优先返回引用的共享过滤器条件，否则回退内联条件。
+func (s *Service) resolveConditions(ctx context.Context, p *domainaidigest.Profile) []domainrule.ConditionConfig {
+	if p.FilterID > 0 && s.filters != nil {
+		if f, err := s.filters.GetByID(ctx, p.FilterID); err == nil && f != nil {
+			return f.Conditions
+		}
+	}
+	return p.Conditions
+}
+
 // resolveOutputTemplate 优先返回引用的共享模板内容，否则回退内联自定义，最后回退内置默认。
 func (s *Service) resolveOutputTemplate(ctx context.Context, p *domainaidigest.Profile) string {
 	if p.OutputTemplateID > 0 && s.repo != nil {
@@ -446,6 +460,7 @@ type ProfileInput struct {
 	Name             string
 	Enabled          bool
 	SourceIDs        []int64
+	FilterID         int64
 	Conditions       []domainrule.ConditionConfig
 	Schedule         domainaidigest.ScheduleConfig
 	Window           domainaidigest.WindowConfig
@@ -744,6 +759,7 @@ func (s *Service) createDeliveryTasks(ctx context.Context, p *domainaidigest.Pro
 
 func (s *Service) filterMessages(ctx context.Context, p *domainaidigest.Profile, runID int64, msgs []*domainmessage.NormalizedMessage) ([]*domainaidigest.RunItem, []*domainmessage.NormalizedMessage) {
 	limits := normalizedLimits(p.Limits)
+	conditions := s.resolveConditions(ctx, p)
 	items := make([]*domainaidigest.RunItem, 0, len(msgs))
 	included := make([]*domainmessage.NormalizedMessage, 0, len(msgs))
 	seen := map[string]struct{}{}
@@ -755,7 +771,7 @@ func (s *Service) filterMessages(ctx context.Context, p *domainaidigest.Profile,
 			reason = "empty_text"
 		}
 		if reason == "" {
-			ok, err := s.matchesConditions(ctx, msg, p.Conditions)
+			ok, err := s.matchesConditions(ctx, msg, conditions)
 			if err != nil {
 				reason = "condition_error: " + err.Error()
 			} else if !ok {
@@ -1050,6 +1066,11 @@ func (s *Service) validateProfile(ctx context.Context, p *domainaidigest.Profile
 			return fmt.Errorf("引用的输出模板不存在 (id=%d): %w", p.OutputTemplateID, err)
 		}
 	}
+	if p.FilterID > 0 && s.filters != nil {
+		if _, err := s.filters.GetByID(ctx, p.FilterID); err != nil {
+			return fmt.Errorf("引用的过滤器不存在 (id=%d): %w", p.FilterID, err)
+		}
+	}
 	p.Dedupe.Enabled = true
 	p.Limits = normalizedLimits(p.Limits)
 	for _, cfg := range p.Conditions {
@@ -1237,6 +1258,7 @@ func profileFromInput(id int64, in ProfileInput) *domainaidigest.Profile {
 		Name:             in.Name,
 		Enabled:          in.Enabled,
 		SourceIDs:        in.SourceIDs,
+		FilterID:         in.FilterID,
 		Conditions:       in.Conditions,
 		Schedule:         in.Schedule,
 		Window:           in.Window,

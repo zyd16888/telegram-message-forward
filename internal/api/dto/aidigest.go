@@ -119,6 +119,7 @@ type AIDigestProfileDTO struct {
 	Name             string                        `json:"name"`
 	Enabled          bool                          `json:"enabled"`
 	SourceIDs        []int64                       `json:"source_ids"`
+	FilterID         int64                         `json:"filter_id"`
 	Conditions       []domainrule.ConditionConfig  `json:"conditions"`
 	Schedule         domainaidigest.ScheduleConfig `json:"schedule"`
 	Window           domainaidigest.WindowConfig   `json:"window"`
@@ -139,6 +140,7 @@ type AIDigestProfileRequest struct {
 	Name             string                        `json:"name"`
 	Enabled          bool                          `json:"enabled"`
 	SourceIDs        []int64                       `json:"source_ids"`
+	FilterID         int64                         `json:"filter_id"`
 	Conditions       []domainrule.ConditionConfig  `json:"conditions"`
 	Schedule         domainaidigest.ScheduleConfig `json:"schedule"`
 	Window           domainaidigest.WindowConfig   `json:"window"`
@@ -163,6 +165,7 @@ func NewAIDigestProfileDTO(p *domainaidigest.Profile) AIDigestProfileDTO {
 		Name:             p.Name,
 		Enabled:          p.Enabled,
 		SourceIDs:        p.SourceIDs,
+		FilterID:         p.FilterID,
 		Conditions:       p.Conditions,
 		Schedule:         p.Schedule,
 		Window:           p.Window,
@@ -185,6 +188,7 @@ func (r AIDigestProfileRequest) ToInput() appaidigest.ProfileInput {
 		Name:             r.Name,
 		Enabled:          r.Enabled,
 		SourceIDs:        r.SourceIDs,
+		FilterID:         r.FilterID,
 		Conditions:       r.Conditions,
 		Schedule:         r.Schedule,
 		Window:           r.Window,
