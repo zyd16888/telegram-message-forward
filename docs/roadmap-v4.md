@@ -6,6 +6,38 @@ v4 的目标是新增一条通用的 **AI 整理旁路**：原始消息继续按
 
 本功能不绑定股票或财经场景。财经新闻、普通新闻、RSS 订阅、技术资讯、群聊讨论、Webhook 输入都应通过同一套 AI Profile 配置表达。
 
+## 当前状态快照
+
+> 更新日期：2026-07-05
+
+**已完成（本轮）**
+
+- **V4-1 到 V4-5 主链路已落地**：AI Provider 配置、OpenAI-compatible HTTP client、AI Profile CRUD、草稿预览、已保存 Profile 预览、手动执行、AI 输出快照直投、重新投递、interval/daily 进程内调度均已实现。
+- **V4-6 观测与调优已完成基础闭环**：Profile 列表展示最近 run，Run 详情展示纳入/排除消息、AI 输出、token usage、delivery task ids；Dashboard 增加 AI 整理概况；提供运行记录清理 API 与页面操作。
+- **数据库迁移已执行到版本 14**：
+  - `00013_ai_digest.sql`：新增 `ai_digest_profiles`、`ai_digest_runs`、`ai_digest_run_items`、`ai_digest_outputs`，以及 `messages(source_id, received_at)` 索引。
+  - `00014_delivery_task_origin.sql`：扩展 `delivery_tasks` 支持 `origin_type/origin_id` 与 `message_snapshot` 直投，`message_id/rule_id` 对 AI 来源可空。
+- **验证已完成**：`go test ./...`、`go vet ./...`、`go build ./...`、`cd web && npm run build` 全部通过。
+- **本地 E2E 已完成**：使用本地 mock OpenAI-compatible provider 与 mock Webhook Sink，验证 Provider test、Webhook Source 入库、草稿预览、手动执行、AI 输出生成 delivery task、worker 投递成功；验证结果中 AI 投递任务 `message_id=0/rule_id=0`，说明快照直投路径生效。
+- **提交记录**：
+  - `036b0e5 feat: 新增 AI 整理后端链路`
+  - `992d3cb feat: 新增 AI 整理管理页面`
+
+**待真实外部联调**
+
+- [ ] 真实 AI provider key 联调：当前仅用本地 mock 验证 OpenAI-compatible 协议路径，未调用真实模型供应商。
+- [ ] 真实外部 Sink 联调：当前仅用本地 mock Webhook Sink 验证投递，未向企业微信、邮件、ntfy、Webhook 等真实生产渠道发送测试消息。
+- [ ] 大窗口/高频 Profile 的成本与性能压测：当前完成功能与基础限制，尚未做大量消息窗口下的成本评估。
+
+**已知待补 / 调优项**
+
+- [ ] V4-6 的“复制输出”按钮尚未实现。
+- [ ] V4-6 的“从 run 复制为新的 prompt/profile”尚未实现。
+- [ ] Profile 列表当前展示最近 run 状态与时间，未专门展示耗时字段。
+- [ ] Profile 列表当前展示调度配置，未专门展示下一次预计运行时间。
+- [ ] `max_messages_per_run` 超限会写入 excluded reason；单条文本与 prompt 字符上限当前以截断方式处理，未为截断单独生成 excluded item。
+- [ ] Sink 禁用时 AI 投递创建阶段会跳过该 Sink；如需“禁用 Sink 也生成 cancelled delivery task 方便审计”，需另行调整语义。
+
 ## 0. 口径与约束
 
 - 默认使用简体中文沟通。
@@ -126,7 +158,7 @@ AI Profile Scheduler / Manual Run
   -> Prompt 构造
   -> AI Provider 调用
   -> ai_digest_outputs 保存结果
-  -> 结果转换为内部消息或直接创建 delivery tasks
+  -> 以 message_snapshot 直接创建 origin_type=ai_digest 的 delivery tasks
   -> 投递到 target sinks
 ```
 
@@ -171,7 +203,7 @@ CREATE TABLE ai_digest_profiles (
     source_ids          jsonb NOT NULL DEFAULT '[]'::jsonb,
     conditions          jsonb NOT NULL DEFAULT '[]'::jsonb,
     schedule            jsonb NOT NULL DEFAULT '{}'::jsonb,
-    window              jsonb NOT NULL DEFAULT '{}'::jsonb,
+    "window"            jsonb NOT NULL DEFAULT '{}'::jsonb,
     dedupe              jsonb NOT NULL DEFAULT '{}'::jsonb,
     prompt_template     text NOT NULL,
     output_format       text NOT NULL DEFAULT 'markdown'
@@ -189,7 +221,7 @@ CREATE TABLE ai_digest_profiles (
 ```sql
 CREATE TABLE ai_digest_runs (
     id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    profile_id            bigint NOT NULL REFERENCES ai_digest_profiles(id) ON DELETE CASCADE,
+    profile_id            bigint REFERENCES ai_digest_profiles(id) ON DELETE CASCADE,
     status                text NOT NULL
                           CHECK (status IN ('pending','running','success','failed','cancelled')),
     trigger_type          text NOT NULL DEFAULT 'manual'
@@ -199,7 +231,6 @@ CREATE TABLE ai_digest_runs (
     input_message_count   integer NOT NULL DEFAULT 0,
     included_count        integer NOT NULL DEFAULT 0,
     excluded_count        integer NOT NULL DEFAULT 0,
-    output_message_id     bigint REFERENCES messages(id) ON DELETE SET NULL,
     delivery_task_ids     jsonb NOT NULL DEFAULT '[]'::jsonb,
     model_name            text,
     token_usage           jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -208,7 +239,12 @@ CREATE TABLE ai_digest_runs (
     finished_at           timestamptz,
     created_at            timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX idx_ai_digest_runs_profile ON ai_digest_runs (profile_id, created_at DESC);
 ```
+
+说明：运行记录列表和「同一 profile 防并发」检查（查询是否存在 running run）都依赖 `(profile_id, created_at)` 索引。不设 `output_message_id`：v4 第一轮 AI 输出不落 `messages` 表（见 9.2），输出通过 `ai_digest_outputs.run_id` 关联即可。
+
+实现说明：草稿预览不强制保存 Profile，因此 `profile_id` 允许为空；已保存 Profile 的预览、手动执行和定时执行仍会关联实际 Profile。
 
 ### 4.3 ai_digest_run_items
 
@@ -242,7 +278,41 @@ CREATE TABLE ai_digest_outputs (
 CREATE UNIQUE INDEX idx_ai_digest_outputs_run ON ai_digest_outputs (run_id);
 ```
 
-### 4.5 设置表复用
+### 4.5 delivery_tasks 扩展
+
+现有 `delivery_tasks` 的 `message_id`、`rule_id` 均为 NOT NULL 外键，且有 `UNIQUE (message_id, rule_id, sink_id)`。AI 输出没有对应的 message 行和 rule 行，因此投递前必须先做一次 schema 扩展（归入 V4-4 里程碑）：
+
+```sql
+ALTER TABLE delivery_tasks ALTER COLUMN message_id DROP NOT NULL;
+ALTER TABLE delivery_tasks ALTER COLUMN rule_id DROP NOT NULL;
+ALTER TABLE delivery_tasks
+    ADD COLUMN origin_type text NOT NULL DEFAULT 'rule'
+    CHECK (origin_type IN ('rule','ai_digest'));
+ALTER TABLE delivery_tasks ADD COLUMN origin_id bigint;
+
+-- rule 来源保持原有幂等语义；ai_digest 来源允许重新投递创建新任务
+ALTER TABLE delivery_tasks
+    DROP CONSTRAINT delivery_tasks_message_id_rule_id_sink_id_key;
+CREATE UNIQUE INDEX idx_delivery_tasks_rule_unique
+    ON delivery_tasks (message_id, rule_id, sink_id)
+    WHERE origin_type = 'rule';
+CREATE INDEX idx_delivery_tasks_origin
+    ON delivery_tasks (origin_type, origin_id);
+
+ALTER TABLE delivery_tasks ADD CONSTRAINT chk_delivery_tasks_origin CHECK (
+    (origin_type = 'rule' AND message_id IS NOT NULL AND rule_id IS NOT NULL)
+    OR (origin_type = 'ai_digest' AND origin_id IS NOT NULL
+        AND message_snapshot IS NOT NULL)
+);
+```
+
+约定：
+
+- `origin_type = 'ai_digest'` 时，`origin_id` 指向 `ai_digest_runs.id`，任务必须携带 `message_snapshot`（dispatch worker 已优先消费 snapshot）。
+- worker 侧需要兼容 `message_id` 为空的任务：snapshot 为空且 `message_id` 为空时直接判定任务失败，不回查 messages。
+- ai_digest 来源不加唯一约束，重新投递（`/runs/:id/deliver`）由 app service 控制频率，天然允许创建新任务。
+
+### 4.6 设置表复用
 
 AI provider 的全局配置优先复用现有 `settings` 表：
 
@@ -381,6 +451,11 @@ cron        后置，不进入第一轮
 - `interval`
 - `daily`
 
+时区约定：
+
+- `schedule` 配置必须带 `timezone` 字段（IANA 名称，例如 `Asia/Shanghai`），`daily` 按该时区计算执行时刻。
+- 未配置时默认使用服务进程时区，但 UI 必须显式展示实际生效的时区，避免容器内 UTC 与用户本地时间错位。
+
 ### 7.2 window 类型
 
 ```text
@@ -393,6 +468,8 @@ fixed_daily      当天固定时间段
 
 - `last_duration`
 - `since_last_run`
+
+窗口一律基于 `received_at` 划分（原因见 8.1）。`since_last_run` 以上次成功 run 的 `window_end` 作为本次 `window_start`，保证多次 run 之间不重不漏。
 
 ### 7.3 调度实现
 
@@ -413,11 +490,13 @@ v4 第一轮仍使用单体进程内 scheduler，不引入外部 MQ。
 基于 `messages` 表选择窗口内消息：
 
 - `source_id IN profile.source_ids`
-- `sent_at` 优先，缺失时用 `received_at`
-- 窗口闭区间建议 `[window_start, window_end)`
+- 窗口一律按 `received_at` 划分，区间 `[window_start, window_end)`。入库时间连续、单调且不可空，能保证多次 run 之间不重不漏。
+- `sent_at` 只用于 prompt 内的时间展示和消息排序，不参与窗口过滤。
 - 默认排除空文本消息；有媒体但无文本的消息可以用媒体摘要进入输入。
 
-需要为 `messages(source_id, sent_at)` 已有索引继续复用；如查询使用 `received_at` 较多，再新增索引。
+不用 `sent_at` 划窗的原因：消息入库存在延迟（RSS 轮询间隔、Telegram 断线补拉、Webhook 重试），按 `sent_at` 划窗会永久漏掉「发送时间落在旧窗口、但入库晚于该窗口 run 时刻」的消息；且 `sent_at` 可空，混合列查询无法稳定利用索引。
+
+现有索引只有 `messages(source_id, sent_at)`，V4-3 需新增 migration 建 `messages(source_id, received_at)` 索引支撑窗口查询。
 
 ### 8.2 条件过滤
 
@@ -427,13 +506,15 @@ v4 第一轮仍使用单体进程内 scheduler，不引入外部 MQ。
 - `keyword_excludes`
 - `regex`
 - `message_type`
-- `source`
 - `sender`
 - `has_media`
 - `media_type`
 - `message_length`
 
-注意：AI Profile 的 conditions 用于选择进入 AI 输入的消息，不影响原始转发规则。
+注意：
+
+- AI Profile 的 conditions 用于选择进入 AI 输入的消息，不影响原始转发规则。
+- 不复用 `source` 条件：Profile 的 `source_ids` 已经完成来源筛选，再暴露 source 条件属于冗余配置面。
 
 ### 8.3 去重
 
@@ -454,26 +535,19 @@ AI 输出必须保存到 `ai_digest_outputs`，并关联 run。
 
 ### 9.2 投递策略
 
-建议将 AI 输出转换为一条内部 message，再复用现有 delivery queue：
+前提：现有 `delivery_tasks` 的 `message_id`、`rule_id` 均为 NOT NULL 外键并带 `UNIQUE (message_id, rule_id, sink_id)`，AI 输出既没有 message 行也没有 rule 行，**无论选哪条路都必须先做 4.5 的 delivery_tasks migration**，不存在零 schema 改动的方案。
 
-- 新增一个虚拟 Source 类型 `ai_digest`，或在 messages 表中保存 `source_id` 指向一个系统 Source。
-- `external_message_id` 可使用 run id。
-- `message_type = text`。
-- `text = output.content`。
-- `original_url` 留空。
-- `raw_payload` 保存 profile/run 元数据。
+两个候选方案：
 
-第一轮更简单的方式：
+1. **快照直投（v4 第一轮采用）**：app/aidigest 根据 target sink ids 直接创建 `origin_type=ai_digest` 的 delivery task，`origin_id` 记 run id，`message_snapshot` 使用 AI 输出构造的 `NormalizedMessage`（`message_type=text`，`text=output.content`）。依赖 4.5 migration：`message_id`/`rule_id` 可空 + origin 判别列。
+2. **系统 Source**：新增 `source_type='ai_digest'` 的系统 Source（00010 已把 `sources.account_id` 改为可空，扩展 CHECK 约束即可），AI 输出落一条 message（`external_message_id` 用 run id），再走 delivery。此方案让 AI 输出进入消息列表并可被规则二次处理，但同样绕不开 `rule_id NOT NULL` 的问题，且引入「AI 输出再触发规则」的回环风险，需要额外的防环设计。
 
-- 不新增系统 Source。
-- app/aidigest 直接根据 target sink ids 创建 delivery task，message_snapshot 使用 AI 输出构造的 `NormalizedMessage`。
+v4 第一轮结论：**快照直投 + 保存 output**。等确有「AI 输出参与消息列表 / 二次规则处理」的需求时，再评估系统 Source 方案并补防环设计。
 
-两种方式取舍：
+重新投递语义：
 
-- 如果希望 AI 输出也出现在消息列表、规则链路、后续二次处理里，选择系统 Source。
-- 如果只希望 AI 输出作为最终投递结果，选择直接创建 delivery task。
-
-v4 第一轮建议：**直接创建 delivery task + 保存 output**。等需要二次规则处理时再引入系统 Source。
+- `/runs/:id/deliver` 直接用已保存的 output 重建 snapshot 创建新任务，不重复调用 AI。
+- ai_digest 来源的任务不受 `(message_id, rule_id, sink_id)` 唯一约束限制（见 4.5 的 partial unique index），重复投递频率由 app service 控制。
 
 ### 9.3 输出渠道
 
@@ -494,6 +568,7 @@ GET    /api/v1/ai/digests/:id
 PUT    /api/v1/ai/digests/:id
 DELETE /api/v1/ai/digests/:id
 
+POST   /api/v1/ai/digests/preview
 POST   /api/v1/ai/digests/:id/preview
 POST   /api/v1/ai/digests/:id/run
 GET    /api/v1/ai/digests/:id/runs
@@ -505,6 +580,7 @@ POST   /api/v1/ai/runs/:id/deliver
 说明：
 
 - `preview` 调用 AI 但不投递，保存 run 可选；建议保存为 `trigger_type=preview`，方便对比效果。
+- `POST /api/v1/ai/digests/preview` 是草稿预览：请求体携带完整 Profile 草稿配置，不要求 Profile 已保存，支撑「保存前先看效果」的表单流程（见 11.2）；`:id/preview` 则基于已保存配置。两者共用同一条预览执行逻辑。
 - `run` 调用 AI 并投递。
 - `deliver` 用于把某次已生成 output 重新投递到 Profile target sinks。
 - `cancel` 第一轮只取消 pending/running 标记；如果 HTTP 请求已发出，可通过 context 尽量中断。
@@ -606,6 +682,7 @@ Dashboard 后续可增加：
 - 每次 output max_tokens。
 - provider timeout。
 - 每个 Profile 最小执行间隔，避免误配成高频刷模型。
+- preview（含草稿预览）同样计入频率限制，防止表单页连点预览刷 token。
 
 ## 13. 安全与隐私
 
@@ -623,109 +700,124 @@ Dashboard 后续可增加：
 
 目标：先打通可配置、可测试的 AI Provider。
 
-- [ ] 新增 `settings` 读写 AI provider 配置。
-- [ ] API 支持读取、保存、测试 provider。
-- [ ] `internal/infra/ai` 实现 OpenAI-compatible HTTP client。
-- [ ] API key 加密存储，响应只返回 `has_api_key`。
-- [ ] Provider 测试接口发送一条短测试 prompt，并返回脱敏结果。
-- [ ] 前端 Settings 或 AI 页面提供 Provider 配置表单。
+- [x] 新增 `settings` 读写 AI provider 配置。
+- [x] API 支持读取、保存、测试 provider。
+- [x] `internal/infra/ai` 实现 OpenAI-compatible HTTP client。
+- [x] API key 加密存储，响应只返回 `has_api_key`。
+- [x] Provider 测试接口发送一条短测试 prompt，并返回脱敏结果。
+- [x] 前端 AI 页面提供 Provider 配置表单。
 
 验收：
 
-- `go test ./...`、`go vet ./...`、`go build ./...` 通过。
-- 改前端则 `cd web && npm run build` 通过。
-- 未配置 api key 时测试返回可读错误。
-- api key 不出现在 API 响应、日志、git diff。
+- [x] `go test ./...`、`go vet ./...`、`go build ./...` 通过。
+- [x] 改前端则 `cd web && npm run build` 通过。
+- [x] 未配置 api key 时测试返回可读错误。
+- [x] api key 不出现在 API 响应、日志、git diff。
+
+进度说明（2026-07-05）：Provider 配置复用 `settings.key=ai.provider`，API key 存入 `secret_encrypted`；本地 mock provider 已通过 `/ai/provider/test` 验证。
 
 ### V4-2 AI Digest Profile CRUD
 
 目标：建立通用 Profile 配置能力。
 
-- [ ] 新增 migration：`ai_digest_profiles`。
-- [ ] 新增 domain/app/repository/API。
-- [ ] 支持 Profile CRUD。
-- [ ] 支持 source_ids、conditions、window、schedule、prompt_template、target_sink_ids、model_config、limits。
-- [ ] 前端新增「AI 整理」页面和 Profile 表单。
+- [x] 新增 migration：`ai_digest_profiles`。
+- [x] 新增 domain/app/repository/API。
+- [x] 支持 Profile CRUD。
+- [x] 支持 source_ids、conditions、window、schedule、prompt_template、target_sink_ids、model_config、limits。
+- [x] 前端新增「AI 整理」页面和 Profile 表单。
 
 验收：
 
-- Profile 能创建、编辑、启停、删除。
-- DTO 不复用 GORM model。
-- handler 不直接访问 DB。
-- 表单不要求用户写 JSON。
+- [x] Profile 能创建、编辑、启停、删除。
+- [x] DTO 不复用 GORM model。
+- [x] handler 不直接访问 DB。
+- [x] 表单不要求用户写 JSON。
+
+进度说明（2026-07-05）：`internal/domain/aidigest`、`internal/app/aidigest`、`internal/storage/repository/aidigest_repository.go`、`internal/api/handler/aidigest_handler.go` 与 `web/src/pages/AIDigestsPage.vue` 已落地。
 
 ### V4-3 手动预览
 
 目标：用户能在不投递的情况下验证整理效果。
 
-- [ ] 新增 migration：`ai_digest_runs`、`ai_digest_run_items`、`ai_digest_outputs`。
-- [ ] 实现窗口消息查询。
-- [ ] 复用 condition 过滤消息。
-- [ ] 实现轻量去重。
-- [ ] 构造 prompt。
-- [ ] 调用 AI provider。
-- [ ] 保存 preview run、items、output。
-- [ ] 前端显示预览结果、纳入消息、排除原因。
+- [x] 新增 migration：`ai_digest_runs`、`ai_digest_run_items`、`ai_digest_outputs`，以及 `messages(source_id, received_at)` 索引。
+- [x] 实现基于 `received_at` 的窗口消息查询。
+- [x] 支持草稿预览端点（未保存 Profile 也能预览）。
+- [x] 复用 condition 过滤消息。
+- [x] 实现轻量去重。
+- [x] 构造 prompt。
+- [x] 调用 AI provider。
+- [x] 保存 preview run、items、output。
+- [x] 前端显示预览结果、纳入消息、排除原因。
 
 验收：
 
-- 预览不创建 delivery task。
-- AI 失败只记录 run failed，不影响原始消息。
-- 输出必须带来源编号。
-- 超限消息有 excluded reason。
+- [x] 预览不创建 delivery task。
+- [x] AI 失败只记录 run failed，不影响原始消息。
+- [x] 输出必须带来源编号。
+- [~] 超限消息有 excluded reason。
+
+进度说明（2026-07-05）：本地 E2E 已验证草稿预览成功，纳入 1 条 Webhook Source 消息并保存 output。`max_messages_per_run` 超限会写入 excluded reason；单条字符与 prompt 总字符上限当前按截断处理。
 
 ### V4-4 手动执行与投递
 
 目标：AI 输出可以投递到指定 Sink。
 
-- [ ] Profile 配置 target_sink_ids。
-- [ ] 手动 run 成功后为每个 target sink 创建 delivery task。
-- [ ] message_snapshot 使用 AI 输出构造。
-- [ ] run 记录 delivery_task_ids。
-- [ ] 支持对已生成 output 重新投递。
-- [ ] 前端运行详情展示投递状态入口。
+- [x] 新增 migration：`delivery_tasks` 扩展 origin_type/origin_id、放开 message_id/rule_id 非空约束、调整唯一约束（见 4.5）。
+- [x] dispatch worker 兼容 message_id 为空、只带 snapshot 的任务。
+- [x] Profile 配置 target_sink_ids。
+- [x] 手动 run 成功后为每个 target sink 创建 origin_type=ai_digest 的 delivery task。
+- [x] message_snapshot 使用 AI 输出构造。
+- [x] run 记录 delivery_task_ids。
+- [x] 支持对已生成 output 重新投递。
+- [x] 前端运行详情展示投递状态入口。
 
 验收：
 
-- 原消息实时转发不受影响。
-- AI 输出能投递到单独 Sink。
-- Sink 禁用、模板格式不支持等错误走现有 delivery 机制。
-- 手动重新投递不会重新调用 AI。
+- [x] 原消息实时转发不受影响。
+- [x] AI 输出能投递到单独 Sink。
+- [~] Sink 禁用、模板格式不支持等错误走现有 delivery 机制。
+- [x] 手动重新投递不会重新调用 AI。
+
+进度说明（2026-07-05）：本地 E2E 已验证手动执行成功创建 `origin_type=ai_digest` 投递任务并由 worker 投递成功。当前实现对禁用 Sink 在创建阶段跳过，不创建 cancelled 任务；模板格式不兼容仍沿用 worker 校验路径。
 
 ### V4-5 定时执行
 
 目标：Profile 能按 interval/daily 自动生成整理。
 
-- [ ] 新增 app/aidigest scheduler。
-- [ ] 服务启动时加载 enabled profiles。
-- [ ] 每分钟 tick 检查到期任务。
-- [ ] 防止同一 Profile 并发运行。
-- [ ] 支持 interval 和 daily。
-- [ ] 支持 since_last_run 和 last_duration 窗口。
-- [ ] 前端展示下一次预计运行时间。
+- [x] 新增 app/aidigest scheduler。
+- [x] 服务启动时加载 enabled profiles。
+- [x] 每分钟 tick 检查到期任务。
+- [x] 防止同一 Profile 并发运行。
+- [x] 支持 interval 和 daily，daily 按 schedule.timezone 计算执行时刻。
+- [x] 支持 since_last_run 和 last_duration 窗口（按 received_at 划分，since_last_run 衔接上次 window_end）。
+- [~] 前端展示下一次预计运行时间和生效时区。
 
 验收：
 
-- 重启服务不会补跑大量历史窗口。
-- 同一 profile 不会并发创建两个 running run。
-- provider 失败会记录错误，下一轮仍可继续。
+- [x] 重启服务不会补跑大量历史窗口。
+- [x] 同一 profile 不会并发创建两个 running run。
+- [x] provider 失败会记录错误，下一轮仍可继续。
+
+进度说明（2026-07-05）：scheduler 已随服务启动，每分钟扫描 enabled profiles。前端 Profile 表单可配置 schedule/timezone，列表展示调度配置；下一次预计运行时间字段已在后端 Profile DTO 中预留并计算，但列表尚未独立展示该字段。
 
 ### V4-6 可观测性与调优
 
 目标：让 AI 整理可解释、可调优。
 
-- [ ] Profile 列表展示最近运行状态、耗时、错误。
-- [ ] Run 详情展示 input/included/excluded/output/token usage/delivery tasks。
+- [~] Profile 列表展示最近运行状态、耗时、错误。
+- [x] Run 详情展示 input/included/excluded/output/token usage/delivery tasks。
 - [ ] 支持复制输出。
 - [ ] 支持从 run 复制为新的 prompt/profile。
-- [ ] Dashboard 可选展示 AI 近 24 小时成功率和 token usage。
-- [ ] 增加运行记录清理策略。
+- [~] Dashboard 可选展示 AI 近 24 小时成功率和 token usage。
+- [x] 增加运行记录清理策略。
 
 验收：
 
-- 用户不查数据库也能知道某条消息为什么没进入摘要。
-- 用户能比较不同 prompt 的输出效果。
-- 长期运行不会无限增长无用运行记录。
+- [x] 用户不查数据库也能知道某条消息为什么没进入摘要。
+- [~] 用户能比较不同 prompt 的输出效果。
+- [x] 长期运行不会无限增长无用运行记录。
+
+进度说明（2026-07-05）：Run 详情已展示纳入/排除消息、输出和 token usage；Dashboard 已展示 AI 整理概况，但当前统计基于各 Profile 最近 run，不是完整 24 小时 run 聚合。复制输出、从 run 复制为新 prompt/profile 尚未实现。
 
 ## 15. 推荐提交拆分
 
@@ -738,10 +830,11 @@ Dashboard 后续可增加：
 5. `feat: 新增 AI 整理管理页面`
 6. `feat: 支持 AI 整理预览`
 7. `feat: 记录 AI 整理运行明细`
-8. `feat: 支持 AI 整理结果投递`
-9. `feat: 支持 AI Profile 定时执行`
-10. `feat: 补强 AI 整理运行观测`
-11. `docs: 补充 AI 整理使用说明`
+8. `feat: 扩展投递任务支持 AI 来源`
+9. `feat: 支持 AI 整理结果投递`
+10. `feat: 支持 AI Profile 定时执行`
+11. `feat: 补强 AI 整理运行观测`
+12. `docs: 补充 AI 整理使用说明`
 
 每个 commit 必须保持可编译、可测试。
 
@@ -790,7 +883,15 @@ git diff --check
 - docs/roadmap-v4.md
 
 目标：
-按 docs/roadmap-v4.md 推进通用 AI 整理与 Briefing 功能。采用目标模式持续推进，直到 AI Profile 可以手动预览、手动投递、定时执行，并且原始消息转发链路不受影响。
+按 docs/roadmap-v4.md 一次性推进完通用 AI 整理与 Briefing 功能，覆盖 V4-1 到 V4-6 全部里程碑，直到 AI Profile 可以手动预览、手动投递、定时执行，并且原始消息转发链路不受影响。中途不要停下来向用户请示或等待确认，遇到报错、编译失败、接口不通就自行调试解决后继续推进；只有在缺少只有用户才能提供的凭证，或出现路线图未覆盖的方向性架构分歧时才停下来提问。
+
+运行与调试授权：
+- 授权在本机开发环境自由运行和调试本项目，该运行运行，该调试调试，不需要逐步请示。
+- 后端直接使用仓库现有 configs/config.yaml 启动：go run ./cmd/server；数据库 migration 用 go run ./cmd/migrate。
+- 前端启动：cd web && npm run dev。
+- 数据库等依赖如未运行，可用 docker compose 启动，但不得修改、覆盖或提交用户对 docker-compose.yml 的已有改动。
+- 可以自由重启服务、查看日志、调用本地 API、用浏览器调试工具打开前端页面做端到端验证。
+- 授权范围仅限本机开发环境；不得对外部生产渠道做破坏性操作，不得把测试消息投递到真实生产 Sink，除非用户明确要求。
 
 必须遵守：
 - 默认中文沟通。
@@ -817,23 +918,26 @@ git diff --check
    - 表单支持 source、conditions、window、schedule、prompt、target sinks、model limits。
 
 3. 手动预览：
-   - 新增 ai_digest_runs / ai_digest_run_items / ai_digest_outputs。
-   - 从 messages 按窗口查询。
+   - 新增 ai_digest_runs / ai_digest_run_items / ai_digest_outputs，以及 messages(source_id, received_at) 索引。
+   - 从 messages 按 received_at 窗口查询。
    - 复用 condition 过滤。
    - 轻量去重。
    - 构造 prompt 并调用 AI。
    - 保存 preview run 和 output。
+   - 提供草稿预览端点，未保存 Profile 也能预览。
    - 前端展示纳入消息、排除原因、AI 输出。
 
 4. 手动执行与投递：
-   - AI 输出生成 delivery task，投递到 target sinks。
+   - 先做 delivery_tasks 扩展 migration：origin_type/origin_id、message_id/rule_id 可空、唯一约束按 roadmap 4.5 调整。
+   - dispatch worker 兼容 message_id 为空、仅带 snapshot 的任务。
+   - AI 输出以 origin_type=ai_digest 生成 delivery task，投递到 target sinks。
    - run 记录 delivery_task_ids。
    - 支持已生成 output 重新投递，不重复调用 AI。
 
 5. 定时执行：
    - 新增 scheduler。
-   - 支持 interval/daily。
-   - 支持 last_duration/since_last_run。
+   - 支持 interval/daily，daily 按 schedule.timezone 计算执行时刻。
+   - 支持 last_duration/since_last_run，均按 received_at 划窗。
    - 防止同一 profile 并发执行。
    - 服务重启后不补跑大量历史窗口。
 
@@ -847,7 +951,8 @@ git diff --check
 - 每个 Go 阶段运行 go test ./...、go vet ./...、go build ./...。
 - 改 web 后运行 cd web && npm run build。
 - 只改文档时运行 git diff --check。
-- 如没有真实 AI provider key 或外部渠道凭证，最终说明未验证原因。
+- 除编译和测试外，用本地启动的后端和前端做端到端自测：配置 Provider、创建 Profile、跑草稿预览、手动执行、检查运行记录和投递任务状态，能实际调通的链路都要实际调通。
+- 如没有真实 AI provider key 或外部渠道凭证，对应链路可用本地 mock 或桩服务验证，并在最终说明中列出未做真实联调的项和原因。
 
 提交要求：
 - 按功能边界拆中文 commit。
@@ -856,5 +961,5 @@ git diff --check
 - 不 stage 用户已有的 docker-compose.yml 或其它无关改动。
 
 优先级：
-先完成 Provider 配置、Profile CRUD 和手动预览；确认 AI 输出质量后，再做投递和定时调度。
+按 V4-1 到 V4-6 顺序推进，一口气全部完成。预览完成后不需要停下来等用户确认输出质量，自测通过就继续做投递和定时调度；输出质量调优放在全链路跑通之后。
 ```
