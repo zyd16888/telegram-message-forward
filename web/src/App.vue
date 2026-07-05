@@ -103,6 +103,7 @@ async function logout() {
             collapse-mode="width"
             :native-scrollbar="false"
             class="sider"
+            :class="{ collapsed }"
           >
             <div class="brand" :class="{ collapsed }">
               <div class="brand-badge">
@@ -243,6 +244,7 @@ async function logout() {
 }
 
 .sider :deep(.n-menu-item-content) {
+  position: relative;
   border-radius: 10px !important;
   transition: box-shadow 0.16s ease, transform 0.16s ease, background-color 0.16s ease !important;
 }
@@ -253,8 +255,48 @@ async function logout() {
 }
 
 .sider :deep(.n-menu-item-content.n-menu-item-content--selected) {
-  box-shadow: var(--clay-inset-sm);
+  box-shadow: none;
   transform: none;
+}
+
+.sider :deep(.n-menu-item-content.n-menu-item-content--selected::before) {
+  position: absolute;
+  left: 8px;
+  top: 11px;
+  width: 3px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--clay-primary);
+  content: '';
+}
+
+.sider.collapsed :deep(.n-menu) {
+  padding: 12px 0;
+}
+
+.sider.collapsed :deep(.n-menu-item) {
+  display: flex;
+  justify-content: center;
+}
+
+.sider.collapsed :deep(.n-menu-item-content) {
+  width: 48px !important;
+  height: 48px !important;
+  margin: 0 auto;
+  padding: 0 !important;
+  justify-content: center;
+}
+
+.sider.collapsed :deep(.n-menu-item-content-header) {
+  display: none;
+}
+
+.sider.collapsed :deep(.n-menu-item-content__icon) {
+  margin: 0 !important;
+}
+
+.sider.collapsed :deep(.n-menu-item-content.n-menu-item-content--selected::before) {
+  display: none;
 }
 
 .main {

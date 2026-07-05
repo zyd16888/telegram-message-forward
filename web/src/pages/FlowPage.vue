@@ -580,7 +580,7 @@ onMounted(async () => {
   padding: 10px 12px;
   border-radius: 14px;
   background: var(--clay-surface);
-  box-shadow: var(--clay-extruded-sm);
+  box-shadow: var(--clay-out-sm);
 }
 
 .toolbar-filters {
@@ -605,9 +605,9 @@ onMounted(async () => {
 
 .toolbar-stats span {
   padding: 4px 9px;
+  border: 1px solid var(--clay-border);
   border-radius: 999px;
   background: var(--clay-surface-2);
-  box-shadow: var(--clay-inset-sm);
 }
 
 .stat-warn {
@@ -622,10 +622,10 @@ onMounted(async () => {
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 14px;
-  border: 0;
+  border: 1px solid color-mix(in srgb, var(--clay-primary) 32%, var(--clay-border));
   border-radius: 14px;
   background: var(--clay-primary-soft);
-  box-shadow: var(--clay-inset-sm);
+  box-shadow: none;
 }
 
 .context-label {
@@ -649,10 +649,10 @@ onMounted(async () => {
 }
 
 .board-column {
-  border: 0;
+  border: 1px solid var(--clay-border);
   border-radius: 14px;
   background: var(--clay-surface);
-  box-shadow: var(--clay-extruded-sm);
+  box-shadow: var(--clay-out-sm);
   overflow: hidden;
 }
 
@@ -661,9 +661,9 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 0;
+  border-bottom: 1px solid var(--clay-border);
   background: var(--clay-surface-2);
-  box-shadow: var(--clay-inset-sm);
+  box-shadow: none;
 }
 
 .column-title {
@@ -678,8 +678,8 @@ onMounted(async () => {
   border-radius: 999px;
   color: var(--clay-text-2);
   background: var(--clay-surface);
-  border: 0;
-  box-shadow: var(--clay-inset-sm);
+  border: 1px solid var(--clay-border);
+  box-shadow: none;
   font-size: 12px;
   font-weight: 700;
   text-align: center;
@@ -697,11 +697,11 @@ onMounted(async () => {
   width: 100%;
   min-width: 0;
   padding: 11px 12px;
-  border: 0;
+  border: 1px solid var(--clay-border);
   border-radius: 12px;
   color: inherit;
   background: var(--clay-surface);
-  box-shadow: var(--clay-extruded-sm);
+  box-shadow: var(--clay-out-sm);
   cursor: pointer;
   text-align: left;
   transition: opacity 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, background-color 0.16s ease;
@@ -709,20 +709,23 @@ onMounted(async () => {
 
 .node-card:hover,
 .node-card:focus-visible {
-  box-shadow: var(--clay-extruded-hover);
+  border-color: var(--clay-border-strong);
+  box-shadow: var(--clay-hover);
   transform: translateY(-1px);
   outline: none;
 }
 
 .node-card.selected {
+  border-color: var(--clay-primary);
   background: color-mix(in srgb, var(--clay-primary-soft) 55%, var(--clay-surface));
-  box-shadow: var(--clay-inset-deep), var(--clay-focus-ring);
-  transform: translateY(1px);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--clay-primary) 18%, transparent);
+  transform: none;
 }
 
 .node-card.linked {
+  border-color: color-mix(in srgb, var(--clay-primary) 40%, var(--clay-border));
   background: color-mix(in srgb, var(--clay-primary-soft) 25%, var(--clay-surface));
-  box-shadow: var(--clay-extruded-sm), 0 0 0 1px color-mix(in srgb, var(--clay-primary) 30%, transparent);
+  box-shadow: var(--clay-out-sm);
 }
 
 .node-card.dimmed {
@@ -742,7 +745,6 @@ onMounted(async () => {
   flex-shrink: 0;
   border-radius: 999px;
   background: var(--clay-border-strong);
-  box-shadow: var(--clay-inset-sm);
 }
 
 .status-dot.on {
@@ -770,11 +772,10 @@ onMounted(async () => {
 
 .node-tag {
   padding: 1px 8px;
-  border: 0;
+  border: 1px solid var(--clay-border);
   border-radius: 999px;
   color: var(--clay-text-2);
   background: var(--clay-surface-2);
-  box-shadow: var(--clay-inset-sm);
   font-size: 11px;
   font-weight: 600;
 }
@@ -815,7 +816,6 @@ onMounted(async () => {
   flex-shrink: 0;
   color: #b45309;
   background: var(--clay-warning-soft);
-  box-shadow: var(--clay-inset-sm);
   font-size: 12px;
   font-weight: 800;
 }
@@ -848,7 +848,6 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  box-shadow: var(--clay-inset-sm);
 }
 
 .pipe-chip.condition {
@@ -874,10 +873,9 @@ onMounted(async () => {
   gap: 10px;
   min-width: 0;
   padding: 5px 8px;
-  border: 0;
+  border: 1px solid var(--clay-border);
   border-radius: 10px;
   background: var(--clay-surface-2);
-  box-shadow: var(--clay-inset-sm);
   font-size: 12px;
 }
 
