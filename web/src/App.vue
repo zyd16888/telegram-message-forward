@@ -266,7 +266,15 @@ async function logout() {
   transform: none;
 }
 
-.sider :deep(.n-menu-item-content.n-menu-item-content--selected::before) {
+/* naive 的 ::before 是整块背景层且自带 background-color 过渡，不能挪作指示条：
+   取消选中时几何覆盖立即失效，残留的颜色过渡会把整块菜单项闪成主色。
+   选中态背景层保持透明，指示条改画在 ::after 上。 */
+.sider :deep(.n-menu-item-content.n-menu-item-content--selected::before),
+.sider :deep(.n-menu-item-content.n-menu-item-content--selected:hover::before) {
+  background-color: transparent;
+}
+
+.sider :deep(.n-menu-item-content.n-menu-item-content--selected::after) {
   position: absolute;
   left: 8px;
   top: 11px;
@@ -287,11 +295,16 @@ async function logout() {
 }
 
 .sider.collapsed :deep(.n-menu-item-content) {
+  /* naive-ui 的菜单项是 grid("icon content arrow")，图标列宽为 auto；
+     绝对定位图标时包含块会退化为 0 宽的 icon 网格区域导致 left:50% 失效，
+     因此收起态改为单区域网格并用 place-items 居中。 */
   width: 48px !important;
   height: 48px !important;
   margin: 0 auto;
   padding: 0 !important;
-  justify-content: center !important;
+  grid-template-areas: 'icon' !important;
+  grid-template-columns: 1fr !important;
+  place-items: center !important;
 }
 
 .sider.collapsed :deep(.n-menu-item-content-header) {
@@ -299,15 +312,11 @@ async function logout() {
 }
 
 .sider.collapsed :deep(.n-menu-item-content__icon) {
-  position: absolute !important;
-  left: 50% !important;
-  top: 50% !important;
-  display: grid !important;
-  place-items: center !important;
   width: 24px !important;
   height: 24px !important;
   margin: 0 !important;
-  transform: translate(-50%, -50%) !important;
+  display: grid !important;
+  place-items: center !important;
 }
 
 .sider.collapsed :deep(.n-menu-item-content__icon svg) {
@@ -315,7 +324,7 @@ async function logout() {
   margin: 0;
 }
 
-.sider.collapsed :deep(.n-menu-item-content.n-menu-item-content--selected::before) {
+.sider.collapsed :deep(.n-menu-item-content.n-menu-item-content--selected::after) {
   display: none;
 }
 
