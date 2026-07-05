@@ -246,16 +246,23 @@ async function logout() {
 .sider :deep(.n-menu-item-content) {
   position: relative;
   border-radius: 10px !important;
-  transition: box-shadow 0.16s ease, transform 0.16s ease, background-color 0.16s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+  transition: background-color 0.14s ease, color 0.14s ease !important;
 }
 
-.sider :deep(.n-menu-item-content:hover) {
-  box-shadow: var(--clay-extruded-sm);
-  transform: translateY(-1px);
+.sider :deep(.n-menu-item-content:hover),
+.sider :deep(.n-menu-item-content:active),
+.sider :deep(.n-menu-item-content:focus),
+.sider :deep(.n-menu-item-content:focus-visible),
+.sider :deep(.n-menu-item-content.n-menu-item-content--selected),
+.sider :deep(.n-menu-item-content.n-menu-item-content--selected:hover),
+.sider :deep(.n-menu-item-content.n-menu-item-content--selected:active) {
+  box-shadow: none !important;
+  transform: none !important;
 }
 
 .sider :deep(.n-menu-item-content.n-menu-item-content--selected) {
-  box-shadow: none;
   transform: none;
 }
 
