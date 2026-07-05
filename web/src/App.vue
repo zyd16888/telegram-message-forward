@@ -291,7 +291,7 @@ async function logout() {
   height: 48px !important;
   margin: 0 auto;
   padding: 0 !important;
-  justify-content: center;
+  justify-content: center !important;
 }
 
 .sider.collapsed :deep(.n-menu-item-content-header) {
@@ -299,7 +299,20 @@ async function logout() {
 }
 
 .sider.collapsed :deep(.n-menu-item-content__icon) {
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  display: grid !important;
+  place-items: center !important;
+  width: 24px !important;
+  height: 24px !important;
   margin: 0 !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.sider.collapsed :deep(.n-menu-item-content__icon svg) {
+  display: block;
+  margin: 0;
 }
 
 .sider.collapsed :deep(.n-menu-item-content.n-menu-item-content--selected::before) {
