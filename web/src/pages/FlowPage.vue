@@ -549,8 +549,9 @@ onMounted(async () => {
 }
 
 .setup-step:active {
-  box-shadow: var(--clay-inset-sm);
-  transform: translateY(1px);
+  box-shadow: var(--clay-inset-deep);
+  transform: scale(0.96);
+  transition-duration: 0.08s;
 }
 
 .setup-step.done {

@@ -256,11 +256,11 @@ onMounted(load)
   border: 0;
   border-radius: 14px;
   background: var(--clay-surface);
-  box-shadow: var(--clay-extruded);
+  box-shadow: var(--clay-extruded-sm);
   transition: box-shadow 0.22s ease-out, transform 0.22s ease-out;
 }
 .tile:hover {
-  box-shadow: var(--clay-extruded-hover);
+  box-shadow: var(--clay-hover);
   transform: translateY(-2px);
 }
 .tile-icon {
@@ -320,10 +320,10 @@ onMounted(load)
   color: #fff;
   background: linear-gradient(150deg, #56b0ea, #2f8fd6);
   box-shadow:
-    7px 7px 16px rgba(32, 117, 179, 0.26),
-    -5px -5px 14px rgba(255, 255, 255, 0.7),
-    inset 2px 2px 6px rgba(255, 255, 255, 0.28),
-    inset -4px -4px 10px rgba(22, 100, 160, 0.24);
+    4px 4px 10px rgba(32, 117, 179, 0.2),
+    -3px -3px 8px var(--clay-shadow-light),
+    inset 1px 1px 4px rgba(255, 255, 255, 0.22),
+    inset -2px -2px 6px rgba(22, 100, 160, 0.18);
   animation: clay-breathe 4.6s ease-in-out infinite;
 }
 .rate-value {
