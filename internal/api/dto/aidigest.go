@@ -85,6 +85,7 @@ type AIDigestProfileDTO struct {
 	Dedupe         domainaidigest.DedupeConfig   `json:"dedupe"`
 	PromptTemplate string                        `json:"prompt_template"`
 	OutputFormat   string                        `json:"output_format"`
+	OutputTemplate string                        `json:"output_template"`
 	TargetSinkIDs  []int64                       `json:"target_sink_ids"`
 	ModelConfig    domainaidigest.ModelConfig    `json:"model_config"`
 	Limits         domainaidigest.LimitsConfig   `json:"limits"`
@@ -103,6 +104,7 @@ type AIDigestProfileRequest struct {
 	Dedupe         domainaidigest.DedupeConfig   `json:"dedupe"`
 	PromptTemplate string                        `json:"prompt_template"`
 	OutputFormat   string                        `json:"output_format"`
+	OutputTemplate string                        `json:"output_template"`
 	TargetSinkIDs  []int64                       `json:"target_sink_ids"`
 	ModelConfig    domainaidigest.ModelConfig    `json:"model_config"`
 	Limits         domainaidigest.LimitsConfig   `json:"limits"`
@@ -125,6 +127,7 @@ func NewAIDigestProfileDTO(p *domainaidigest.Profile) AIDigestProfileDTO {
 		Dedupe:         p.Dedupe,
 		PromptTemplate: p.PromptTemplate,
 		OutputFormat:   p.OutputFormat,
+		OutputTemplate: p.OutputTemplate,
 		TargetSinkIDs:  p.TargetSinkIDs,
 		ModelConfig:    p.ModelConfig,
 		Limits:         p.Limits,
@@ -145,6 +148,7 @@ func (r AIDigestProfileRequest) ToInput() appaidigest.ProfileInput {
 		Dedupe:         r.Dedupe,
 		PromptTemplate: r.PromptTemplate,
 		OutputFormat:   r.OutputFormat,
+		OutputTemplate: r.OutputTemplate,
 		TargetSinkIDs:  r.TargetSinkIDs,
 		ModelConfig:    r.ModelConfig,
 		Limits:         r.Limits,

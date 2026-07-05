@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,6 +134,27 @@ func TestNextRunAfterCronUsesProfileAnchor(t *testing.T) {
 	want := time.Date(2026, 7, 5, 9, 0, 0, 0, loc)
 	if !next.Equal(want) {
 		t.Fatalf("next = %s, want %s", next, want)
+	}
+}
+
+func TestBuildPromptAppendsAndRendersOutputTemplate(t *testing.T) {
+	svc := NewService(Deps{})
+	run := &domainaidigest.Run{
+		WindowStart: time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC),
+		WindowEnd:   time.Date(2026, 7, 5, 9, 0, 0, 0, time.UTC),
+	}
+	profile := &domainaidigest.Profile{
+		Name:           "新闻简报",
+		PromptTemplate: "请整理消息：\n{{messages}}\n输出：{{output_format}}",
+		OutputFormat:   "markdown",
+		OutputTemplate: "## 标题\n先写标题，再写摘要。",
+	}
+	prompt := svc.buildPrompt(context.Background(), profile, run, nil)
+	if !strings.Contains(prompt, "输出结构模板：\n## 标题\n先写标题，再写摘要。") {
+		t.Fatalf("prompt should include rendered output template, got:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "{{output_template}}") {
+		t.Fatalf("prompt should not keep output_template placeholder, got:\n%s", prompt)
 	}
 }
 

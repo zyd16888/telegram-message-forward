@@ -2,6 +2,43 @@ package aidigest
 
 import domainaidigest "telegram-message-forward/internal/domain/aidigest"
 
+const groupDigestOutputTemplate = `# {{profile_name}}
+
+## 重点摘要
+- 输出 3-7 条重点摘要。
+- 每条摘要必须标注来源编号，例如 [#1]。
+
+## 主题归类
+按讨论主题分组，每组包含：
+- 主题名称
+- 关键内容
+- 相关来源编号
+
+## 待办与风险
+- 单独列出明确的待办、风险、问题和需要跟进的人或事项。
+- 如果没有明确待办或风险，写“暂无明确待办或风险”。
+
+## 低价值内容
+用一句话说明被忽略的寒暄、表情、重复转发或无上下文短句。`
+
+const dailyNewsOutputTemplate = `# 今日新闻总结
+
+## 今日要点
+用 3-7 条概括最重要的新闻，每条都标注来源编号。
+
+## 分主题整理
+按主题分组，例如国际、国内、科技、财经、行业动态；没有对应内容的主题不要硬凑。
+每个主题包含：
+- 重点事实
+- 简短背景
+- 来源编号
+
+## 进展与重复报道
+标出同一事件的进展关系、重复报道和仍不确定的信息。
+
+## 值得继续关注
+列出 3-5 项值得继续关注的事件、风险或后续进展。`
+
 func defaultPresets() []domainaidigest.Preset {
 	return []domainaidigest.Preset{
 		{
@@ -11,20 +48,23 @@ func defaultPresets() []domainaidigest.Preset {
 			PromptTemplate: `请把以下群消息整理成一份可直接阅读的简报。
 
 目标：
-1. 先给出 3-7 条重点摘要，每条都标注来源编号。
-2. 按主题归类列出讨论内容，合并重复信息。
-3. 单独列出明确的待办、风险、问题和需要跟进的人或事项。
-4. 忽略寒暄、表情、无上下文短句和重复转发。
-5. 只基于输入消息，不补充外部事实。
+1. 忽略寒暄、表情、无上下文短句和重复转发。
+2. 合并重复信息，不要重复罗列同一件事。
+3. 只基于输入消息，不补充外部事实。
+4. 严格按照输出结构模板输出。
 
 窗口：{{window_start}} 至 {{window_end}}
 来源：{{source_list}}
 消息数：{{message_count}}
 
+输出结构模板：
+{{output_template}}
+
 {{messages}}
 
 输出格式：{{output_format}}`,
-			OutputFormat: "markdown",
+			OutputFormat:   "markdown",
+			OutputTemplate: groupDigestOutputTemplate,
 			Schedule: domainaidigest.ScheduleConfig{
 				Type:            "interval",
 				IntervalMinutes: 60,
@@ -42,20 +82,22 @@ func defaultPresets() []domainaidigest.Preset {
 			PromptTemplate: `请把以下资讯消息整理成“今日新闻总结”。
 
 要求：
-1. 按主题分组，例如国际、国内、科技、财经、行业动态；没有对应内容的主题不要硬凑。
-2. 每个主题先列重点，再列简短背景，所有关键事实都标注来源编号。
-3. 标出重复报道、同一事件的进展关系，以及信息仍不确定的地方。
-4. 不要补充输入之外的事实，不要给投资、医疗、法律等建议。
-5. 末尾给出“值得继续关注”的 3-5 项。
+1. 所有关键事实都标注来源编号。
+2. 不要补充输入之外的事实，不要给投资、医疗、法律等建议。
+3. 严格按照输出结构模板输出。
 
 窗口：{{window_start}} 至 {{window_end}}
 来源：{{source_list}}
 消息数：{{message_count}}
 
+输出结构模板：
+{{output_template}}
+
 {{messages}}
 
 输出格式：{{output_format}}`,
-			OutputFormat: "markdown",
+			OutputFormat:   "markdown",
+			OutputTemplate: dailyNewsOutputTemplate,
 			Schedule: domainaidigest.ScheduleConfig{
 				Type:     "daily",
 				Time:     "09:00",

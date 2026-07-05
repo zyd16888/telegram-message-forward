@@ -254,6 +254,7 @@ type AIDigestProfile struct {
 	Dedupe         datatypes.JSON
 	PromptTemplate string
 	OutputFormat   string
+	OutputTemplate string
 	TargetSinkIDs  datatypes.JSON
 	ModelConfig    datatypes.JSON
 	Limits         datatypes.JSON

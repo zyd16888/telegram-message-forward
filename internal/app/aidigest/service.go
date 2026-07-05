@@ -35,7 +35,37 @@ const defaultPrompt = `请整理以下窗口内的消息，输出重点摘要、
 1. 只基于输入消息，不补充外部事实。
 2. 每条关键结论必须标注来源编号。
 3. 合并重复信息，低价值重复内容放到低优先级。
-4. 末尾保留“说明：以上内容仅基于本窗口内消息整理，未使用外部事实补全。”`
+4. 严格按照输出结构模板组织内容。
+5. 末尾保留“说明：以上内容仅基于本窗口内消息整理，未使用外部事实补全。”
+
+输出结构模板：
+{{output_template}}
+
+窗口：{{window_start}} 至 {{window_end}}
+来源：{{source_list}}
+消息数：{{message_count}}
+
+{{messages}}
+
+输出载体：{{output_format}}`
+
+const defaultOutputTemplate = `# {{profile_name}}
+
+## 一句话总结
+用 1 段话概括本窗口最重要的信息。
+
+## 重点摘要
+- 列出 3-7 条重点，每条都标注来源编号，例如 [#1]。
+- 合并重复消息，不要重复罗列同一件事。
+
+## 分类整理
+按主题分组整理，每组包含关键事实、背景线索和来源编号。
+
+## 待关注事项
+列出需要继续关注的问题、风险、待办或后续进展。
+
+## 说明
+以上内容仅基于本窗口内消息整理，未使用外部事实补全。`
 
 const systemPrompt = `你是信息整理助手。只能基于用户提供的消息内容整理，不要编造事实。
 如果输入不足以得出结论，请明确说明信息不足。
@@ -316,6 +346,7 @@ type ProfileInput struct {
 	Dedupe         domainaidigest.DedupeConfig
 	PromptTemplate string
 	OutputFormat   string
+	OutputTemplate string
 	TargetSinkIDs  []int64
 	ModelConfig    domainaidigest.ModelConfig
 	Limits         domainaidigest.LimitsConfig
@@ -354,6 +385,7 @@ func (s *Service) ListProfiles(ctx context.Context) ([]*domainaidigest.Profile, 
 		return nil, err
 	}
 	for _, p := range profiles {
+		normalizeProfileDefaults(p)
 		s.withNextRun(ctx, p)
 	}
 	return profiles, nil
@@ -364,6 +396,7 @@ func (s *Service) GetProfile(ctx context.Context, id int64) (*domainaidigest.Pro
 	if err != nil {
 		return nil, err
 	}
+	normalizeProfileDefaults(p)
 	return s.withNextRun(ctx, p), nil
 }
 
@@ -384,6 +417,7 @@ func (s *Service) PreviewProfile(ctx context.Context, id int64) (*domainaidigest
 	if err != nil {
 		return nil, err
 	}
+	normalizeProfileDefaults(p)
 	return s.execute(ctx, p, domainaidigest.TriggerPreview, false)
 }
 
@@ -392,6 +426,7 @@ func (s *Service) RunProfile(ctx context.Context, id int64, trigger domainaidige
 	if err != nil {
 		return nil, err
 	}
+	normalizeProfileDefaults(p)
 	return s.execute(ctx, p, trigger, true)
 }
 
@@ -678,6 +713,13 @@ func (s *Service) buildPrompt(ctx context.Context, p *domainaidigest.Profile, ru
 	if tmpl == "" {
 		tmpl = defaultPrompt
 	}
+	if !strings.Contains(tmpl, "{{output_template}}") {
+		tmpl += "\n\n输出结构模板：\n{{output_template}}"
+	}
+	outputTemplate := strings.TrimSpace(p.OutputTemplate)
+	if outputTemplate == "" {
+		outputTemplate = defaultOutputTemplate
+	}
 	sourceList := make([]string, 0, len(sourceNames))
 	for _, name := range sourceNames {
 		sourceList = append(sourceList, name)
@@ -691,6 +733,7 @@ func (s *Service) buildPrompt(ctx context.Context, p *domainaidigest.Profile, ru
 		"{{messages}}", "",
 		"{{source_list}}", strings.Join(sourceList, ", "),
 		"{{output_format}}", p.OutputFormat,
+		"{{output_template}}", outputTemplate,
 	)
 	basePrompt := staticReplacer.Replace(tmpl)
 	messageBudget := -1
@@ -709,6 +752,7 @@ func (s *Service) buildPrompt(ctx context.Context, p *domainaidigest.Profile, ru
 		"{{messages}}", messages,
 		"{{source_list}}", strings.Join(sourceList, ", "),
 		"{{output_format}}", p.OutputFormat,
+		"{{output_template}}", outputTemplate,
 	)
 	b.WriteString(replacer.Replace(tmpl))
 	if !strings.Contains(tmpl, "{{messages}}") {
@@ -874,21 +918,12 @@ func (s *Service) nextRunAfter(ctx context.Context, p *domainaidigest.Profile, f
 }
 
 func (s *Service) validateProfile(ctx context.Context, p *domainaidigest.Profile, preview bool) error {
-	p.Name = strings.TrimSpace(p.Name)
-	if p.Name == "" {
-		p.Name = "未命名 AI 整理"
-	}
+	normalizeProfileDefaults(p)
 	if len(p.SourceIDs) == 0 {
 		return errors.New("请至少选择一个输入 Source")
 	}
 	if !preview && len(p.TargetSinkIDs) == 0 {
 		return errors.New("请至少选择一个输出 Sink")
-	}
-	if p.OutputFormat == "" {
-		p.OutputFormat = "markdown"
-	}
-	if p.PromptTemplate == "" {
-		p.PromptTemplate = defaultPrompt
 	}
 	if p.Schedule.Type == "cron" {
 		if strings.TrimSpace(p.Schedule.Cron) == "" {
@@ -1099,9 +1134,29 @@ func profileFromInput(id int64, in ProfileInput) *domainaidigest.Profile {
 		Dedupe:         in.Dedupe,
 		PromptTemplate: in.PromptTemplate,
 		OutputFormat:   in.OutputFormat,
+		OutputTemplate: in.OutputTemplate,
 		TargetSinkIDs:  in.TargetSinkIDs,
 		ModelConfig:    in.ModelConfig,
 		Limits:         in.Limits,
+	}
+}
+
+func normalizeProfileDefaults(p *domainaidigest.Profile) {
+	if p == nil {
+		return
+	}
+	p.Name = strings.TrimSpace(p.Name)
+	if p.Name == "" {
+		p.Name = "未命名 AI 整理"
+	}
+	if strings.TrimSpace(p.OutputFormat) == "" {
+		p.OutputFormat = "markdown"
+	}
+	if strings.TrimSpace(p.PromptTemplate) == "" {
+		p.PromptTemplate = defaultPrompt
+	}
+	if strings.TrimSpace(p.OutputTemplate) == "" {
+		p.OutputTemplate = defaultOutputTemplate
 	}
 }
 

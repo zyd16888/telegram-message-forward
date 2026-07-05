@@ -43,6 +43,7 @@ type Profile struct {
 	Dedupe         DedupeConfig
 	PromptTemplate string
 	OutputFormat   string
+	OutputTemplate string
 	TargetSinkIDs  []int64
 	ModelConfig    ModelConfig
 	Limits         LimitsConfig
@@ -112,6 +113,7 @@ type Preset struct {
 	Description    string         `json:"description"`
 	PromptTemplate string         `json:"prompt_template"`
 	OutputFormat   string         `json:"output_format"`
+	OutputTemplate string         `json:"output_template"`
 	Schedule       ScheduleConfig `json:"schedule"`
 	Window         WindowConfig   `json:"window"`
 	Dedupe         DedupeConfig   `json:"dedupe"`

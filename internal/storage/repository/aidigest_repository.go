@@ -58,6 +58,7 @@ func (r *AIDigestRepository) UpdateProfile(ctx context.Context, p *domainaidiges
 			"dedupe":          m.Dedupe,
 			"prompt_template": m.PromptTemplate,
 			"output_format":   m.OutputFormat,
+			"output_template": m.OutputTemplate,
 			"target_sink_ids": m.TargetSinkIDs,
 			"model_config":    m.ModelConfig,
 			"limits":          m.Limits,
@@ -332,6 +333,7 @@ func toAIDigestProfileModel(p *domainaidigest.Profile) (*model.AIDigestProfile, 
 		Dedupe:         dedupe,
 		PromptTemplate: p.PromptTemplate,
 		OutputFormat:   p.OutputFormat,
+		OutputTemplate: p.OutputTemplate,
 		TargetSinkIDs:  targets,
 		ModelConfig:    modelCfg,
 		Limits:         limits,
@@ -347,6 +349,7 @@ func toAIDigestProfileDomain(m *model.AIDigestProfile) (*domainaidigest.Profile,
 	p.Enabled = m.Enabled
 	p.PromptTemplate = m.PromptTemplate
 	p.OutputFormat = m.OutputFormat
+	p.OutputTemplate = m.OutputTemplate
 	p.CreatedAt = m.CreatedAt
 	p.UpdatedAt = m.UpdatedAt
 	if err := unmarshalJSON(m.SourceIDs, &p.SourceIDs); err != nil {

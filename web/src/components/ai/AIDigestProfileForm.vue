@@ -42,8 +42,9 @@ const form = reactive<AIDigestProfileRequest>({
   window: { type: 'last_duration', duration_minutes: 60 },
   dedupe: { enabled: true },
   prompt_template:
-    '请整理以下窗口内的消息，输出重点摘要、分类列表和来源编号。\n\n{{messages}}\n\n输出格式：{{output_format}}',
+    '请整理以下窗口内的消息，严格按照输出结构模板组织内容。\n\n输出结构模板：\n{{output_template}}\n\n{{messages}}\n\n输出格式：{{output_format}}',
   output_format: 'markdown',
+  output_template: defaultOutputTemplate(),
   target_sink_ids: [],
   model_config: { provider_id: '', model: '', temperature: 0.2, max_tokens: 0 },
   limits: { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 0 },
@@ -87,6 +88,36 @@ const promptVariables = [
   { token: '{{message_count}}', label: '消息数量', desc: '最终纳入 Prompt 的消息条数。' },
   { token: '{{source_list}}', label: '来源列表', desc: '所选 Source 的名称列表。' },
   { token: '{{output_format}}', label: 'AI 输出格式', desc: '由本区域下方的“AI 输出格式”选择项决定。' },
+  { token: '{{output_template}}', label: '输出结构模板', desc: '由下方“结构模板”选择或自定义编辑。' },
+]
+const outputTemplatePresets = [
+  {
+    id: 'default',
+    name: '通用简报',
+    description: '适合大多数消息窗口，包含总结、摘要、分类和待关注事项。',
+    template: defaultOutputTemplate(),
+  },
+  {
+    id: 'news',
+    name: '新闻简报',
+    description: '适合资讯源、新闻频道和 RSS 摘要。',
+    template:
+      '# 今日新闻总结\n\n## 今日要点\n用 3-7 条概括最重要的新闻，每条都标注来源编号。\n\n## 分主题整理\n按主题分组，例如国际、国内、科技、财经、行业动态；没有对应内容的主题不要硬凑。\n每个主题包含：\n- 重点事实\n- 简短背景\n- 来源编号\n\n## 进展与重复报道\n标出同一事件的进展关系、重复报道和仍不确定的信息。\n\n## 值得继续关注\n列出 3-5 项值得继续关注的事件、风险或后续进展。',
+  },
+  {
+    id: 'group',
+    name: '群聊摘要',
+    description: '适合群聊和频道消息，突出讨论主题、待办和风险。',
+    template:
+      '# {{profile_name}}\n\n## 重点摘要\n- 输出 3-7 条重点摘要。\n- 每条摘要必须标注来源编号，例如 [#1]。\n\n## 主题归类\n按讨论主题分组，每组包含：\n- 主题名称\n- 关键内容\n- 相关来源编号\n\n## 待办与风险\n- 单独列出明确的待办、风险、问题和需要跟进的人或事项。\n- 如果没有明确待办或风险，写“暂无明确待办或风险”。\n\n## 低价值内容\n用一句话说明被忽略的寒暄、表情、重复转发或无上下文短句。',
+  },
+  {
+    id: 'tasks',
+    name: '待办提取',
+    description: '适合从聊天记录中提取事项、负责人和风险。',
+    template:
+      '# 待办提取\n\n## 结论摘要\n用 1 段话说明本窗口内最重要的事项。\n\n## 明确待办\n每项包含：\n- 事项\n- 负责人或相关人\n- 截止时间或触发条件\n- 来源编号\n\n## 待确认问题\n列出信息不足、需要追问或依赖外部确认的问题。\n\n## 风险提示\n列出可能影响执行的风险或阻塞点。',
+  },
 ]
 const baseInputVolumeOptions = [
   { label: '少量消息（最多 30 条）', value: 30 },
@@ -128,6 +159,27 @@ const selectedMessageLength = computed({
 })
 const promptCharCount = computed(() => [...form.prompt_template].length)
 const hasMessagesVariable = computed(() => form.prompt_template.includes(requiredMessagesVariable))
+const selectedOutputTemplatePreset = computed({
+  get: () => {
+    const matched = outputTemplatePresets.find((item) => item.template === form.output_template)
+    return matched?.id ?? 'custom'
+  },
+  set: (id: string) => {
+    const preset = outputTemplatePresets.find((item) => item.id === id)
+    if (!preset) return
+    form.output_template = preset.template
+  },
+})
+const outputTemplateOptions = computed(() => {
+  const options = outputTemplatePresets.map((item) => ({
+    label: `${item.name} - ${item.description}`,
+    value: item.id,
+  }))
+  if (selectedOutputTemplatePreset.value === 'custom') {
+    return [{ label: '自定义结构', value: 'custom' }, ...options]
+  }
+  return options
+})
 const promptSelection = reactive({ start: -1, end: -1 })
 
 watch(
@@ -149,8 +201,9 @@ function reset(): void {
     form.window = { type: 'last_duration', duration_minutes: 60 }
     form.dedupe = { enabled: true }
     form.prompt_template =
-      '请整理以下窗口内的消息，输出重点摘要、分类列表和来源编号。\n\n{{messages}}\n\n输出格式：{{output_format}}'
+      '请整理以下窗口内的消息，严格按照输出结构模板组织内容。\n\n输出结构模板：\n{{output_template}}\n\n{{messages}}\n\n输出格式：{{output_format}}'
     form.output_format = 'markdown'
+    form.output_template = defaultOutputTemplate()
     form.target_sink_ids = []
     form.model_config = { provider_id: defaultProviderID(), model: '', temperature: 0.2, max_tokens: 0 }
     form.limits = { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 0 }
@@ -166,6 +219,7 @@ function reset(): void {
     dedupe: { ...props.profile.dedupe },
     prompt_template: props.profile.prompt_template,
     output_format: props.profile.output_format,
+    output_template: props.profile.output_template || defaultOutputTemplate(),
     target_sink_ids: [...props.profile.target_sink_ids],
     model_config: { ...props.profile.model_config },
     limits: { ...props.profile.limits },
@@ -217,6 +271,7 @@ function applyPreset(id: string): void {
   if (!preset) return
   form.prompt_template = preset.prompt_template
   form.output_format = preset.output_format
+  form.output_template = preset.output_template || defaultOutputTemplate()
   form.schedule = { ...preset.schedule }
   form.window = { ...preset.window }
   form.dedupe = { ...preset.dedupe }
@@ -261,6 +316,7 @@ function payload(): AIDigestProfileRequest {
     dedupe: { ...form.dedupe },
     prompt_template: form.prompt_template,
     output_format: form.output_format,
+    output_template: form.output_template,
     target_sink_ids: [...form.target_sink_ids],
     model_config: { ...form.model_config, max_tokens: 0 },
     limits: { ...form.limits, max_prompt_chars: 0 },
@@ -280,6 +336,10 @@ function validate(forPreview = false): boolean {
     message.warning('请填写 Prompt')
     return false
   }
+  if (!form.output_template.trim()) {
+    message.warning('请填写输出结构模板')
+    return false
+  }
   if (form.schedule.type === 'cron' && !form.schedule.cron?.trim()) {
     message.warning('请填写 Cron 表达式')
     return false
@@ -295,6 +355,10 @@ function save(): void {
 function preview(): void {
   if (!validate(true)) return
   emit('preview', payload())
+}
+
+function defaultOutputTemplate(): string {
+  return '# {{profile_name}}\n\n## 一句话总结\n用 1 段话概括本窗口最重要的信息。\n\n## 重点摘要\n- 列出 3-7 条重点，每条都标注来源编号，例如 [#1]。\n- 合并重复消息，不要重复罗列同一件事。\n\n## 分类整理\n按主题分组整理，每组包含关键事实、背景线索和来源编号。\n\n## 待关注事项\n列出需要继续关注的问题、风险、待办或后续进展。\n\n## 说明\n以上内容仅基于本窗口内消息整理，未使用外部事实补全。'
 }
 </script>
 
@@ -440,6 +504,9 @@ function preview(): void {
             <NFormItem label="AI 输出格式">
               <NSelect v-model:value="form.output_format" :options="outputFormatOptions" />
             </NFormItem>
+            <NFormItem label="结构模板">
+              <NSelect v-model:value="selectedOutputTemplatePreset" :options="outputTemplateOptions" />
+            </NFormItem>
             <NFormItem label="输入消息量">
               <NSelect v-model:value="form.limits.max_messages_per_run" :options="inputVolumeOptions" />
             </NFormItem>
@@ -457,6 +524,17 @@ function preview(): void {
               />
             </NFormItem>
           </div>
+          <NFormItem label="输出结构模板">
+            <NInput
+              v-model:value="form.output_template"
+              type="textarea"
+              placeholder="定义 AI 输出的标题、章节、列表、来源标注等结构规范"
+              :autosize="{ minRows: 8, maxRows: 16 }"
+            />
+          </NFormItem>
+          <NAlert type="default" :show-icon="false" class="template-note">
+            这里定义“内容长什么样”，例如标题、摘要、分类、待办、风险和来源标注；上面的 AI 输出格式只决定用 Markdown、Text 还是 HTML 作为载体。
+          </NAlert>
           <NCollapse class="advanced-collapse">
             <NCollapseItem title="高级限制（一般不用改）" name="limits">
               <div class="limit-grid">
@@ -635,7 +713,8 @@ function preview(): void {
 }
 
 .prompt-alert,
-.advanced-collapse {
+.advanced-collapse,
+.template-note {
   margin-top: 12px;
 }
 

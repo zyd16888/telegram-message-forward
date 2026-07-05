@@ -456,6 +456,7 @@ export interface AIDigestProfile {
   dedupe: { enabled: boolean }
   prompt_template: string
   output_format: string
+  output_template: string
   target_sink_ids: number[]
   model_config: AIDigestModelConfig
   limits: AIDigestLimits
@@ -540,6 +541,7 @@ export interface AIDigestPreset {
   description: string
   prompt_template: string
   output_format: string
+  output_template: string
   schedule: AIDigestSchedule
   window: AIDigestWindow
   dedupe: { enabled: boolean }
