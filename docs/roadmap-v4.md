@@ -13,15 +13,19 @@ v4 的目标是新增一条通用的 **AI 整理旁路**：原始消息继续按
 **已完成（本轮）**
 
 - **V4-1 到 V4-5 主链路已落地**：AI Provider 配置、OpenAI-compatible HTTP client、AI Profile CRUD、草稿预览、已保存 Profile 预览、手动执行、AI 输出快照直投、重新投递、interval/daily 进程内调度均已实现。
+- **多 Provider、预设与 Cron 增强已落地**：AI Provider 已支持多个 OpenAI-compatible 配置并按 Profile 选择 Provider/Model；内置“群消息归纳整理”“今日新闻总结”预设；调度支持标准 5 段 cron 表达式，并按 Profile timezone 计算。
 - **V4-6 观测与调优已完成基础闭环**：Profile 列表展示最近 run，Run 详情展示纳入/排除消息、AI 输出、token usage、delivery task ids；Dashboard 增加 AI 整理概况；提供运行记录清理 API 与页面操作。
-- **数据库迁移已执行到版本 14**：
+- **数据库迁移已执行到版本 15**：
   - `00013_ai_digest.sql`：新增 `ai_digest_profiles`、`ai_digest_runs`、`ai_digest_run_items`、`ai_digest_outputs`，以及 `messages(source_id, received_at)` 索引。
   - `00014_delivery_task_origin.sql`：扩展 `delivery_tasks` 支持 `origin_type/origin_id` 与 `message_snapshot` 直投，`message_id/rule_id` 对 AI 来源可空。
+  - `00015_ai_digest_run_provider_snapshot.sql`：为 AI run 增加 Provider id/name 快照，便于追溯历史输出使用的供应商配置。
 - **验证已完成**：`go test ./...`、`go vet ./...`、`go build ./...`、`cd web && npm run build` 全部通过。
+- **新增自动化覆盖**：补充多 Provider 存储/指定 Provider 测试调用、cron next-run 计算测试。
 - **本地 E2E 已完成**：使用本地 mock OpenAI-compatible provider 与 mock Webhook Sink，验证 Provider test、Webhook Source 入库、草稿预览、手动执行、AI 输出生成 delivery task、worker 投递成功；验证结果中 AI 投递任务 `message_id=0/rule_id=0`，说明快照直投路径生效。
 - **提交记录**：
   - `036b0e5 feat: 新增 AI 整理后端链路`
   - `992d3cb feat: 新增 AI 整理管理页面`
+  - `a20aac9 docs: 更新 V4 AI 整理真实进度`
 
 **待真实外部联调**
 
