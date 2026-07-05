@@ -7,6 +7,8 @@ import type {
   ApiToken,
   BootstrapStatus,
   Delivery,
+  Filter,
+  FilterRequest,
   LoginFlow,
   Me,
   Rule,
@@ -286,6 +288,16 @@ export const rulesApi = {
   preview: (body: Record<string, unknown>) =>
     http.post<ApiItem<RulePreviewResult>>('/rules/preview', body).then((r) => r.data.data),
   remove: (id: number) => http.delete(`/rules/${id}`),
+}
+
+// --- Filters（可复用过滤器） ---
+export const filtersApi = {
+  list: () => http.get<ApiList<Filter>>('/filters').then((r) => r.data.data),
+  get: (id: number) => http.get<ApiItem<Filter>>(`/filters/${id}`).then((r) => r.data.data),
+  create: (body: FilterRequest) => http.post<ApiItem<Filter>>('/filters', body).then((r) => r.data.data),
+  update: (id: number, body: FilterRequest) =>
+    http.put<ApiItem<Filter>>(`/filters/${id}`, body).then((r) => r.data.data),
+  remove: (id: number) => http.delete(`/filters/${id}`),
 }
 
 // --- Deliveries ---

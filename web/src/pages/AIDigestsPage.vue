@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue'
 import { NButton, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
-import { aiApi, rulesApi, sinksApi, sourcesApi } from '@/api/client'
+import { useRouter } from 'vue-router'
+import { aiApi, filtersApi, rulesApi, sinksApi, sourcesApi } from '@/api/client'
 import type {
   AIDigestProfile,
   AIDigestProfileRequest,
@@ -11,6 +12,7 @@ import type {
   AIDigestRunDetail as AIDigestRunDetailType,
   AIProvider,
   AIProviderRequest,
+  Filter,
   RuleItemDescriptor,
   Sink,
   Source,
@@ -24,6 +26,7 @@ import AIDigestRunDetail from '@/components/ai/AIDigestRunDetail.vue'
 
 const message = useMessage()
 const dialog = useDialog()
+const router = useRouter()
 
 const activeTab = ref<'profiles' | 'templates' | 'providers'>('profiles')
 
@@ -35,6 +38,7 @@ const showProviderForm = ref(false)
 const providers = ref<AIProvider[]>([])
 const presets = ref<AIDigestPreset[]>([])
 const templates = ref<AIDigestOutputTemplate[]>([])
+const filters = ref<Filter[]>([])
 const profiles = ref<AIDigestProfile[]>([])
 const sources = ref<Source[]>([])
 const sinks = ref<Sink[]>([])
@@ -215,7 +219,7 @@ const runColumns: DataTableColumns<AIDigestRun> = [
 async function loadAll(): Promise<void> {
   loading.value = true
   try {
-    const [ps, srcs, snks, meta, pvds, presetItems, tmpls] = await Promise.all([
+    const [ps, srcs, snks, meta, pvds, presetItems, tmpls, flts] = await Promise.all([
       aiApi.profiles.list(),
       sourcesApi.list(),
       sinksApi.list(),
@@ -223,6 +227,7 @@ async function loadAll(): Promise<void> {
       aiApi.providers.list(),
       aiApi.presets.list(),
       aiApi.outputTemplates.list(),
+      filtersApi.list(),
     ])
     profiles.value = ps
     sources.value = srcs
@@ -231,6 +236,7 @@ async function loadAll(): Promise<void> {
     providers.value = pvds
     presets.value = presetItems
     templates.value = tmpls
+    filters.value = flts
   } catch (e) {
     message.error('加载 AI 整理失败：' + errText(e))
   } finally {
@@ -645,12 +651,14 @@ onMounted(loadAll)
       :providers="providers"
       :presets="presets"
       :templates="templates"
+      :filters="filters"
       :condition-descriptors="conditionDescriptors"
       :saving="savingProfile"
       :previewing="previewing"
       @save="saveProfile"
       @preview="previewDraft"
       @manage-templates="activeTab = 'templates'"
+      @manage-filters="router.push({ name: 'filters' })"
     />
 
     <!-- 输出模板表单 -->

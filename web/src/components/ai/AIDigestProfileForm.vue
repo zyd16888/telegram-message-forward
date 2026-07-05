@@ -9,6 +9,7 @@ import type {
   AIDigestOutputTemplate,
   AIProvider,
   ConditionConfig,
+  Filter,
   RuleItemDescriptor,
   Sink,
   Source,
@@ -23,6 +24,7 @@ const props = defineProps<{
   providers: AIProvider[]
   presets: AIDigestPreset[]
   templates: AIDigestOutputTemplate[]
+  filters: Filter[]
   conditionDescriptors: RuleItemDescriptor[]
   saving?: boolean
   previewing?: boolean
@@ -32,6 +34,7 @@ const emit = defineEmits<{
   save: [payload: AIDigestProfileRequest]
   preview: [payload: AIDigestProfileRequest]
   manageTemplates: []
+  manageFilters: []
 }>()
 
 const message = useMessage()
@@ -42,6 +45,7 @@ const form = reactive<AIDigestProfileRequest>({
   name: '',
   enabled: false,
   source_ids: [],
+  filter_id: 0,
   conditions: [],
   schedule: { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai', cron: '0 9 * * *' },
   window: { type: 'last_duration', duration_minutes: 60 },
@@ -117,6 +121,14 @@ const templateSelectOptions = computed(() => [
 const selectedTemplate = computed(() => props.templates.find((t) => t.id === form.output_template_id) ?? null)
 const usingSharedTemplate = computed(() => form.output_template_id > 0)
 
+// 过滤条件：0 = 自定义内联；否则引用共享过滤器 id。
+const usingFilter = computed(() => form.filter_id > 0)
+const selectedFilter = computed(() => props.filters.find((f) => f.id === form.filter_id) ?? null)
+const conditionSourceOptions = computed(() => [
+  { label: '自定义条件（本 Profile 专用）', value: 0 },
+  ...props.filters.map((f) => ({ label: f.description ? `${f.name} — ${f.description}` : f.name, value: f.id })),
+])
+
 const promptSelection = reactive({ start: -1, end: -1 })
 
 watch(
@@ -134,6 +146,7 @@ function reset(): void {
     form.name = ''
     form.enabled = false
     form.source_ids = []
+    form.filter_id = 0
     form.conditions = []
     form.schedule = { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai', cron: '0 9 * * *' }
     form.window = { type: 'last_duration', duration_minutes: 60 }
@@ -152,6 +165,7 @@ function reset(): void {
     name: props.profile.name,
     enabled: props.profile.enabled,
     source_ids: [...props.profile.source_ids],
+    filter_id: props.profile.filter_id ?? 0,
     conditions: props.profile.conditions.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } })),
     schedule: { ...props.profile.schedule },
     window: { ...props.profile.window },
@@ -255,7 +269,8 @@ function payload(): AIDigestProfileRequest {
     name: form.name.trim(),
     enabled: form.enabled,
     source_ids: [...form.source_ids],
-    conditions: form.conditions.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } })),
+    filter_id: form.filter_id,
+    conditions: usingFilter.value ? [] : form.conditions.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } })),
     schedule: { ...form.schedule },
     window: { ...form.window },
     dedupe: { ...form.dedupe },
@@ -331,28 +346,50 @@ function defaultOutputTemplate(): string {
 
             <div class="field-head">
               <div class="field-label">输入来源与过滤</div>
-              <NButton size="tiny" dashed @click="addCondition">添加过滤条件</NButton>
+              <NButton size="tiny" text type="primary" @click="emit('manageFilters'); show = false">管理过滤器</NButton>
             </div>
-            <div class="field-hint">过滤只影响 AI 输入，不影响原始消息实时转发。</div>
+            <div class="field-hint">过滤只影响 AI 输入，不影响原始消息实时转发。可引用共享过滤器，或写本 Profile 专用条件。</div>
             <NFormItem label="Source">
               <NSelect v-model:value="form.source_ids" multiple filterable :options="sourceOptions" />
             </NFormItem>
-            <div v-for="(condition, index) in form.conditions" :key="index" class="condition-block">
-              <NSpace align="center" justify="space-between">
-                <NSelect
-                  :value="condition.type"
-                  class="type-select"
-                  :options="conditionOptions"
-                  @update:value="(value: string) => updateConditionType(condition, value)"
+            <NFormItem label="过滤条件来源">
+              <NSelect v-model:value="form.filter_id" :options="conditionSourceOptions" />
+            </NFormItem>
+
+            <template v-if="usingFilter">
+              <NAlert type="info" :show-icon="false" class="filter-note">
+                使用共享过滤器「{{ selectedFilter?.name }}」的 {{ selectedFilter?.conditions.length ?? 0 }} 个条件。修改该过滤器会联动所有引用它的地方。
+              </NAlert>
+              <div v-if="selectedFilter?.conditions.length" class="filter-cond-list">
+                <NTag v-for="(c, i) in selectedFilter?.conditions" :key="i" size="small" :bordered="false" type="info">
+                  {{ conditionDescriptor(c.type)?.label ?? c.type }}
+                </NTag>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="cond-head">
+                <span class="cond-head-label">自定义条件</span>
+                <NButton size="tiny" dashed @click="addCondition">添加过滤条件</NButton>
+              </div>
+              <div v-for="(condition, index) in form.conditions" :key="index" class="condition-block">
+                <NSpace align="center" justify="space-between">
+                  <NSelect
+                    :value="condition.type"
+                    class="type-select"
+                    :options="conditionOptions"
+                    @update:value="(value: string) => updateConditionType(condition, value)"
+                  />
+                  <NButton size="small" type="error" secondary @click="removeCondition(index)">移除</NButton>
+                </NSpace>
+                <ConfigFormRenderer
+                  v-if="conditionDescriptor(condition.type)"
+                  v-model="condition.config"
+                  :fields="conditionDescriptor(condition.type)?.fields ?? []"
                 />
-                <NButton size="small" type="error" secondary @click="removeCondition(index)">移除</NButton>
-              </NSpace>
-              <ConfigFormRenderer
-                v-if="conditionDescriptor(condition.type)"
-                v-model="condition.config"
-                :fields="conditionDescriptor(condition.type)?.fields ?? []"
-              />
-            </div>
+              </div>
+              <div v-if="!form.conditions.length" class="field-hint">未添加条件时，来源消息全部进入 AI（仅自动去空、去重）。</div>
+            </template>
 
             <div class="field-label field-gap">窗口与调度</div>
             <div class="schedule-grid">
@@ -749,6 +786,30 @@ function defaultOutputTemplate(): string {
   margin: 10px 0;
   padding: 12px;
   background: var(--clay-surface);
+}
+
+.filter-note {
+  margin-bottom: 10px;
+}
+
+.filter-cond-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cond-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+
+.cond-head-label {
+  color: var(--clay-text-2);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .type-select,

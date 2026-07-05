@@ -5,9 +5,9 @@ import { useMessage } from 'naive-ui'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
-import { rulesApi, sinksApi } from '@/api/client'
+import { filtersApi, rulesApi, sinksApi } from '@/api/client'
 import { useForwardingGraph, type FlowRuleGraphNode } from '@/composables/useForwardingGraph'
-import type { Rule, RuleInitialDraft, RuleMeta, Sink, SinkDescriptor, Source } from '@/types'
+import type { Filter, Rule, RuleInitialDraft, RuleMeta, Sink, SinkDescriptor, Source } from '@/types'
 import { errText } from '@/utils/error'
 
 type NodeKind = 'source' | 'rule' | 'sink'
@@ -20,6 +20,7 @@ const { accounts, sources, rules, sinks, templates, loading, ruleNodes, stats, l
 
 const ruleMeta = shallowRef<RuleMeta>({ conditions: [], processors: [] })
 const sinkDescriptors = shallowRef<SinkDescriptor[]>([])
+const filters = shallowRef<Filter[]>([])
 
 const selection = shallowRef<{ kind: NodeKind; id: number } | null>(null)
 const keyword = shallowRef('')
@@ -188,7 +189,7 @@ async function refresh() {
 
 async function loadMeta() {
   try {
-    ;[ruleMeta.value, sinkDescriptors.value] = await Promise.all([rulesApi.meta(), sinksApi.meta()])
+    ;[ruleMeta.value, sinkDescriptors.value, filters.value] = await Promise.all([rulesApi.meta(), sinksApi.meta(), filtersApi.list()])
   } catch {
     // 元信息加载失败时退回展示原始类型标识，不阻塞页面。
   }
@@ -492,6 +493,7 @@ onMounted(async () => {
       :sources="sources"
       :sinks="sinks"
       :templates="templates"
+      :filters="filters"
       :condition-descriptors="ruleMeta.conditions"
       :processor-descriptors="ruleMeta.processors"
       :initial-draft="initialDraft"

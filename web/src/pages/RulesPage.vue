@@ -5,8 +5,8 @@ import { NAlert, NButton, NSpace, NTag, NText, useDialog, useMessage, type DataT
 import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
-import { rulesApi, sinksApi, sourcesApi, templatesApi } from '@/api/client'
-import type { Rule, RuleInitialDraft, RuleMeta, Sink, Source, Template } from '@/types'
+import { filtersApi, rulesApi, sinksApi, sourcesApi, templatesApi } from '@/api/client'
+import type { Filter, Rule, RuleInitialDraft, RuleMeta, Sink, Source, Template } from '@/types'
 import { errText } from '@/utils/error'
 
 const message = useMessage()
@@ -18,6 +18,7 @@ const rules = shallowRef<Rule[]>([])
 const sources = shallowRef<Source[]>([])
 const sinks = shallowRef<Sink[]>([])
 const templates = shallowRef<Template[]>([])
+const filters = shallowRef<Filter[]>([])
 const meta = shallowRef<RuleMeta>({ conditions: [], processors: [] })
 const loading = shallowRef(false)
 const showModal = shallowRef(false)
@@ -58,11 +59,12 @@ function clearFilter() {
 async function load() {
   loading.value = true
   try {
-    ;[rules.value, sources.value, sinks.value, templates.value, meta.value] = await Promise.all([
+    ;[rules.value, sources.value, sinks.value, templates.value, filters.value, meta.value] = await Promise.all([
       rulesApi.list(),
       sourcesApi.list(),
       sinksApi.list(),
       templatesApi.list(),
+      filtersApi.list(),
       rulesApi.meta(),
     ])
     openQueriedRule()
@@ -204,7 +206,7 @@ onMounted(load)
 
 <template>
   <NSpace vertical size="large">
-    <PageHeader title="过滤规则" desc="定义监听源到目标渠道的匹配、处理与投递规则" icon="rules">
+    <PageHeader title="转发规则" desc="定义监听源到目标渠道的匹配、处理与投递规则" icon="rules">
       <template #actions>
         <NButton type="primary" @click="openCreate">
           <template #icon><ClayIcon name="plus" :size="16" /></template>
@@ -245,6 +247,7 @@ onMounted(load)
       :sources="sources"
       :sinks="sinks"
       :templates="templates"
+      :filters="filters"
       :condition-descriptors="meta.conditions"
       :processor-descriptors="meta.processors"
       :initial-draft="initialDraft"

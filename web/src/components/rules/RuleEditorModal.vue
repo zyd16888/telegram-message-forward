@@ -5,6 +5,7 @@ import ConfigFormRenderer from '@/components/ConfigFormRenderer.vue'
 import { rulesApi } from '@/api/client'
 import type {
   ConditionConfig,
+  Filter,
   ProcessorConfig,
   Rule,
   RuleInitialDraft,
@@ -24,6 +25,7 @@ const props = defineProps<{
   sources: Source[]
   sinks: Sink[]
   templates: Template[]
+  filters: Filter[]
   conditionDescriptors: RuleItemDescriptor[]
   processorDescriptors: RuleItemDescriptor[]
   initialDraft?: RuleInitialDraft | null
@@ -40,6 +42,7 @@ const form = reactive({
   enabled: true,
   priority: 0,
   stop_on_match: false,
+  filter_id: 0,
   conditions: [] as ConditionConfig[],
   processors: [] as ProcessorConfig[],
   source_ids: [] as number[],
@@ -58,6 +61,12 @@ const preview = reactive({
 })
 
 const editing = computed(() => Boolean(props.rule))
+const usingFilter = computed(() => form.filter_id > 0)
+const selectedFilter = computed(() => props.filters.find((f) => f.id === form.filter_id) ?? null)
+const conditionSourceOptions = computed(() => [
+  { label: '自定义条件（本规则专用）', value: 0 },
+  ...props.filters.map((f) => ({ label: f.description ? `${f.name} — ${f.description}` : f.name, value: f.id })),
+])
 const sourceOptions = computed(() => props.sources.map((source) => ({ label: `${source.name} (#${source.id})`, value: source.id })))
 const sinkOptions = computed(() => props.sinks.map((sink) => ({ label: `${sink.name} (${sink.type})`, value: sink.id })))
 const conditionOptions = computed(() => props.conditionDescriptors.map((item) => ({ label: item.label, value: item.type })))
@@ -90,6 +99,7 @@ function resetForm() {
     form.enabled = props.rule.enabled
     form.priority = props.rule.priority
     form.stop_on_match = props.rule.stop_on_match
+    form.filter_id = props.rule.filter_id ?? 0
     form.conditions = props.rule.conditions.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } }))
     form.processors = props.rule.processors.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } }))
     form.source_ids = [...props.rule.source_ids]
@@ -102,6 +112,7 @@ function resetForm() {
   form.enabled = true
   form.priority = 0
   form.stop_on_match = false
+  form.filter_id = 0
   form.conditions = []
   form.processors = []
   form.source_ids = [...(draft?.source_ids ?? [])]
@@ -228,7 +239,8 @@ function ruleBody() {
     enabled: form.enabled,
     priority: form.priority,
     stop_on_match: form.stop_on_match,
-    conditions: form.conditions,
+    filter_id: form.filter_id,
+    conditions: usingFilter.value ? [] : form.conditions,
     processors: form.processors,
     source_ids: form.source_ids,
     targets: form.targets,
@@ -325,30 +337,54 @@ function previewTargetLabel(target: RuleTarget): string {
           <div class="section-head">
             <div>
               <div class="section-title">匹配条件</div>
-              <div class="section-desc">为空时表示来源消息直接进入这条规则。</div>
+              <div class="section-desc">为空时表示来源消息直接进入这条规则。可引用共享过滤器，或写本规则专用的条件。</div>
             </div>
-            <NButton size="small" dashed @click="addCondition">添加条件</NButton>
+            <NButton v-if="!usingFilter" size="small" dashed @click="addCondition">添加条件</NButton>
           </div>
-          <div v-for="(condition, index) in form.conditions" :key="index" class="rule-block">
-            <NSpace align="center" justify="space-between">
-              <NSelect
-                :value="condition.type"
-                class="type-select"
-                :options="conditionOptions"
-                @update:value="(value: string) => updateConditionType(condition, value)"
+          <NFormItem label="条件来源">
+            <NSelect v-model:value="form.filter_id" :options="conditionSourceOptions" />
+          </NFormItem>
+
+          <template v-if="usingFilter">
+            <NAlert type="info" :show-icon="false" class="filter-note">
+              使用共享过滤器「{{ selectedFilter?.name }}」的 {{ selectedFilter?.conditions.length ?? 0 }} 个条件。
+              修改该过滤器会联动所有引用它的规则与 AI 整理；如需单独调整，请改选「自定义条件」。
+            </NAlert>
+            <div v-if="selectedFilter?.conditions.length" class="filter-cond-list">
+              <NTag
+                v-for="(c, i) in selectedFilter?.conditions"
+                :key="i"
+                size="small"
+                :bordered="false"
+                type="info"
+              >
+                {{ conditionDescriptor(c.type)?.label ?? c.type }}
+              </NTag>
+            </div>
+          </template>
+
+          <template v-else>
+            <div v-for="(condition, index) in form.conditions" :key="index" class="rule-block">
+              <NSpace align="center" justify="space-between">
+                <NSelect
+                  :value="condition.type"
+                  class="type-select"
+                  :options="conditionOptions"
+                  @update:value="(value: string) => updateConditionType(condition, value)"
+                />
+                <NButton size="small" type="error" secondary @click="removeCondition(index)">移除</NButton>
+              </NSpace>
+              <ConfigFormRenderer
+                v-if="conditionDescriptor(condition.type)"
+                v-model="condition.config"
+                :fields="conditionDescriptor(condition.type)?.fields ?? []"
               />
-              <NButton size="small" type="error" secondary @click="removeCondition(index)">移除</NButton>
-            </NSpace>
-            <ConfigFormRenderer
-              v-if="conditionDescriptor(condition.type)"
-              v-model="condition.config"
-              :fields="conditionDescriptor(condition.type)?.fields ?? []"
-            />
-            <NText v-if="conditionDescriptor(condition.type)?.description" depth="3">
-              {{ conditionDescriptor(condition.type)?.description }}
-            </NText>
-          </div>
-          <NEmpty v-if="!form.conditions.length" size="small" description="未添加条件" />
+              <NText v-if="conditionDescriptor(condition.type)?.description" depth="3">
+                {{ conditionDescriptor(condition.type)?.description }}
+              </NText>
+            </div>
+            <NEmpty v-if="!form.conditions.length" size="small" description="未添加条件" />
+          </template>
         </section>
 
         <section class="form-section">
@@ -514,6 +550,16 @@ function previewTargetLabel(target: RuleTarget): string {
   margin-bottom: 10px;
   padding: 12px;
   background: var(--clay-surface);
+}
+
+.filter-note {
+  margin-bottom: 10px;
+}
+
+.filter-cond-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .type-select {

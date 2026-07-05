@@ -221,6 +221,7 @@ export interface Rule {
   name: string
   enabled: boolean
   priority: number
+  filter_id: number
   conditions: ConditionConfig[]
   processors: ProcessorConfig[]
   stop_on_match: boolean
@@ -229,6 +230,17 @@ export interface Rule {
   created_at: string
   updated_at: string
 }
+
+export interface Filter {
+  id: number
+  name: string
+  description: string
+  conditions: ConditionConfig[]
+  created_at: string
+  updated_at: string
+}
+
+export type FilterRequest = Pick<Filter, 'name' | 'description' | 'conditions'>
 
 export interface RuleInitialDraft {
   name?: string
@@ -450,6 +462,7 @@ export interface AIDigestProfile {
   name: string
   enabled: boolean
   source_ids: number[]
+  filter_id: number
   conditions: ConditionConfig[]
   schedule: AIDigestSchedule
   window: AIDigestWindow
