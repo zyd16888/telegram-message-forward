@@ -10,12 +10,23 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"telegram-message-forward/internal/domain/formschema"
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
+)
+
+const (
+	attachmentModeAuto   = "auto"
+	attachmentModeUpload = "upload"
+	attachmentModeURL    = "url"
+	attachmentModeText   = "text"
+
+	ntfyShUploadLimitMB     = 2
+	selfHostedUploadLimitMB = 15
 )
 
 func init() {
@@ -57,6 +68,13 @@ func (s *Sink) Descriptor() pluginsink.Descriptor {
 				{Label: "高", Value: "high"},
 				{Label: "紧急", Value: "urgent"},
 			}},
+			{Key: "attachment_mode", Label: "附件策略", Type: formschema.FieldSelect, Default: attachmentModeAuto, Help: "自动模式会小文件直传、大文件走 URL 或摘要。", Options: []formschema.Option{
+				{Label: "自动：小文件直传，大文件 URL", Value: attachmentModeAuto},
+				{Label: "优先直传", Value: attachmentModeUpload},
+				{Label: "优先 URL", Value: attachmentModeURL},
+				{Label: "仅文本摘要", Value: attachmentModeText},
+			}},
+			{Key: "upload_max_mb", Label: "直传上限 MB", Type: formschema.FieldNumber, Placeholder: "ntfy.sh 默认 2，自建默认 15", Help: "自动模式下，本地附件不超过该大小才直传；留空时按 Topic URL 自动选择默认值。"},
 		},
 		SecretField: &formschema.FieldSpec{
 			Key:         "secret",
@@ -84,7 +102,7 @@ func (s *Sink) Capabilities() domainsink.Capabilities {
 			{Type: "audio", Supported: true, MaxSizeMB: 15, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: true, DeliveryMode: "attach_header_or_upload", Fallback: "超限或不可读时降级为音频摘要和链接"},
 			{Type: "video", Supported: true, MaxSizeMB: 15, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: true, DeliveryMode: "attach_header_or_upload", Fallback: "超限或不可读时降级为视频摘要和链接"},
 		},
-		Notes: []string{"ntfy 远程媒体 URL 通过 Attach header；本地媒体作为请求体上传，大小上限取决于服务端配置。"},
+		Notes: []string{"ntfy 远程媒体 URL 通过 Attach header；本地媒体可作为请求体上传，自动模式下小文件直传、大文件走 URL 或摘要。ntfy.sh 公共服务附件直传限制较低，自建服务可在配置中调大直传上限。"},
 	}
 }
 
@@ -101,19 +119,39 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 		return &pluginsink.Result{Success: false, Error: "ntfy 缺少 topic_url"}, nil
 	}
 	media := firstMedia(payload.Media)
-	if media.LocalPath != "" {
-		if payload.Text != "" {
-			if res, err := s.publishText(ctx, sink, payload, ""); err != nil || res == nil || !res.Success {
-				return res, err
-			}
-		}
-		return s.publishAttachment(ctx, sink, media)
+	if len(payload.Media) == 0 {
+		return s.publishText(ctx, sink, payload, "")
 	}
+
 	attachURL := mediaURL(media)
-	if len(payload.Media) > 0 && attachURL == "" && payload.FallbackText != "" {
-		payload.Text = payload.FallbackText
+	switch attachmentMode(sink) {
+	case attachmentModeText:
+		return s.publishFallbackText(ctx, sink, payload)
+	case attachmentModeURL:
+		if attachURL != "" {
+			return s.publishText(ctx, sink, payload, attachURL)
+		}
+		if media.LocalPath != "" && shouldUploadLocal(sink, media) {
+			return s.publishLocalMedia(ctx, sink, payload, media)
+		}
+		return s.publishFallbackText(ctx, sink, payload)
+	case attachmentModeUpload:
+		if media.LocalPath != "" {
+			return s.publishLocalMedia(ctx, sink, payload, media)
+		}
+		if attachURL != "" {
+			return s.publishText(ctx, sink, payload, attachURL)
+		}
+		return s.publishFallbackText(ctx, sink, payload)
+	default:
+		if media.LocalPath != "" && shouldUploadLocal(sink, media) {
+			return s.publishLocalMedia(ctx, sink, payload, media)
+		}
+		if attachURL != "" {
+			return s.publishText(ctx, sink, payload, attachURL)
+		}
+		return s.publishFallbackText(ctx, sink, payload)
 	}
-	return s.publishText(ctx, sink, payload, attachURL)
 }
 
 func (s *Sink) publishText(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, attachURL string) (*pluginsink.Result, error) {
@@ -124,6 +162,22 @@ func (s *Sink) publishText(ctx context.Context, sink *domainsink.Sink, payload p
 	}
 	s.applyHeaders(req, sink, payload.Format, attachURL, "")
 	return s.do(req)
+}
+
+func (s *Sink) publishLocalMedia(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, media domainmessage.Media) (*pluginsink.Result, error) {
+	if payload.Text != "" {
+		if res, err := s.publishText(ctx, sink, payload, ""); err != nil || res == nil || !res.Success {
+			return res, err
+		}
+	}
+	return s.publishAttachment(ctx, sink, media)
+}
+
+func (s *Sink) publishFallbackText(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload) (*pluginsink.Result, error) {
+	if payload.FallbackText != "" {
+		payload.Text = payload.FallbackText
+	}
+	return s.publishText(ctx, sink, payload, "")
 }
 
 func (s *Sink) publishAttachment(ctx context.Context, sink *domainsink.Sink, media domainmessage.Media) (*pluginsink.Result, error) {
@@ -192,4 +246,57 @@ func mediaURL(media domainmessage.Media) string {
 		return media.RemoteURL
 	}
 	return media.URL
+}
+
+func attachmentMode(sink *domainsink.Sink) string {
+	mode, _ := sink.Config["attachment_mode"].(string)
+	switch mode {
+	case attachmentModeUpload, attachmentModeURL, attachmentModeText:
+		return mode
+	default:
+		return attachmentModeAuto
+	}
+}
+
+func shouldUploadLocal(sink *domainsink.Sink, media domainmessage.Media) bool {
+	size := media.Size
+	if size <= 0 && media.LocalPath != "" {
+		if stat, err := os.Stat(filepath.Clean(media.LocalPath)); err == nil {
+			size = stat.Size()
+		}
+	}
+	if size <= 0 {
+		return true
+	}
+	return size <= int64(uploadLimitMB(sink))*1024*1024
+}
+
+func uploadLimitMB(sink *domainsink.Sink) int {
+	if v, ok := positiveIntConfig(sink.Config["upload_max_mb"]); ok {
+		return v
+	}
+	topicURL, _ := sink.Config["topic_url"].(string)
+	if strings.HasPrefix(strings.ToLower(topicURL), "https://ntfy.sh/") || strings.HasPrefix(strings.ToLower(topicURL), "http://ntfy.sh/") {
+		return ntfyShUploadLimitMB
+	}
+	return selfHostedUploadLimitMB
+}
+
+func positiveIntConfig(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, v > 0
+	case int64:
+		return int(v), v > 0
+	case float64:
+		return int(v), v > 0
+	case json.Number:
+		i, err := strconv.Atoi(v.String())
+		return i, err == nil && i > 0
+	case string:
+		i, err := strconv.Atoi(strings.TrimSpace(v))
+		return i, err == nil && i > 0
+	default:
+		return 0, false
+	}
 }

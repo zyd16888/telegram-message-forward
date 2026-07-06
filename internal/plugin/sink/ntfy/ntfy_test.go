@@ -98,6 +98,107 @@ func TestSendLocalAttachment(t *testing.T) {
 	}
 }
 
+func TestSendLargeLocalAttachmentUsesURLInAutoMode(t *testing.T) {
+	file := t.TempDir() + "/large.txt"
+	if err := os.WriteFile(file, []byte("large attachment"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	var gotMethod atomic.Value
+	var gotAttach atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		gotMethod.Store(r.Method)
+		gotAttach.Store(r.Header.Get("Attach"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	s := New()
+	sink := &domainsink.Sink{Type: "ntfy", Config: map[string]any{"topic_url": srv.URL, "upload_max_mb": 2}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Text: "hello",
+		Media: []domainmessage.Media{{
+			Type:      "file",
+			FileName:  "large.txt",
+			LocalPath: file,
+			URL:       "https://example.com/large.txt",
+			Size:      3 * 1024 * 1024,
+		}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success || calls.Load() != 1 || gotMethod.Load() != http.MethodPost || gotAttach.Load() != "https://example.com/large.txt" {
+		t.Fatalf("大附件应走 Attach URL res=%+v calls=%d method=%v attach=%v", res, calls.Load(), gotMethod.Load(), gotAttach.Load())
+	}
+}
+
+func TestSendLargeLocalAttachmentFallsBackWithoutURL(t *testing.T) {
+	file := t.TempDir() + "/large.txt"
+	if err := os.WriteFile(file, []byte("large attachment"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var gotBody atomic.Value
+	var gotFilename atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(b))
+		gotFilename.Store(r.Header.Get("Filename"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	s := New()
+	sink := &domainsink.Sink{Type: "ntfy", Config: map[string]any{"topic_url": srv.URL, "upload_max_mb": 2}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Text:         "hello",
+		FallbackText: "hello\n[文件消息] 文件：large.txt 大小：3 MB",
+		Media: []domainmessage.Media{{
+			Type:      "file",
+			FileName:  "large.txt",
+			LocalPath: file,
+			Size:      3 * 1024 * 1024,
+		}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success || gotBody.Load() != "hello\n[文件消息] 文件：large.txt 大小：3 MB" || gotFilename.Load() != "" {
+		t.Fatalf("无 URL 大附件应降级为摘要 res=%+v body=%v filename=%v", res, gotBody.Load(), gotFilename.Load())
+	}
+}
+
+func TestSendUploadModeForcesLocalAttachment(t *testing.T) {
+	file := t.TempDir() + "/large.txt"
+	if err := os.WriteFile(file, []byte("large attachment"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	var gotFilename atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if n == 2 {
+			gotFilename.Store(r.Header.Get("Filename"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	s := New()
+	sink := &domainsink.Sink{Type: "ntfy", Config: map[string]any{"topic_url": srv.URL, "attachment_mode": "upload", "upload_max_mb": 2}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Text:  "hello",
+		Media: []domainmessage.Media{{Type: "file", FileName: "large.txt", LocalPath: file, Size: 3 * 1024 * 1024}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success || calls.Load() != 2 || gotFilename.Load() != "large.txt" {
+		t.Fatalf("upload 模式应强制本地直传 res=%+v calls=%d filename=%v", res, calls.Load(), gotFilename.Load())
+	}
+}
+
 func TestSendErrorStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
