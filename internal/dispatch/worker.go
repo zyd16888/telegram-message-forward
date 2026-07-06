@@ -3,8 +3,12 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"telegram-message-forward/internal/config"
@@ -190,6 +194,8 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 		return nil, err
 	}
 	media := w.publicMedia(ctx, msg.Media)
+	media, cleanup := w.localUploadMedia(ctx, s.Capabilities, media)
+	defer cleanup()
 	fallbackText := mediaFallbackText(rendered.Text, media, msg.OriginalURL)
 	payload := pluginsink.Payload{
 		Format:       string(rendered.Format),
@@ -197,7 +203,7 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 		Media:        media,
 		FallbackText: fallbackText,
 	}
-	if len(msg.Media) > 0 && !supportsAllMedia(s.Capabilities, msg.Media) {
+	if len(media) > 0 && !supportsAllMedia(s.Capabilities, media) {
 		payload.Format = string(domaintemplate.FormatText)
 		payload.Text = fallbackText
 	}
@@ -254,9 +260,9 @@ func supportsMediaItem(c domainsink.Capabilities, item domainmessage.Media) bool
 		if mc.MaxSizeMB > 0 && item.Size > int64(mc.MaxSizeMB)*1024*1024 {
 			return false
 		}
-		// 只认二进制/上传的渠道（不支持公网 URL），媒体没有本地文件时无法真实发送，
+		// 只认二进制/上传的渠道（不支持公网 URL），媒体没有可读本地文件时无法真实发送，
 		// 提前降级为可读文本，避免 Sink 侧静默丢弃媒体。
-		if !mc.SupportsPublicURL && item.LocalPath == "" && item.RemoteURL == "" {
+		if !mc.SupportsPublicURL && !hasReadableLocalFile(item.LocalPath) && item.RemoteURL == "" {
 			return false
 		}
 		return true
@@ -283,6 +289,114 @@ func (w *Worker) publicMedia(ctx context.Context, media []domainmessage.Media) [
 		out[i].URL = u
 	}
 	return out
+}
+
+// localUploadMedia 为需要二进制/上传的渠道补齐可读 LocalPath。
+//
+// Source 入库后 LocalPath 可能为空或已因本地缓存清理而失效；只要还有 StorageKey，
+// worker 就可以从 media store 重新打开内容并写入临时文件，交给 Sink 上传。
+func (w *Worker) localUploadMedia(ctx context.Context, caps domainsink.Capabilities, media []domainmessage.Media) ([]domainmessage.Media, func()) {
+	if w.media == nil || len(media) == 0 {
+		return media, func() {}
+	}
+	out := append([]domainmessage.Media(nil), media...)
+	var cleanupPaths []string
+	for i := range out {
+		if !needsLocalUpload(caps, out[i]) {
+			continue
+		}
+		if hasReadableLocalFile(out[i].LocalPath) {
+			continue
+		}
+		if out[i].StorageKey == "" {
+			continue
+		}
+		path, err := w.materializeMedia(ctx, out[i])
+		if err != nil {
+			if w.log != nil {
+				w.log.Warn("恢复媒体本地文件失败", "storage_key", out[i].StorageKey, "err", err)
+			}
+			continue
+		}
+		out[i].LocalPath = path
+		cleanupPaths = append(cleanupPaths, path)
+	}
+	return out, func() {
+		for _, path := range cleanupPaths {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				if w.log != nil {
+					w.log.Warn("清理投递临时媒体失败", "path", path, "err", err)
+				}
+			}
+		}
+	}
+}
+
+func (w *Worker) materializeMedia(ctx context.Context, item domainmessage.Media) (string, error) {
+	rc, err := w.media.Open(ctx, item.StorageKey)
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+
+	f, err := os.CreateTemp("", "tmf-dispatch-*"+mediaTempExt(item))
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	if _, err := io.Copy(f, rc); err != nil {
+		f.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+func needsLocalUpload(caps domainsink.Capabilities, item domainmessage.Media) bool {
+	kind := mediaKind(item.Type)
+	if kind == "" {
+		return false
+	}
+	for _, mc := range caps.Media {
+		if mc.Type == kind {
+			return mc.Supported && mc.RequiresUpload && mc.SupportsBinary
+		}
+	}
+	return false
+}
+
+func mediaKind(t string) string {
+	switch t {
+	case "photo", "image":
+		return "image"
+	case "file", "document":
+		return "file"
+	case "audio", "voice":
+		return "audio"
+	case "video":
+		return "video"
+	default:
+		return ""
+	}
+}
+
+func hasReadableLocalFile(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func mediaTempExt(item domainmessage.Media) string {
+	if ext := filepath.Ext(item.FileName); ext != "" && !strings.ContainsAny(ext, `\/`) {
+		return ext
+	}
+	return filepath.Ext(filepath.FromSlash(item.StorageKey))
 }
 
 func mediaFallbackText(text string, media []domainmessage.Media, originalURL string) string {
