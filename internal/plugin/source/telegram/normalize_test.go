@@ -141,3 +141,46 @@ func TestNormalizeUserTextMessage(t *testing.T) {
 		t.Fatalf("user 消息不应有 OriginalURL: %q", nm.OriginalURL)
 	}
 }
+
+func TestNormalizeExtractsTelegramLinks(t *testing.T) {
+	prefix := "前缀😀"
+	title := "游资大V复盘文章汇总20260705"
+	bareURL := "https://example.com/a"
+	text := prefix + title + "\n裸链 " + bareURL
+	msg := &tg.Message{
+		ID:      10,
+		Message: text,
+		PeerID:  &tg.PeerUser{UserID: 555},
+	}
+	msg.SetEntities([]tg.MessageEntityClass{
+		&tg.MessageEntityTextURL{
+			Offset: testUTF16Len(prefix),
+			Length: testUTF16Len(title),
+			URL:    "https://pan.baidu.com/s/1Hg80L07OLfcW99xhco5UQQ?pwd=uscp",
+		},
+		&tg.MessageEntityURL{
+			Offset: testUTF16Len(prefix + title + "\n裸链 "),
+			Length: testUTF16Len(bareURL),
+		},
+	})
+
+	nm := Normalize(3, msg, tg.Entities{})
+
+	if len(nm.Links) != 2 {
+		t.Fatalf("Links length = %d, want 2: %+v", len(nm.Links), nm.Links)
+	}
+	if nm.Links[0].URL != "https://pan.baidu.com/s/1Hg80L07OLfcW99xhco5UQQ?pwd=uscp" || nm.Links[0].Title != title {
+		t.Fatalf("hidden link = %+v", nm.Links[0])
+	}
+	if nm.Links[1].URL != bareURL || nm.Links[1].Title != bareURL {
+		t.Fatalf("bare link = %+v", nm.Links[1])
+	}
+}
+
+func testUTF16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n += utf16RuneLen(r)
+	}
+	return n
+}

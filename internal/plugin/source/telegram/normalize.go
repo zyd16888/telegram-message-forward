@@ -37,6 +37,7 @@ func Normalize(sourceID int64, msg *tg.Message, ent tg.Entities) *domainmessage.
 	}
 
 	fillSender(nm, msg, ent)
+	nm.Links = extractLinks(msg.Message, msg)
 	nm.Media = extractMedia(msg)
 	nm.OriginalURL = originalURL(msg, ent)
 
@@ -230,6 +231,83 @@ func safeExt(name, mimeType string) string {
 		return exts[0]
 	}
 	return ".bin"
+}
+
+func extractLinks(text string, msg *tg.Message) []domainmessage.Link {
+	entities, ok := msg.GetEntities()
+	if !ok || len(entities) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	links := make([]domainmessage.Link, 0, len(entities))
+	add := func(url, title string) {
+		url = strings.TrimSpace(url)
+		title = strings.TrimSpace(title)
+		if url == "" {
+			return
+		}
+		if _, ok := seen[url]; ok {
+			return
+		}
+		seen[url] = struct{}{}
+		links = append(links, domainmessage.Link{URL: url, Title: title})
+	}
+
+	for _, entity := range entities {
+		switch e := entity.(type) {
+		case *tg.MessageEntityTextURL:
+			title, _ := utf16Slice(text, e.Offset, e.Length)
+			add(e.URL, title)
+		case *tg.MessageEntityURL:
+			url, ok := utf16Slice(text, e.Offset, e.Length)
+			if !ok {
+				continue
+			}
+			add(url, url)
+		}
+	}
+	if len(links) == 0 {
+		return nil
+	}
+	return links
+}
+
+func utf16Slice(text string, offset, length int) (string, bool) {
+	if offset < 0 || length <= 0 {
+		return "", false
+	}
+	startUnit := offset
+	endUnit := offset + length
+	unit := 0
+	startByte := -1
+	endByte := -1
+	for i, r := range text {
+		if startByte < 0 && unit >= startUnit {
+			startByte = i
+		}
+		unit += utf16RuneLen(r)
+		if endByte < 0 && unit >= endUnit {
+			endByte = i + len(string(r))
+			break
+		}
+	}
+	if startByte < 0 && startUnit == unit {
+		startByte = len(text)
+	}
+	if endByte < 0 && endUnit == unit {
+		endByte = len(text)
+	}
+	if startByte < 0 || endByte < startByte || endUnit > unit {
+		return "", false
+	}
+	return text[startByte:endByte], true
+}
+
+func utf16RuneLen(r rune) int {
+	if r >= 0x10000 {
+		return 2
+	}
+	return 1
 }
 
 // originalURL 为带 username 的频道消息构造 t.me 链接。

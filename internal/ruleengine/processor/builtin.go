@@ -181,7 +181,7 @@ func (mediaFallbackText) Process(_ context.Context, msg *domainmessage.Normalize
 	var lines []string
 	for _, item := range msg.Media {
 		line := "[" + mediaLabel(item.Type) + "消息]"
-		if item.Caption != "" && item.Caption != msg.Text {
+		if item.Caption != "" && !strings.Contains(msg.Text, item.Caption) {
 			line += " " + item.Caption
 		}
 		if item.FileName != "" {

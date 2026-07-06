@@ -410,7 +410,7 @@ func mediaFallbackText(text string, media []domainmessage.Media, originalURL str
 			label = "图片"
 		}
 		line := "[" + label + "消息]"
-		if item.Caption != "" && item.Caption != text {
+		if item.Caption != "" && !strings.Contains(text, item.Caption) {
 			line += " " + item.Caption
 		}
 		if item.FileName != "" {
