@@ -144,7 +144,7 @@ func firstLocalImage(payload pluginsink.Payload) (domainmessage.Media, bool) {
 
 func firstLocalFile(payload pluginsink.Payload) (domainmessage.Media, bool) {
 	for _, item := range payload.Media {
-		if (item.Type == "file" || item.Type == "document") && item.LocalPath != "" {
+		if (item.Type == "file" || item.Type == "document" || item.Type == "audio" || item.Type == "voice") && item.LocalPath != "" {
 			return item, true
 		}
 	}

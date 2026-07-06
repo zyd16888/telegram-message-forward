@@ -126,6 +126,37 @@ func TestLocalUploadMediaMaterializesStorageKey(t *testing.T) {
 	}
 }
 
+func TestLocalUploadMediaMaterializesAudioAsFile(t *testing.T) {
+	w := &Worker{log: slog.New(slog.DiscardHandler)}
+	w.UseMediaStore(fakeMediaStore{objects: map[string]string{
+		"telegram/source_1/11_0.mp3": "fake-mp3",
+	}})
+
+	caps := domainsink.Capabilities{
+		SupportsFile: true,
+		Media: []domainsink.MediaCapability{
+			{Type: "audio", Supported: false},
+			{Type: "file", Supported: true, MaxSizeMB: 20, RequiresUpload: true, SupportsBinary: true},
+		},
+	}
+	in := []domainmessage.Media{{
+		Type:       "audio",
+		FileName:   "voice.mp3",
+		MimeType:   "audio/mpeg",
+		StorageKey: "telegram/source_1/11_0.mp3",
+		Size:       int64(len("fake-mp3")),
+	}}
+
+	out, cleanup := w.localUploadMedia(context.Background(), caps, in)
+	defer cleanup()
+	if out[0].LocalPath == "" {
+		t.Fatal("audio 可按 file 上传时应从 StorageKey 恢复本地临时文件")
+	}
+	if !supportsAllMedia(caps, out) {
+		t.Fatal("audio 命中文件能力后不应再降级")
+	}
+}
+
 func TestSupportsMediaItemFineGrained(t *testing.T) {
 	doc := mustTempFile(t, "a-*.pdf", []byte("pdf"))
 	img := mustTempFile(t, "a-*.jpg", []byte("jpg"))
@@ -150,6 +181,24 @@ func TestSupportsMediaItemFineGrained(t *testing.T) {
 	}
 	if supportsMediaItem(caps, domainmessage.Media{Type: "photo", Size: 3 * 1024 * 1024, LocalPath: img}) {
 		t.Fatal("图片超过渠道上限应降级")
+	}
+}
+
+func TestSupportsMediaItemAudioFallsBackToFileCapability(t *testing.T) {
+	mp3 := mustTempFile(t, "a-*.mp3", []byte("mp3"))
+	caps := domainsink.Capabilities{
+		SupportsFile: true,
+		Media: []domainsink.MediaCapability{
+			{Type: "audio", Supported: false},
+			{Type: "file", Supported: true, MaxSizeMB: 20, RequiresUpload: true, SupportsBinary: true},
+		},
+	}
+
+	if !supportsMediaItem(caps, domainmessage.Media{Type: "audio", FileName: "a.mp3", MimeType: "audio/mpeg", Size: 1024, LocalPath: mp3}) {
+		t.Fatal("audio 原生不支持但 file 支持时，应按普通文件投递")
+	}
+	if supportsMediaItem(caps, domainmessage.Media{Type: "audio", FileName: "big.mp3", Size: 30 * 1024 * 1024, LocalPath: mp3}) {
+		t.Fatal("audio 按 file 投递时仍应遵守文件大小上限")
 	}
 }
 

@@ -110,10 +110,10 @@ func (s *AppSink) Capabilities() domainsink.Capabilities {
 		Media: []domainsink.MediaCapability{
 			{Type: "image", Supported: true, MaxSizeMB: 10, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为 [图片消息] + caption + 原始链接"},
 			{Type: "file", Supported: true, MaxSizeMB: 20, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为文件名、大小和原始链接摘要"},
-			{Type: "audio", Supported: false, Fallback: "官方支持 voice 素材，但当前内置实现未接入，降级为音频文件名、大小和原始链接摘要"},
+			{Type: "audio", Supported: true, MaxSizeMB: 20, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media_as_file", Fallback: "无本地文件时降级为音频文件名、大小和原始链接摘要"},
 			{Type: "video", Supported: false, Fallback: "官方支持 video 素材，但当前内置实现未接入，降级为视频文件名、大小和原始链接摘要"},
 		},
-		Notes: []string{"应用消息媒体需先上传临时素材，再用 media_id 发送；音频/视频原生发送后置，当前按文本摘要降级。"},
+		Notes: []string{"应用消息媒体需先上传临时素材，再用 media_id 发送；音频按普通文件上传发送，视频原生发送后置。"},
 	}
 }
 
