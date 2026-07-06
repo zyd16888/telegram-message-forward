@@ -37,13 +37,63 @@ const sinkTypeLabelByType = computed(() => new Map(sinkDescriptors.value.map((d)
 const accountNameById = computed(() => new Map(accounts.value.map((a) => [a.id, a.name])))
 
 const setupChecklist = computed(() => [
-  { label: '配置 Telegram App', done: accounts.value.length > 0, route: 'telegram-config' },
+  { label: '配置 Telegram 账号', done: accounts.value.length > 0, route: 'accounts' },
   { label: '同步监听源', done: stats.value.totalSources > 0, route: 'sources' },
   { label: '创建目标渠道', done: stats.value.totalSinks > 0, route: 'sinks' },
-  { label: '创建模板', done: stats.value.totalTemplates > 0, route: 'templates' },
-  { label: '关联规则', done: stats.value.enabledRules > 0 && stats.value.linkedSources > 0, route: 'rules' },
+  { label: '启用转发规则', done: stats.value.enabledRules > 0, route: 'rules' },
+  { label: '规则关联来源', done: stats.value.linkedSources > 0, route: 'rules' },
 ])
-const setupIncomplete = computed(() => setupChecklist.value.some((item) => !item.done))
+const setupIssues = computed(() => setupChecklist.value.filter((item) => !item.done))
+const setupIncomplete = computed(() => setupIssues.value.length > 0)
+const flowReady = computed(() => !setupIncomplete.value)
+const templateModeLabel = computed(() =>
+  stats.value.totalTemplates > 0 ? `${stats.value.totalTemplates} 个模板可选` : '未创建模板，未指定模板的目标将按原文投递',
+)
+
+const overviewCards = computed(() => [
+  {
+    label: '链路状态',
+    value: flowReady.value ? '可运行' : `${setupIssues.value.length} 项待配置`,
+    tone: flowReady.value ? 'good' : 'warn',
+    hint: flowReady.value ? '来源、规则、渠道已形成闭环' : setupIssues.value.map((item) => item.label).join(' / '),
+    route: flowReady.value ? 'deliveries' : setupIssues.value[0]?.route ?? 'rules',
+  },
+  {
+    label: '监听来源',
+    value: `${stats.value.linkedSources}/${stats.value.totalSources}`,
+    tone: stats.value.linkedSources > 0 ? 'good' : 'warn',
+    hint: '已关联规则 / 全部来源',
+    route: 'sources',
+  },
+  {
+    label: '转发规则',
+    value: `${stats.value.enabledRules}/${stats.value.totalRules}`,
+    tone: stats.value.enabledRules > 0 ? 'good' : 'warn',
+    hint: '启用 / 全部规则',
+    route: 'rules',
+  },
+  {
+    label: '目标渠道',
+    value: `${stats.value.enabledSinks}/${stats.value.totalSinks}`,
+    tone: stats.value.enabledSinks > 0 ? 'good' : 'warn',
+    hint: '启用 / 全部渠道',
+    route: 'sinks',
+  },
+  {
+    label: '异常项',
+    value: String(stats.value.warningRules + stats.value.warningSources),
+    tone: stats.value.warningRules + stats.value.warningSources > 0 ? 'danger' : 'good',
+    hint: '来源与规则诊断',
+    route: stats.value.warningRules > 0 ? 'rules' : 'sources',
+  },
+  {
+    label: '模板模式',
+    value: stats.value.totalTemplates > 0 ? '可选模板' : '原文投递',
+    tone: 'neutral',
+    hint: templateModeLabel.value,
+    route: 'templates',
+  },
+])
 
 const templateFilterName = computed(() => {
   if (!templateFilterId.value) return ''
@@ -157,8 +207,46 @@ function sourceTypeLabel(source: Source): string {
   return 'Telegram'
 }
 
+function sourceAccountLabel(source: Source): string {
+  if (source.type === 'rss') return 'RSS'
+  if (source.type === 'webhook') return 'Webhook'
+  return accountNameById.value.get(source.account_id) ?? `账号 #${source.account_id}`
+}
+
+function formatRuntimeTime(value?: string): string {
+  if (!value) return ''
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function sourceRuntimeLabel(source: Source): string {
+  if (!source.enabled) return '未启用'
+  if (source.runner_status === 'running') {
+    return source.runner_recent_message_at ? `运行中 · 最近 ${formatRuntimeTime(source.runner_recent_message_at)}` : '运行中'
+  }
+  return source.runner_last_error ? `未运行 · ${source.runner_last_error}` : '未运行'
+}
+
 function sinkTypeLabel(sink: Sink): string {
   return sinkTypeLabelByType.value.get(sink.type) ?? sink.type
+}
+
+function sinkDeliveryLabel(sink: Sink): string {
+  const total = sink.observability?.delivery_total_24h ?? 0
+  if (!total) return '24h 无投递'
+  const success = sink.observability?.delivery_success_24h ?? 0
+  const rate = Math.round((sink.observability?.success_rate_24h ?? 0) * 100)
+  return `24h ${rate}% · ${success}/${total}`
+}
+
+function sinkLastTestLabel(sink: Sink): string {
+  const obs = sink.observability
+  if (!obs?.last_test_at) return '未测试'
+  return `${obs.last_test_success ? '测试成功' : '测试失败'} · ${formatRuntimeTime(obs.last_test_at)}`
 }
 
 function sourceRuleCount(sourceId: number): number {
@@ -175,6 +263,22 @@ function conditionLabel(type: string): string {
 
 function processorLabel(type: string): string {
   return processorLabelByType.value.get(type) ?? type
+}
+
+function ruleSourceLabel(sourceNode: FlowRuleGraphNode['sources'][number]): string {
+  return sourceNode.source?.name ?? `来源 #${sourceNode.sourceId}`
+}
+
+function targetTemplateLabel(target: FlowRuleGraphNode['targets'][number]): string {
+  if (target.template) return target.template.name
+  if (target.templateId) return `模板 #${target.templateId}`
+  return '原文'
+}
+
+function targetTemplateClass(target: FlowRuleGraphNode['targets'][number]): string {
+  if (target.template) return 'template'
+  if (target.templateId) return 'missing'
+  return 'plain'
 }
 
 // --- 数据与操作 ---
@@ -250,6 +354,14 @@ function goToDeliveries() {
   router.push({ name: 'deliveries', query })
 }
 
+function goToSelectedConfig() {
+  const sel = selection.value
+  if (!sel) return
+  if (sel.kind === 'source') router.push({ name: 'sources', query: { source_id: String(sel.id) } })
+  if (sel.kind === 'rule') router.push({ name: 'rules', query: { rule_id: String(sel.id) } })
+  if (sel.kind === 'sink') router.push({ name: 'sinks', query: { sink_id: String(sel.id) } })
+}
+
 function go(name: string) {
   router.push({ name })
 }
@@ -290,8 +402,26 @@ onMounted(async () => {
       </template>
     </PageHeader>
 
+    <section class="overview-grid">
+      <button
+        v-for="item in overviewCards"
+        :key="item.label"
+        type="button"
+        class="overview-card"
+        :class="item.tone"
+        @click="go(item.route)"
+      >
+        <span class="overview-label">{{ item.label }}</span>
+        <strong class="overview-value">{{ item.value }}</strong>
+        <span class="overview-hint">{{ item.hint }}</span>
+      </button>
+    </section>
+
     <section v-if="setupIncomplete" class="setup-panel">
-      <div class="setup-title">尚未完成基础配置</div>
+      <div class="setup-copy">
+        <div class="setup-title">链路还差 {{ setupIssues.length }} 项才能自动转发</div>
+        <div class="setup-desc">模板不是必需配置；没有模板时会按原文或默认文本投递。</div>
+      </div>
       <div class="setup-steps">
         <button
           v-for="item in setupChecklist"
@@ -305,6 +435,13 @@ onMounted(async () => {
           <span>{{ item.label }}</span>
         </button>
       </div>
+    </section>
+    <section v-else-if="stats.totalTemplates === 0" class="template-note">
+      <div>
+        <strong>当前使用原文投递</strong>
+        <span>未创建渲染模板不会阻塞转发；需要统一格式时再补模板即可。</span>
+      </div>
+      <NButton size="small" secondary @click="go('templates')">管理模板</NButton>
     </section>
 
     <div class="board-toolbar">
@@ -330,6 +467,7 @@ onMounted(async () => {
       </span>
       <div class="context-actions">
         <NButton v-if="selection.kind !== 'rule'" size="small" @click="openCreateRule">沿此建规则</NButton>
+        <NButton size="small" @click="goToSelectedConfig">管理配置</NButton>
         <NButton size="small" @click="goToDeliveries">查看投递记录</NButton>
         <NButton size="small" text type="primary" @click="clearSelection">清除选中</NButton>
       </div>
@@ -358,10 +496,13 @@ onMounted(async () => {
               </div>
               <div class="node-meta">
                 <span class="node-tag">{{ sourceTypeLabel(source) }}</span>
-                <span v-if="source.type !== 'rss' && source.type !== 'webhook'" class="node-sub">
-                  {{ accountNameById.get(source.account_id) ?? '' }}
-                </span>
+                <span class="node-sub">{{ sourceAccountLabel(source) }}</span>
                 <span class="node-sub">{{ sourceRuleCount(source.id) ? `${sourceRuleCount(source.id)} 条规则` : '未接规则' }}</span>
+              </div>
+              <div class="node-foot">
+                <span class="node-foot-text" :class="{ muted: !source.enabled || source.runner_status !== 'running' }">
+                  {{ sourceRuntimeLabel(source) }}
+                </span>
               </div>
             </button>
             <NEmpty v-if="!visibleSources.length" size="small" description="没有匹配的来源" />
@@ -416,26 +557,41 @@ onMounted(async () => {
                 <template v-if="node.rule.stop_on_match"> · 命中即停</template>
                 · {{ node.sources.length }} 来源 → {{ node.targets.length }} 目标
               </div>
-              <div v-if="node.rule.conditions.length || node.rule.processors.length" class="chip-row">
-                <span
-                  v-for="(condition, index) in node.rule.conditions"
-                  :key="`c-${condition.type}-${index}`"
-                  class="pipe-chip condition"
-                >
-                  {{ conditionLabel(condition.type) }}
-                </span>
-                <span
-                  v-for="(processor, index) in node.rule.processors"
-                  :key="`p-${processor.type}-${index}`"
-                  class="pipe-chip processor"
-                >
-                  {{ processorLabel(processor.type) }}
-                </span>
+              <div class="path-rows">
+                <div class="path-row">
+                  <span class="path-label">来源</span>
+                  <span class="path-values">
+                    <span v-for="source in node.sources" :key="source.sourceId" class="path-chip">
+                      {{ ruleSourceLabel(source) }}
+                    </span>
+                    <span v-if="!node.sources.length" class="path-chip missing">未指定来源</span>
+                  </span>
+                </div>
+                <div class="path-row">
+                  <span class="path-label">处理</span>
+                  <span class="path-values">
+                    <span
+                      v-for="(condition, index) in node.rule.conditions"
+                      :key="`pc-${condition.type}-${index}`"
+                      class="path-chip condition"
+                    >
+                      {{ conditionLabel(condition.type) }}
+                    </span>
+                    <span
+                      v-for="(processor, index) in node.rule.processors"
+                      :key="`pp-${processor.type}-${index}`"
+                      class="path-chip processor"
+                    >
+                      {{ processorLabel(processor.type) }}
+                    </span>
+                    <span v-if="!node.rule.conditions.length && !node.rule.processors.length" class="path-chip plain">全部消息</span>
+                  </span>
+                </div>
               </div>
               <div class="target-rows">
                 <div v-for="target in node.targets" :key="`${target.sinkId}-${target.templateId ?? 0}`" class="target-row">
                   <span class="target-sink">{{ target.sink?.name ?? `渠道 #${target.sinkId}` }}</span>
-                  <span class="target-template">{{ target.template?.name ?? '原文' }}</span>
+                  <span class="target-template" :class="targetTemplateClass(target)">{{ targetTemplateLabel(target) }}</span>
                 </div>
                 <div v-if="!node.targets.length" class="target-row empty">未配置目标渠道</div>
               </div>
@@ -471,6 +627,12 @@ onMounted(async () => {
                 <span class="node-tag">{{ sinkTypeLabel(sink) }}</span>
                 <span class="node-sub">{{ sinkRuleCount(sink.id) ? `${sinkRuleCount(sink.id)} 条规则` : '未接规则' }}</span>
               </div>
+              <div class="node-foot">
+                <span class="node-foot-text">{{ sinkDeliveryLabel(sink) }}</span>
+                <span class="node-foot-text" :class="{ muted: !sink.observability?.last_test_success }">
+                  {{ sinkLastTestLabel(sink) }}
+                </span>
+              </div>
             </button>
             <NEmpty v-if="!visibleSinks.length" size="small" description="没有匹配的渠道" />
           </div>
@@ -503,19 +665,86 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.overview-card {
+  min-width: 0;
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid var(--clay-border);
+  border-radius: 12px;
+  background: var(--clay-surface);
+  box-shadow: var(--clay-out-sm);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.overview-card:hover,
+.overview-card:focus-visible {
+  border-color: var(--clay-border-strong);
+  box-shadow: var(--clay-hover);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.overview-label,
+.overview-hint {
+  display: block;
+  color: var(--clay-text-3);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.overview-value {
+  display: block;
+  margin: 4px 0;
+  color: var(--clay-text);
+  font-size: 22px;
+  line-height: 1.15;
+  font-weight: 900;
+}
+
+.overview-card.good .overview-value {
+  color: #14755f;
+}
+
+.overview-card.warn .overview-value {
+  color: #b45309;
+}
+
+.overview-card.danger .overview-value {
+  color: #b91c1c;
+}
+
 .setup-panel {
-  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--clay-surface);
   box-shadow: var(--clay-extruded-sm);
 }
 
 .setup-title {
-  margin-bottom: 10px;
   color: var(--clay-text);
   font-size: 14px;
   font-weight: 800;
+}
+
+.setup-desc {
+  margin-top: 5px;
+  color: var(--clay-text-3);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .setup-steps {
@@ -570,6 +799,31 @@ onMounted(async () => {
   box-shadow: var(--clay-inset-sm);
   font-size: 12px;
   font-weight: 900;
+}
+
+.template-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--clay-primary) 22%, var(--clay-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--clay-primary-soft) 38%, var(--clay-surface));
+}
+
+.template-note strong {
+  display: block;
+  color: var(--clay-text);
+  font-size: 13px;
+}
+
+.template-note span {
+  display: block;
+  margin-top: 3px;
+  color: var(--clay-text-3);
+  font-size: 12px;
 }
 
 .board-toolbar {
@@ -789,6 +1043,29 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
+.node-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.node-foot-text {
+  max-width: 100%;
+  color: var(--clay-text-2);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-foot-text.muted {
+  color: var(--clay-text-3);
+}
+
 /* 规则卡片 */
 
 .rule-card {
@@ -833,17 +1110,41 @@ onMounted(async () => {
   font-size: 12px;
 }
 
-.chip-row {
-  display: flex;
-  flex-wrap: wrap;
+.path-rows {
+  display: grid;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 9px;
 }
 
-.pipe-chip {
+.path-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.path-label {
+  padding-top: 2px;
+  color: var(--clay-text-3);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.path-values {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.path-chip {
   max-width: 100%;
   padding: 2px 8px;
   border-radius: 999px;
+  color: var(--clay-text-2);
+  background: var(--clay-surface-2);
+  border: 1px solid var(--clay-border);
   font-size: 11px;
   font-weight: 600;
   overflow: hidden;
@@ -851,14 +1152,26 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
-.pipe-chip.condition {
+.path-chip.condition {
   color: #1d6fb8;
   background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.24);
 }
 
-.pipe-chip.processor {
+.path-chip.processor {
   color: #7c3aed;
   background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.24);
+}
+
+.path-chip.missing {
+  color: #b45309;
+  background: var(--clay-warning-soft);
+  border-color: rgba(180, 83, 9, 0.24);
+}
+
+.path-chip.plain {
+  color: var(--clay-text-3);
 }
 
 .target-rows {
@@ -899,7 +1212,25 @@ onMounted(async () => {
   color: var(--clay-text-3);
 }
 
+.target-template.template {
+  color: #1d6fb8;
+  font-weight: 700;
+}
+
+.target-template.missing {
+  color: #b45309;
+  font-weight: 700;
+}
+
+.target-template.plain {
+  color: var(--clay-text-3);
+}
+
 @media (max-width: 1100px) {
+  .overview-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .board {
     grid-template-columns: 1fr 1fr;
   }
@@ -911,7 +1242,15 @@ onMounted(async () => {
 }
 
 @media (max-width: 680px) {
+  .overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .board {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-panel {
     grid-template-columns: 1fr;
   }
 
