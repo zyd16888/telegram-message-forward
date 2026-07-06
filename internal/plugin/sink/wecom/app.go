@@ -2,6 +2,7 @@ package wecom
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -19,7 +20,7 @@ func init() {
 	})
 }
 
-// --- 包级 access_token 缓存：按 corpid 分桶 ---
+// --- 包级 access_token 缓存：按企业应用凭据分桶 ---
 
 type cachedToken struct {
 	token   string
@@ -151,11 +152,17 @@ func (s *AppSink) toUser(sink *domainsink.Sink) string {
 	return "@all"
 }
 
+func tokenCacheKey(corpid, agentid, secret string) string {
+	sum := sha256.Sum256([]byte(secret))
+	return fmt.Sprintf("%s:%s:%x", corpid, agentid, sum)
+}
+
 // getToken 返回有效的 access_token，必要时刷新并缓存。forceRefresh 强制重新获取。
-func (s *AppSink) getToken(ctx context.Context, corpid, secret string, debug bool, forceRefresh bool) (string, error) {
+func (s *AppSink) getToken(ctx context.Context, corpid, agentid, secret string, debug bool, forceRefresh bool) (string, error) {
+	cacheKey := tokenCacheKey(corpid, agentid, secret)
 	tokenMu.Lock()
 	if !forceRefresh {
-		if c, ok := tokenCache[corpid]; ok && time.Now().Before(c.expires) {
+		if c, ok := tokenCache[cacheKey]; ok && time.Now().Before(c.expires) {
 			tok := c.token
 			tokenMu.Unlock()
 			return tok, nil
@@ -185,7 +192,7 @@ func (s *AppSink) getToken(ctx context.Context, corpid, secret string, debug boo
 		ttl = 7200 * time.Second
 	}
 	tokenMu.Lock()
-	tokenCache[corpid] = &cachedToken{token: tr.AccessToken, expires: time.Now().Add(ttl - tokenExpirySafety)}
+	tokenCache[cacheKey] = &cachedToken{token: tr.AccessToken, expires: time.Now().Add(ttl - tokenExpirySafety)}
 	tokenMu.Unlock()
 	return tr.AccessToken, nil
 }
@@ -221,7 +228,7 @@ func (s *AppSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 // trySend 发送一次；返回结果、是否因 token 失效需要重试、以及网络错误。
 func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, agentid, secret string, payload pluginsink.Payload, forceRefresh bool) (*pluginsink.Result, bool, error) {
 	debug := debugEnabled(sink.Config)
-	token, err := s.getToken(ctx, corpid, secret, debug, forceRefresh)
+	token, err := s.getToken(ctx, corpid, agentid, secret, debug, forceRefresh)
 	if err != nil {
 		return nil, false, err
 	}

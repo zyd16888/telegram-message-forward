@@ -269,6 +269,72 @@ func TestAppTokenCacheAndRefresh(t *testing.T) {
 	}
 }
 
+func TestAppTokenCacheScopedByAppSecret(t *testing.T) {
+	tokenMu.Lock()
+	tokenCache = map[string]*cachedToken{}
+	tokenMu.Unlock()
+
+	var tokenCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gettoken"):
+			tokenCalls.Add(1)
+			secret := r.URL.Query().Get("corpsecret")
+			switch secret {
+			case "secret1":
+				io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK_APP_1","expires_in":7200}`)
+			case "secret2":
+				io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK_APP_2","expires_in":7200}`)
+			default:
+				t.Errorf("未预期 secret: %s", secret)
+				io.WriteString(w, `{"errcode":40001,"errmsg":"invalid secret"}`)
+			}
+		case strings.Contains(r.URL.Path, "/message/send"):
+			token := r.URL.Query().Get("access_token")
+			b, _ := io.ReadAll(r.Body)
+			var payload map[string]any
+			_ = json.Unmarshal(b, &payload)
+			agentid, _ := payload["agentid"].(string)
+			if (agentid == "1000001" && token != "TOK_APP_1") || (agentid == "1000002" && token != "TOK_APP_2") {
+				io.WriteString(w, `{"errcode":301002,"errmsg":"not allow operate another agent with this accesstoken."}`)
+				return
+			}
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		default:
+			t.Errorf("未预期请求: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	apiBase = srv.URL
+	defer func() { apiBase = "https://qyapi.weixin.qq.com/cgi-bin" }()
+
+	s := NewApp()
+	app1 := &domainsink.Sink{
+		Type:   "wecom_app",
+		Config: map[string]any{"corpid": "corp1", "agentid": "1000001"},
+		Secret: []byte("secret1"),
+	}
+	app2 := &domainsink.Sink{
+		Type:   "wecom_app",
+		Config: map[string]any{"corpid": "corp1", "agentid": "1000002"},
+		Secret: []byte("secret2"),
+	}
+
+	for _, sink := range []*domainsink.Sink{app1, app2, app1} {
+		res, err := s.Send(context.Background(), sink, pluginsink.Payload{Format: "text", Text: "hi"}, pluginsink.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.Success {
+			t.Fatalf("应用 %v 应使用自己的 access_token: %+v", sink.Config["agentid"], res)
+		}
+	}
+	if tokenCalls.Load() != 2 {
+		t.Fatalf("两个不同应用应分别获取 token，实际 gettoken 调用 %d 次", tokenCalls.Load())
+	}
+}
+
 func TestAppDebugParam(t *testing.T) {
 	tokenMu.Lock()
 	tokenCache = map[string]*cachedToken{}
