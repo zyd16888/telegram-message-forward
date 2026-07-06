@@ -77,6 +77,13 @@ func (s *AppSink) Descriptor() pluginsink.Descriptor {
 				Placeholder: "@all 或 user1|user2",
 				Help:        "留空时默认 @all；多个成员用 | 分隔。",
 			},
+			{
+				Key:     "debug",
+				Label:   "调试模式",
+				Type:    formschema.FieldBoolean,
+				Default: false,
+				Help:    "开启后企业微信相关请求会追加 debug=1 参数。",
+			},
 		},
 		SecretField: &formschema.FieldSpec{
 			Key:         "secret",
@@ -145,7 +152,7 @@ func (s *AppSink) toUser(sink *domainsink.Sink) string {
 }
 
 // getToken 返回有效的 access_token，必要时刷新并缓存。forceRefresh 强制重新获取。
-func (s *AppSink) getToken(ctx context.Context, corpid, secret string, forceRefresh bool) (string, error) {
+func (s *AppSink) getToken(ctx context.Context, corpid, secret string, debug bool, forceRefresh bool) (string, error) {
 	tokenMu.Lock()
 	if !forceRefresh {
 		if c, ok := tokenCache[corpid]; ok && time.Now().Before(c.expires) {
@@ -156,7 +163,7 @@ func (s *AppSink) getToken(ctx context.Context, corpid, secret string, forceRefr
 	}
 	tokenMu.Unlock()
 
-	url := fmt.Sprintf("%s/gettoken?corpid=%s&corpsecret=%s", apiBase, corpid, secret)
+	url := withDebugParam(fmt.Sprintf("%s/gettoken?corpid=%s&corpsecret=%s", apiBase, corpid, secret), debug)
 	resp, err := s.client.Get(ctx, url, nil)
 	if err != nil {
 		return "", err
@@ -213,7 +220,8 @@ func (s *AppSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 
 // trySend 发送一次；返回结果、是否因 token 失效需要重试、以及网络错误。
 func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, agentid, secret string, payload pluginsink.Payload, forceRefresh bool) (*pluginsink.Result, bool, error) {
-	token, err := s.getToken(ctx, corpid, secret, forceRefresh)
+	debug := debugEnabled(sink.Config)
+	token, err := s.getToken(ctx, corpid, secret, debug, forceRefresh)
 	if err != nil {
 		return nil, false, err
 	}
@@ -225,7 +233,7 @@ func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, ag
 				return textResult, expired, err
 			}
 		}
-		mediaID, summary, err := s.uploadMedia(ctx, token, "image", img.LocalPath)
+		mediaID, summary, err := s.uploadMedia(ctx, token, "image", img.LocalPath, debug)
 		if err != nil {
 			return failResult(summary, err.Error()), false, err
 		}
@@ -238,7 +246,7 @@ func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, ag
 				return textResult, expired, err
 			}
 		}
-		mediaID, summary, err := s.uploadMedia(ctx, token, "file", file.LocalPath)
+		mediaID, summary, err := s.uploadMedia(ctx, token, "file", file.LocalPath, debug)
 		if err != nil {
 			return failResult(summary, err.Error()), false, err
 		}
@@ -264,7 +272,7 @@ func (s *AppSink) sendAppText(ctx context.Context, sink *domainsink.Sink, token,
 		body["text"] = textContent{Content: payload.Text}
 	}
 
-	url := apiBase + "/message/send?access_token=" + token
+	url := withDebugParam(apiBase+"/message/send?access_token="+token, debugEnabled(sink.Config))
 	resp, err := s.client.PostJSON(ctx, url, body, nil)
 	if err != nil {
 		return nil, false, err
@@ -279,8 +287,8 @@ func (s *AppSink) sendAppText(ctx context.Context, sink *domainsink.Sink, token,
 	return failResult(summary, errMsg), false, nil
 }
 
-func (s *AppSink) uploadMedia(ctx context.Context, token, mediaType, path string) (string, []byte, error) {
-	url := fmt.Sprintf("%s/media/upload?access_token=%s&type=%s", apiBase, token, mediaType)
+func (s *AppSink) uploadMedia(ctx context.Context, token, mediaType, path string, debug bool) (string, []byte, error) {
+	url := withDebugParam(fmt.Sprintf("%s/media/upload?access_token=%s&type=%s", apiBase, token, mediaType), debug)
 	resp, err := s.client.PostMultipartFile(ctx, url, "media", path, nil)
 	if err != nil {
 		return "", nil, err
@@ -306,7 +314,7 @@ func (s *AppSink) sendAppFile(ctx context.Context, sink *domainsink.Sink, token,
 		"agentid": agentid,
 		"file":    fileContent{MediaID: mediaID},
 	}
-	url := apiBase + "/message/send?access_token=" + token
+	url := withDebugParam(apiBase+"/message/send?access_token="+token, debugEnabled(sink.Config))
 	resp, err := s.client.PostJSON(ctx, url, body, nil)
 	if err != nil {
 		return nil, false, err
@@ -325,7 +333,7 @@ func (s *AppSink) sendAppImage(ctx context.Context, sink *domainsink.Sink, token
 		"agentid": agentid,
 		"image":   imageContent{MediaID: mediaID},
 	}
-	url := apiBase + "/message/send?access_token=" + token
+	url := withDebugParam(apiBase+"/message/send?access_token="+token, debugEnabled(sink.Config))
 	resp, err := s.client.PostJSON(ctx, url, body, nil)
 	if err != nil {
 		return nil, false, err

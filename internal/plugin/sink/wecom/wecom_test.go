@@ -116,6 +116,47 @@ func TestBotSendLocalFile(t *testing.T) {
 	}
 }
 
+func TestBotDebugParam(t *testing.T) {
+	pdf := t.TempDir() + "/report.pdf"
+	if err := os.WriteFile(pdf, []byte("%PDF-fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var uploadDebug, sendDebug atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/webhook/upload_media"):
+			uploadDebug.Store(r.URL.Query().Get("debug"))
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","type":"file","media_id":"MEDIA_FILE"}`)
+		case strings.Contains(r.URL.Path, "/webhook/send"):
+			sendDebug.Store(r.URL.Query().Get("debug"))
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		default:
+			t.Errorf("未预期请求: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	s := NewBot()
+	sink := &domainsink.Sink{Type: "wecom_bot", Config: map[string]any{"webhook_url": srv.URL + "/cgi-bin/webhook/send?key=TEST", "debug": true}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Text:  "文件",
+		Media: []domainmessage.Media{{Type: "document", LocalPath: pdf}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("开启 debug 后应成功: %+v", res)
+	}
+	if got, _ := sendDebug.Load().(string); got != "1" {
+		t.Fatalf("send debug = %q, want 1", got)
+	}
+	if got, _ := uploadDebug.Load().(string); got != "1" {
+		t.Fatalf("upload debug = %q, want 1", got)
+	}
+}
+
 func TestBotSendFileUploadURLUnderivable(t *testing.T) {
 	pdf := t.TempDir() + "/report.pdf"
 	if err := os.WriteFile(pdf, []byte("%PDF-fake"), 0o644); err != nil {
@@ -225,6 +266,64 @@ func TestAppTokenCacheAndRefresh(t *testing.T) {
 	}
 	if tokenCalls.Load() != tokBefore {
 		t.Fatalf("token 应命中缓存，不应再次 gettoken（before=%d after=%d）", tokBefore, tokenCalls.Load())
+	}
+}
+
+func TestAppDebugParam(t *testing.T) {
+	tokenMu.Lock()
+	tokenCache = map[string]*cachedToken{}
+	tokenMu.Unlock()
+
+	img := t.TempDir() + "/image.jpg"
+	if err := os.WriteFile(img, []byte("fake-image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var tokenDebug, uploadDebug, sendDebug atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gettoken"):
+			tokenDebug.Store(r.URL.Query().Get("debug"))
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK","expires_in":7200}`)
+		case strings.Contains(r.URL.Path, "/media/upload"):
+			uploadDebug.Store(r.URL.Query().Get("debug"))
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","media_id":"MEDIA_ID"}`)
+		case strings.Contains(r.URL.Path, "/message/send"):
+			sendDebug.Store(r.URL.Query().Get("debug"))
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		default:
+			t.Errorf("未预期请求: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	apiBase = srv.URL
+	defer func() { apiBase = "https://qyapi.weixin.qq.com/cgi-bin" }()
+
+	s := NewApp()
+	sink := &domainsink.Sink{
+		Type:   "wecom_app",
+		Config: map[string]any{"corpid": "corp1", "agentid": "1000002", "debug": true},
+		Secret: []byte("secret1"),
+	}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Text:  "图片",
+		Media: []domainmessage.Media{{Type: "image", LocalPath: img}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("开启 debug 后应成功: %+v", res)
+	}
+	if got, _ := tokenDebug.Load().(string); got != "1" {
+		t.Fatalf("gettoken debug = %q, want 1", got)
+	}
+	if got, _ := uploadDebug.Load().(string); got != "1" {
+		t.Fatalf("upload debug = %q, want 1", got)
+	}
+	if got, _ := sendDebug.Load().(string); got != "1" {
+		t.Fatalf("send debug = %q, want 1", got)
 	}
 }
 

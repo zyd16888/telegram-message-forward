@@ -49,6 +49,13 @@ func (s *BotSink) Descriptor() pluginsink.Descriptor {
 				Placeholder: "可选；填写后优先使用完整 URL",
 				Help:        "通常只需要填写下方机器人 Key；如果网关地址特殊，可直接填写完整 webhook_url。",
 			},
+			{
+				Key:     "debug",
+				Label:   "调试模式",
+				Type:    formschema.FieldBoolean,
+				Default: false,
+				Help:    "开启后企业微信相关请求会追加 debug=1 参数。",
+			},
 		},
 		SecretField: &formschema.FieldSpec{
 			Key:         "secret",
@@ -91,14 +98,15 @@ func (s *BotSink) ValidateConfig(config map[string]any) error {
 
 // webhookURL 组装机器人 webhook 地址。优先 config.webhook_url；否则用 secret 作为 key。
 func (s *BotSink) webhookURL(sink *domainsink.Sink) (string, string, error) {
+	debug := debugEnabled(sink.Config)
 	if url, _ := sink.Config["webhook_url"].(string); url != "" {
-		return url, url, nil
+		return withDebugParam(url, debug), url, nil
 	}
 	key := string(sink.Secret)
 	if key == "" {
 		return "", "", fmt.Errorf("wecom_bot 缺少 webhook key（secret）或 webhook_url")
 	}
-	return apiBase + "/webhook/send?key=" + key, "wecom_bot:" + key, nil
+	return withDebugParam(apiBase+"/webhook/send?key="+key, debug), "wecom_bot:" + key, nil
 }
 
 // Send 向群机器人 webhook 发送消息。

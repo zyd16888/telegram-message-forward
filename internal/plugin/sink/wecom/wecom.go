@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -101,6 +102,30 @@ func limiterFor(key string) *rate.Limiter {
 // waitRate 阻塞直到该渠道允许发送或 ctx 取消（触发限频时排队而非报错）。
 func waitRate(ctx context.Context, key string) error {
 	return limiterFor(key).Wait(ctx)
+}
+
+func debugEnabled(config map[string]any) bool {
+	switch v := config["debug"].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "1" || v == "true"
+	}
+	return false
+}
+
+func withDebugParam(rawURL string, enabled bool) string {
+	if !enabled {
+		return rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	q.Set("debug", "1")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // failResult 构造失败结果。
