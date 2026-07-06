@@ -81,7 +81,7 @@ func (h *SourceHandler) Create(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": dto.NewSourceDTO(s)})
+	c.JSON(http.StatusCreated, gin.H{"data": newSourceDTOWithRuntime(s, h.svc.RuntimeStatusBySource())})
 }
 
 // Update PUT /sources/:id
@@ -103,7 +103,7 @@ func (h *SourceHandler) Update(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": dto.NewSourceDTO(s)})
+	c.JSON(http.StatusOK, gin.H{"data": newSourceDTOWithRuntime(s, h.svc.RuntimeStatusBySource())})
 }
 
 // Delete DELETE /sources/:id

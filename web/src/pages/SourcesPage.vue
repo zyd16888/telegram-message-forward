@@ -123,10 +123,10 @@ function formatRuntimeTime(value?: string): string {
 
 async function toggle(row: Source, value: boolean) {
   try {
-    await sourcesApi.update(row.id, { enabled: value })
+    const updated = await sourcesApi.update(row.id, { enabled: value })
     // sources 是 shallowRef：直接改 row.enabled 不会触发表格重新渲染，
     // 必须替换数组里对应项的引用。
-    sources.value = sources.value.map((s) => (s.id === row.id ? { ...s, enabled: value } : s))
+    sources.value = sources.value.map((s) => (s.id === row.id ? updated : s))
   } catch (e) {
     message.error('更新失败：' + errText(e))
   }
@@ -135,8 +135,8 @@ async function toggle(row: Source, value: boolean) {
 async function toggleDownloadFiles(row: Source, value: boolean) {
   const config = { ...(row.config ?? {}), download_files: value }
   try {
-    await sourcesApi.update(row.id, { config })
-    sources.value = sources.value.map((s) => (s.id === row.id ? { ...s, config } : s))
+    const updated = await sourcesApi.update(row.id, { config })
+    sources.value = sources.value.map((s) => (s.id === row.id ? updated : s))
   } catch (e) {
     message.error('更新失败：' + errText(e))
   }

@@ -163,6 +163,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domainsource.Sou
 	if err := s.sources.Create(ctx, src); err != nil {
 		return nil, err
 	}
+	if src.Enabled {
+		if err := s.startSource(ctx, src); err != nil {
+			return nil, fmt.Errorf("source 已保存但启动失败: %w", err)
+		}
+	}
 	return src, nil
 }
 
@@ -195,9 +200,13 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*domain
 	}
 	if toggled {
 		if src.Enabled {
-			_ = s.Start(ctx, src.ID)
+			if err := s.startSource(ctx, src); err != nil {
+				return nil, err
+			}
 		} else {
-			_ = s.Stop(ctx, src.ID)
+			if err := s.stopSource(ctx, src); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return src, nil
@@ -291,6 +300,10 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
+	return s.startSource(ctx, src)
+}
+
+func (s *Service) startSource(ctx context.Context, src *domainsource.Source) error {
 	plugin, err := s.pluginForSource(src)
 	if err != nil {
 		return err
@@ -305,6 +318,9 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 			return fmt.Errorf("账号未登录，无法启动监听（当前状态 %s）", acc.Status)
 		}
 	}
+	if s.manager == nil || s.manager.ingest == nil {
+		return fmt.Errorf("source manager 未初始化")
+	}
 	return plugin.Start(ctx, acc, src, s.manager.ingest.Ingest)
 }
 
@@ -314,6 +330,10 @@ func (s *Service) Stop(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
+	return s.stopSource(ctx, src)
+}
+
+func (s *Service) stopSource(ctx context.Context, src *domainsource.Source) error {
 	plugin, err := s.pluginForSource(src)
 	if err != nil {
 		return err
