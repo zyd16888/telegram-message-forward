@@ -26,7 +26,8 @@ const successRate = computed(() => {
   const total = windowTotal.value
   if (total === 0) return '—'
   const ok = statusCount.value['success'] ?? 0
-  return `${Math.round((ok / total) * 100)}%`
+  const rate = (ok / total) * 100
+  return ok === total ? '100%' : `${rate.toFixed(1)}%`
 })
 
 // 顶部四张主统计瓷砖，各配一个点缀色。
