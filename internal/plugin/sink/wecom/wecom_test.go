@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -72,23 +73,48 @@ func TestBotSendLocalImage(t *testing.T) {
 }
 
 func TestBotSendLocalFile(t *testing.T) {
-	pdf := t.TempDir() + "/report.pdf"
+	pdf := t.TempDir() + "/tmf-dispatch-temp"
 	if err := os.WriteFile(pdf, []byte("%PDF-fake"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	var uploadCalled, sendBody atomic.Value
+	var mu sync.Mutex
+	var events []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/webhook/upload_media"):
+			mu.Lock()
+			events = append(events, "upload")
+			mu.Unlock()
 			if r.URL.Query().Get("type") != "file" {
 				t.Errorf("upload type = %q, want file", r.URL.Query().Get("type"))
+			}
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Errorf("解析 multipart 失败: %v", err)
+			} else {
+				files := r.MultipartForm.File["media"]
+				if len(files) != 1 {
+					t.Errorf("上传文件数量 = %d, want 1", len(files))
+				} else if got := files[0].Filename; got != "report.pdf" {
+					t.Errorf("上传文件名 = %q, want report.pdf", got)
+				}
 			}
 			uploadCalled.Store(true)
 			io.WriteString(w, `{"errcode":0,"errmsg":"ok","type":"file","media_id":"MEDIA_FILE"}`)
 		case strings.Contains(r.URL.Path, "/webhook/send"):
 			b, _ := io.ReadAll(r.Body)
-			sendBody.Store(string(b))
+			body := string(b)
+			if strings.Contains(body, `"msgtype":"file"`) {
+				mu.Lock()
+				events = append(events, "file")
+				mu.Unlock()
+				sendBody.Store(body)
+			} else if strings.Contains(body, `"msgtype":"text"`) {
+				mu.Lock()
+				events = append(events, "text")
+				mu.Unlock()
+			}
 			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
 		default:
 			t.Errorf("未预期请求: %s", r.URL.Path)
@@ -99,6 +125,7 @@ func TestBotSendLocalFile(t *testing.T) {
 	s := NewBot()
 	sink := &domainsink.Sink{Type: "wecom_bot", Config: map[string]any{"webhook_url": srv.URL + "/cgi-bin/webhook/send?key=TEST"}}
 	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Text:  "文件附言",
 		Media: []domainmessage.Media{{Type: "document", FileName: "report.pdf", LocalPath: pdf}},
 	}, pluginsink.Options{})
 	if err != nil {
@@ -113,6 +140,12 @@ func TestBotSendLocalFile(t *testing.T) {
 	body, _ := sendBody.Load().(string)
 	if !strings.Contains(body, `"msgtype":"file"`) || !strings.Contains(body, "MEDIA_FILE") {
 		t.Fatalf("文件请求体不正确: %s", body)
+	}
+	mu.Lock()
+	gotEvents := strings.Join(events, ",")
+	mu.Unlock()
+	if gotEvents != "upload,file,text" {
+		t.Fatalf("发送顺序 = %s, want upload,file,text", gotEvents)
 	}
 }
 
@@ -461,24 +494,47 @@ func TestAppSendLocalFileUploadsMedia(t *testing.T) {
 	tokenCache = map[string]*cachedToken{}
 	tokenMu.Unlock()
 
-	pdf := t.TempDir() + "/report.pdf"
+	pdf := t.TempDir() + "/tmf-dispatch-temp"
 	if err := os.WriteFile(pdf, []byte("%PDF-fake"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	var uploadType atomic.Value
 	var fileSent atomic.Bool
+	var mu sync.Mutex
+	var events []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/gettoken"):
 			io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK","expires_in":7200}`)
 		case strings.Contains(r.URL.Path, "/media/upload"):
+			mu.Lock()
+			events = append(events, "upload")
+			mu.Unlock()
 			uploadType.Store(r.URL.Query().Get("type"))
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Errorf("解析 multipart 失败: %v", err)
+			} else {
+				files := r.MultipartForm.File["media"]
+				if len(files) != 1 {
+					t.Errorf("上传文件数量 = %d, want 1", len(files))
+				} else if got := files[0].Filename; got != "report.pdf" {
+					t.Errorf("上传文件名 = %q, want report.pdf", got)
+				}
+			}
 			io.WriteString(w, `{"errcode":0,"errmsg":"ok","media_id":"MEDIA_FILE"}`)
 		case strings.Contains(r.URL.Path, "/message/send"):
 			b, _ := io.ReadAll(r.Body)
-			if strings.Contains(string(b), `"msgtype":"file"`) && strings.Contains(string(b), "MEDIA_FILE") {
+			body := string(b)
+			if strings.Contains(body, `"msgtype":"file"`) && strings.Contains(body, "MEDIA_FILE") {
 				fileSent.Store(true)
+				mu.Lock()
+				events = append(events, "file")
+				mu.Unlock()
+			} else if strings.Contains(body, `"msgtype":"text"`) {
+				mu.Lock()
+				events = append(events, "text")
+				mu.Unlock()
 			}
 			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
 		}
@@ -506,5 +562,11 @@ func TestAppSendLocalFileUploadsMedia(t *testing.T) {
 	}
 	if got, _ := uploadType.Load().(string); got != "file" {
 		t.Fatalf("上传素材类型 = %q, want file", got)
+	}
+	mu.Lock()
+	gotEvents := strings.Join(events, ",")
+	mu.Unlock()
+	if gotEvents != "upload,file,text" {
+		t.Fatalf("发送顺序 = %s, want upload,file,text", gotEvents)
 	}
 }

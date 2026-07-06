@@ -234,34 +234,37 @@ func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, ag
 	}
 
 	if img, ok := firstLocalImage(payload); ok {
-		if payload.Text != "" {
-			textResult, expired, err := s.sendAppText(ctx, sink, token, agentid, payload)
-			if err != nil || expired || textResult == nil || !textResult.Success {
-				return textResult, expired, err
-			}
-		}
-		mediaID, summary, err := s.uploadMedia(ctx, token, "image", img.LocalPath, debug)
+		mediaID, summary, err := s.uploadMedia(ctx, token, "image", img.LocalPath, img.FileName, debug)
 		if err != nil {
 			return failResult(summary, err.Error()), false, err
 		}
-		return s.sendAppImage(ctx, sink, token, agentid, mediaID)
+		res, expired, err := s.sendAppImage(ctx, sink, token, agentid, mediaID)
+		if err != nil || expired || res == nil || !res.Success {
+			return res, expired, err
+		}
+		return s.sendAppTextAfterMedia(ctx, sink, token, agentid, payload, res)
 	}
 	if file, ok := firstLocalFile(payload); ok {
-		if payload.Text != "" {
-			textResult, expired, err := s.sendAppText(ctx, sink, token, agentid, payload)
-			if err != nil || expired || textResult == nil || !textResult.Success {
-				return textResult, expired, err
-			}
-		}
-		mediaID, summary, err := s.uploadMedia(ctx, token, "file", file.LocalPath, debug)
+		mediaID, summary, err := s.uploadMedia(ctx, token, "file", file.LocalPath, file.FileName, debug)
 		if err != nil {
 			return failResult(summary, err.Error()), false, err
 		}
-		return s.sendAppFile(ctx, sink, token, agentid, mediaID)
+		res, expired, err := s.sendAppFile(ctx, sink, token, agentid, mediaID)
+		if err != nil || expired || res == nil || !res.Success {
+			return res, expired, err
+		}
+		return s.sendAppTextAfterMedia(ctx, sink, token, agentid, payload, res)
 	}
 	if len(payload.Media) > 0 {
 		payload.Format = "text"
 		payload.Text = fallbackText(payload)
+	}
+	return s.sendAppText(ctx, sink, token, agentid, payload)
+}
+
+func (s *AppSink) sendAppTextAfterMedia(ctx context.Context, sink *domainsink.Sink, token, agentid string, payload pluginsink.Payload, mediaResult *pluginsink.Result) (*pluginsink.Result, bool, error) {
+	if payload.Text == "" {
+		return mediaResult, false, nil
 	}
 	return s.sendAppText(ctx, sink, token, agentid, payload)
 }
@@ -294,9 +297,9 @@ func (s *AppSink) sendAppText(ctx context.Context, sink *domainsink.Sink, token,
 	return failResult(summary, errMsg), false, nil
 }
 
-func (s *AppSink) uploadMedia(ctx context.Context, token, mediaType, path string, debug bool) (string, []byte, error) {
+func (s *AppSink) uploadMedia(ctx context.Context, token, mediaType, path, fileName string, debug bool) (string, []byte, error) {
 	url := withDebugParam(fmt.Sprintf("%s/media/upload?access_token=%s&type=%s", apiBase, token, mediaType), debug)
-	resp, err := s.client.PostMultipartFile(ctx, url, "media", path, nil)
+	resp, err := s.client.PostMultipartFileNamed(ctx, url, "media", path, fileName, nil)
 	if err != nil {
 		return "", nil, err
 	}

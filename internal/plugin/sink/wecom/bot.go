@@ -121,20 +121,18 @@ func (s *BotSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 	}
 
 	if img, ok := firstLocalImage(payload); ok {
-		if payload.Text != "" {
-			if res, err := s.sendText(ctx, url, payload); err != nil || res == nil || !res.Success {
-				return res, err
-			}
+		res, err := s.sendImage(ctx, url, img.LocalPath)
+		if err != nil || res == nil || !res.Success {
+			return res, err
 		}
-		return s.sendImage(ctx, url, img.LocalPath)
+		return s.sendTextAfterMedia(ctx, url, payload, res)
 	}
 	if file, ok := firstLocalFile(payload); ok {
-		if payload.Text != "" {
-			if res, err := s.sendText(ctx, url, payload); err != nil || res == nil || !res.Success {
-				return res, err
-			}
+		res, err := s.sendFile(ctx, url, file.LocalPath, file.FileName)
+		if err != nil || res == nil || !res.Success {
+			return res, err
 		}
-		return s.sendFile(ctx, url, file.LocalPath)
+		return s.sendTextAfterMedia(ctx, url, payload, res)
 	}
 	if len(payload.Media) > 0 {
 		payload.Format = "text"
@@ -163,6 +161,13 @@ func (s *BotSink) sendText(ctx context.Context, url string, payload pluginsink.P
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
 }
 
+func (s *BotSink) sendTextAfterMedia(ctx context.Context, url string, payload pluginsink.Payload, mediaResult *pluginsink.Result) (*pluginsink.Result, error) {
+	if payload.Text == "" {
+		return mediaResult, nil
+	}
+	return s.sendText(ctx, url, payload)
+}
+
 // botUploadURL 由 webhook send 地址推导 upload_media 地址（沿用同一个 key）。
 func botUploadURL(sendURL string) (string, error) {
 	if !strings.Contains(sendURL, "/webhook/send") {
@@ -177,12 +182,12 @@ func botUploadURL(sendURL string) (string, error) {
 }
 
 // sendFile 先上传文件获取 media_id，再按 msgtype=file 发送。
-func (s *BotSink) sendFile(ctx context.Context, url string, path string) (*pluginsink.Result, error) {
+func (s *BotSink) sendFile(ctx context.Context, url string, path string, fileName string) (*pluginsink.Result, error) {
 	uploadURL, err := botUploadURL(url)
 	if err != nil {
 		return failResult(nil, err.Error()), nil
 	}
-	resp, err := s.client.PostMultipartFile(ctx, uploadURL, "media", path, nil)
+	resp, err := s.client.PostMultipartFileNamed(ctx, uploadURL, "media", path, fileName, nil)
 	if err != nil {
 		return failResult(nil, "上传文件失败: "+err.Error()), err
 	}

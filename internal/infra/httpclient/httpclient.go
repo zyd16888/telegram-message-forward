@@ -10,7 +10,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -99,15 +101,20 @@ func (c *Client) Get(ctx context.Context, url string, headers map[string]string)
 
 // PostMultipartFile 上传单个文件字段并返回响应。
 func (c *Client) PostMultipartFile(ctx context.Context, url, fieldName, path string, headers map[string]string) (*Response, error) {
+	return c.PostMultipartFileNamed(ctx, url, fieldName, path, "", headers)
+}
+
+// PostMultipartFileNamed 上传单个文件字段，并允许覆盖 multipart 中暴露的文件名。
+func (c *Client) PostMultipartFileNamed(ctx context.Context, url, fieldName, filePath, fileName string, headers map[string]string) (*Response, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	file, err := os.Open(filepath.Clean(path))
+	file, err := os.Open(filepath.Clean(filePath))
 	if err != nil {
 		return nil, fmt.Errorf("打开上传文件失败: %w", err)
 	}
 	defer file.Close()
 
-	part, err := writer.CreateFormFile(fieldName, filepath.Base(path))
+	part, err := writer.CreateFormFile(fieldName, uploadFileName(filePath, fileName))
 	if err != nil {
 		return nil, fmt.Errorf("创建 multipart 字段失败: %w", err)
 	}
@@ -127,6 +134,17 @@ func (c *Client) PostMultipartFile(ctx context.Context, url, fieldName, path str
 		req.Header.Set(k, v)
 	}
 	return c.do(req)
+}
+
+func uploadFileName(filePath, fileName string) string {
+	name := strings.TrimSpace(fileName)
+	if name != "" {
+		name = path.Base(strings.ReplaceAll(name, "\\", "/"))
+	}
+	if name == "" || name == "." || name == "/" {
+		name = filepath.Base(filePath)
+	}
+	return name
 }
 
 func (c *Client) do(req *http.Request) (*Response, error) {
