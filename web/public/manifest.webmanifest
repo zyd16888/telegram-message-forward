@@ -1,0 +1,18 @@
+{
+  "name": "TG Forward 管理后台",
+  "short_name": "TG Forward",
+  "description": "TG Forward 管理后台，用于配置 Telegram 消息转发、规则编排、目标渠道和投递任务。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eaf1f8",
+  "theme_color": "#eaf1f8",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
