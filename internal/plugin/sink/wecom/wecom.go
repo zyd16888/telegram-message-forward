@@ -133,9 +133,9 @@ func failResult(summary []byte, errMsg string) *pluginsink.Result {
 	return &pluginsink.Result{Success: false, ResponseSummary: summary, Error: errMsg}
 }
 
-func firstLocalImage(payload pluginsink.Payload) (domainmessage.Media, bool) {
+func firstLocalImage(payload pluginsink.Payload, maxBytes int64) (domainmessage.Media, bool) {
 	for _, item := range payload.Media {
-		if (item.Type == "photo" || item.Type == "image") && item.LocalPath != "" {
+		if (item.Type == "photo" || item.Type == "image") && item.LocalPath != "" && withinLimit(item.Size, maxBytes) {
 			return item, true
 		}
 	}
@@ -144,11 +144,15 @@ func firstLocalImage(payload pluginsink.Payload) (domainmessage.Media, bool) {
 
 func firstLocalFile(payload pluginsink.Payload) (domainmessage.Media, bool) {
 	for _, item := range payload.Media {
-		if (item.Type == "file" || item.Type == "document" || item.Type == "audio" || item.Type == "voice") && item.LocalPath != "" {
+		if (item.Type == "file" || item.Type == "document" || item.Type == "audio" || item.Type == "voice" || item.Type == "photo" || item.Type == "image") && item.LocalPath != "" {
 			return item, true
 		}
 	}
 	return domainmessage.Media{}, false
+}
+
+func withinLimit(size, maxBytes int64) bool {
+	return maxBytes <= 0 || size <= 0 || size <= maxBytes
 }
 
 func fallbackText(payload pluginsink.Payload) string {

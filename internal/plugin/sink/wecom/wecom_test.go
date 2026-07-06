@@ -72,6 +72,56 @@ func TestBotSendLocalImage(t *testing.T) {
 	}
 }
 
+func TestBotSendLargeImageAsFile(t *testing.T) {
+	img := t.TempDir() + "/large.png"
+	if err := os.WriteFile(img, []byte("fake-large-image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var uploadType, uploadName atomic.Value
+	var fileSent atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/webhook/upload_media"):
+			uploadType.Store(r.URL.Query().Get("type"))
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Errorf("解析 multipart 失败: %v", err)
+			} else if files := r.MultipartForm.File["media"]; len(files) == 1 {
+				uploadName.Store(files[0].Filename)
+			}
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","type":"file","media_id":"MEDIA_IMAGE_FILE"}`)
+		case strings.Contains(r.URL.Path, "/webhook/send"):
+			b, _ := io.ReadAll(r.Body)
+			body := string(b)
+			if strings.Contains(body, `"msgtype":"file"`) && strings.Contains(body, "MEDIA_IMAGE_FILE") {
+				fileSent.Store(true)
+			}
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		default:
+			t.Errorf("未预期请求: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	s := NewBot()
+	sink := &domainsink.Sink{Type: "wecom_bot", Config: map[string]any{"webhook_url": srv.URL + "/cgi-bin/webhook/send?key=TEST"}}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Media: []domainmessage.Media{{Type: "image", FileName: "large.png", MimeType: "image/png", LocalPath: img, Size: 4 * 1024 * 1024}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success || !fileSent.Load() {
+		t.Fatalf("大图应按普通文件发送 res=%+v file=%v", res, fileSent.Load())
+	}
+	if got, _ := uploadType.Load().(string); got != "file" {
+		t.Fatalf("上传类型 = %q, want file", got)
+	}
+	if got, _ := uploadName.Load().(string); got != "large.png" {
+		t.Fatalf("上传文件名 = %q, want large.png", got)
+	}
+}
+
 func TestBotSendLocalFile(t *testing.T) {
 	pdf := t.TempDir() + "/tmf-dispatch-temp"
 	if err := os.WriteFile(pdf, []byte("%PDF-fake"), 0o644); err != nil {
@@ -536,6 +586,69 @@ func TestAppSendLocalImageUploadsMedia(t *testing.T) {
 	}
 	if !res.Success || !uploadCalled.Load() || !imageSent.Load() {
 		t.Fatalf("图片上传/发送未完成 res=%+v upload=%v image=%v", res, uploadCalled.Load(), imageSent.Load())
+	}
+}
+
+func TestAppSendLargeImageAsFile(t *testing.T) {
+	tokenMu.Lock()
+	tokenCache = map[string]*cachedToken{}
+	tokenMu.Unlock()
+
+	img := t.TempDir() + "/large.png"
+	if err := os.WriteFile(img, []byte("fake-large-image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var uploadType, uploadName atomic.Value
+	var fileSent atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gettoken"):
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK","expires_in":7200}`)
+		case strings.Contains(r.URL.Path, "/media/upload"):
+			uploadType.Store(r.URL.Query().Get("type"))
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Errorf("解析 multipart 失败: %v", err)
+			} else if files := r.MultipartForm.File["media"]; len(files) == 1 {
+				uploadName.Store(files[0].Filename)
+			}
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","media_id":"MEDIA_IMAGE_FILE"}`)
+		case strings.Contains(r.URL.Path, "/message/send"):
+			b, _ := io.ReadAll(r.Body)
+			body := string(b)
+			if strings.Contains(body, `"msgtype":"file"`) && strings.Contains(body, "MEDIA_IMAGE_FILE") {
+				fileSent.Store(true)
+			}
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		default:
+			t.Errorf("未预期请求: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	apiBase = srv.URL
+	defer func() { apiBase = "https://qyapi.weixin.qq.com/cgi-bin" }()
+
+	s := NewApp()
+	sink := &domainsink.Sink{
+		Type:   "wecom_app",
+		Config: map[string]any{"corpid": "corp1", "agentid": "1000002"},
+		Secret: []byte("secret1"),
+	}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{
+		Media: []domainmessage.Media{{Type: "image", FileName: "large.png", MimeType: "image/png", LocalPath: img, Size: 12 * 1024 * 1024}},
+	}, pluginsink.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success || !fileSent.Load() {
+		t.Fatalf("大图应按普通文件发送 res=%+v file=%v", res, fileSent.Load())
+	}
+	if got, _ := uploadType.Load().(string); got != "file" {
+		t.Fatalf("上传素材类型 = %q, want file", got)
+	}
+	if got, _ := uploadName.Load().(string); got != "large.png" {
+		t.Fatalf("上传文件名 = %q, want large.png", got)
 	}
 }
 

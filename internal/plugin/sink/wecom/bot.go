@@ -18,6 +18,8 @@ func init() {
 	})
 }
 
+const botNativeImageMaxBytes int64 = 2 * 1024 * 1024
+
 // BotSink 是企业微信群机器人 Sink（webhook，无 access_token）。
 //
 // key 保存在 sink.Secret；config 可选 webhook_url 覆盖默认地址。
@@ -120,7 +122,7 @@ func (s *BotSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 		return nil, err
 	}
 
-	if img, ok := firstLocalImage(payload); ok {
+	if img, ok := firstLocalImage(payload, botNativeImageMaxBytes); ok {
 		res, err := s.sendImage(ctx, url, img.LocalPath)
 		if err != nil || res == nil || !res.Success {
 			return res, err

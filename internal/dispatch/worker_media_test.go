@@ -179,8 +179,11 @@ func TestSupportsMediaItemFineGrained(t *testing.T) {
 	if supportsMediaItem(caps, domainmessage.Media{Type: "document", Size: 1024}) {
 		t.Fatal("渠道只认二进制且媒体无本地文件时应降级，避免静默丢弃")
 	}
-	if supportsMediaItem(caps, domainmessage.Media{Type: "photo", Size: 3 * 1024 * 1024, LocalPath: img}) {
-		t.Fatal("图片超过渠道上限应降级")
+	if !supportsMediaItem(caps, domainmessage.Media{Type: "photo", Size: 3 * 1024 * 1024, LocalPath: img}) {
+		t.Fatal("图片超过 image 上限但未超过 file 上限时应按文件投递")
+	}
+	if supportsMediaItem(caps, domainmessage.Media{Type: "photo", Size: 30 * 1024 * 1024, LocalPath: img}) {
+		t.Fatal("图片超过 file 上限时应降级")
 	}
 }
 
@@ -199,6 +202,25 @@ func TestSupportsMediaItemAudioFallsBackToFileCapability(t *testing.T) {
 	}
 	if supportsMediaItem(caps, domainmessage.Media{Type: "audio", FileName: "big.mp3", Size: 30 * 1024 * 1024, LocalPath: mp3}) {
 		t.Fatal("audio 按 file 投递时仍应遵守文件大小上限")
+	}
+}
+
+func TestSupportsMediaItemImageFallsBackToFileCapability(t *testing.T) {
+	img := mustTempFile(t, "a-*.png", []byte("png"))
+	caps := domainsink.Capabilities{
+		SupportsImage: true,
+		SupportsFile:  true,
+		Media: []domainsink.MediaCapability{
+			{Type: "image", Supported: true, MaxSizeMB: 2, RequiresUpload: true, SupportsBinary: true},
+			{Type: "file", Supported: true, MaxSizeMB: 20, RequiresUpload: true, SupportsBinary: true},
+		},
+	}
+
+	if !supportsMediaItem(caps, domainmessage.Media{Type: "image", FileName: "big.png", Size: 4 * 1024 * 1024, LocalPath: img}) {
+		t.Fatal("图片超过 image 上限但 file 支持时，应按普通文件投递")
+	}
+	if supportsMediaItem(caps, domainmessage.Media{Type: "image", FileName: "huge.png", Size: 30 * 1024 * 1024, LocalPath: img}) {
+		t.Fatal("图片按 file 投递时仍应遵守文件大小上限")
 	}
 }
 

@@ -356,7 +356,10 @@ type mediaCapabilityCandidate struct {
 func mediaCapabilityCandidates(c domainsink.Capabilities, t string) []mediaCapabilityCandidate {
 	switch t {
 	case "photo", "image":
-		return []mediaCapabilityCandidate{{kind: "image", coarse: c.SupportsImage}}
+		return []mediaCapabilityCandidate{
+			{kind: "image", coarse: c.SupportsImage},
+			{kind: "file", coarse: c.SupportsFile},
+		}
 	case "file", "document":
 		return []mediaCapabilityCandidate{{kind: "file", coarse: c.SupportsFile}}
 	case "audio", "voice":
