@@ -548,17 +548,21 @@ func TestAppSendLocalImageUploadsMedia(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var uploadType atomic.Value
 	var uploadCalled, imageSent atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/gettoken"):
 			io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK","expires_in":7200}`)
 		case strings.Contains(r.URL.Path, "/media/upload"):
+			uploadType.Store(r.URL.Query().Get("type"))
 			uploadCalled.Store(true)
 			if !strings.Contains(r.Header.Get("Content-Type"), "multipart/form-data") {
 				t.Errorf("应使用 multipart 上传，Content-Type=%s", r.Header.Get("Content-Type"))
 			}
 			io.WriteString(w, `{"errcode":0,"errmsg":"ok","media_id":"MEDIA_ID"}`)
+		case strings.Contains(r.URL.Path, "/media/uploadimg"):
+			t.Error("应用消息图片不应走 uploadimg 接口，应走临时素材 media/upload")
 		case strings.Contains(r.URL.Path, "/message/send"):
 			b, _ := io.ReadAll(r.Body)
 			if strings.Contains(string(b), `"msgtype":"image"`) && strings.Contains(string(b), "MEDIA_ID") {
@@ -586,6 +590,9 @@ func TestAppSendLocalImageUploadsMedia(t *testing.T) {
 	}
 	if !res.Success || !uploadCalled.Load() || !imageSent.Load() {
 		t.Fatalf("图片上传/发送未完成 res=%+v upload=%v image=%v", res, uploadCalled.Load(), imageSent.Load())
+	}
+	if got, _ := uploadType.Load().(string); got != "image" {
+		t.Fatalf("上传临时素材类型 = %q, want image", got)
 	}
 }
 

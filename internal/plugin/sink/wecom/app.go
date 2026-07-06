@@ -20,7 +20,7 @@ func init() {
 	})
 }
 
-const appNativeImageMaxBytes int64 = 10 * 1024 * 1024
+const appTemporaryImageMaxBytes int64 = 10 * 1024 * 1024
 
 // --- 包级 access_token 缓存：按企业应用凭据分桶 ---
 
@@ -235,7 +235,7 @@ func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, ag
 		return nil, false, err
 	}
 
-	if img, ok := firstLocalImage(payload, appNativeImageMaxBytes); ok {
+	if img, ok := firstLocalImage(payload, appTemporaryImageMaxBytes); ok {
 		mediaID, summary, err := s.uploadMedia(ctx, token, "image", img.LocalPath, img.FileName, debug)
 		if err != nil {
 			return failResult(summary, err.Error()), false, err

@@ -133,9 +133,9 @@ func failResult(summary []byte, errMsg string) *pluginsink.Result {
 	return &pluginsink.Result{Success: false, ResponseSummary: summary, Error: errMsg}
 }
 
-func firstLocalImage(payload pluginsink.Payload, maxBytes int64) (domainmessage.Media, bool) {
+func firstLocalImage(payload pluginsink.Payload, imageLimitBytes int64) (domainmessage.Media, bool) {
 	for _, item := range payload.Media {
-		if (item.Type == "photo" || item.Type == "image") && item.LocalPath != "" && withinLimit(item.Size, maxBytes) {
+		if (item.Type == "photo" || item.Type == "image") && item.LocalPath != "" && withinLimit(item.Size, imageLimitBytes) {
 			return item, true
 		}
 	}

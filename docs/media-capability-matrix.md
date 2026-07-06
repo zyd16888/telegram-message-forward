@@ -22,7 +22,7 @@
 |---|---|---|---|---|---|---|---|---:|---:|---|---|---|---|
 | Webhook | 支持 | 支持 | 支持 | metadata/URL | metadata/URL | metadata/URL | metadata/URL | 接收方决定 | 接收方决定 | 支持 | 否 | 默认否 | payload 带媒体 metadata，接收方自行处理 |
 | 企业微信群机器人 | 支持 | 支持 | 不支持 | 支持，base64 + md5 | 支持，先上传文件 | 不支持 | 不支持 | text 约 2048，markdown 约 4096 | image 约 2 MB，file 约 20 MB | 不支持本地直链 | file 需要 | image 支持 base64 | `[图片消息]` / 文件名 + 大小 + 原始链接 |
-| 企业微信应用消息 | 支持 | 支持 | 不支持 | 支持，media_id | 支持，media_id | 支持，media_id | 支持，media_id | 约 2048 | image 约 10 MB，voice 约 2 MB，video 约 10 MB，file 约 20 MB | 不作为主路径 | 是 | 是 | 对超限或上传失败媒体生成文本摘要 |
+| 企业微信应用消息 | 支持 | 支持 | 不支持 | 支持，临时素材 media_id | 支持，临时素材 media_id | 支持，临时素材 media_id | 支持，临时素材 media_id | 约 2048 | 临时素材 image 约 10 MB，voice 约 2 MB，video 约 10 MB，file 约 20 MB | 不作为主路径 | 是 | 是 | 对超限或上传失败媒体生成文本摘要 |
 | 钉钉自定义机器人 | 支持 | 支持 | 不支持 | 仅 Markdown 公网图片 URL | 不支持直传 | 不支持 | 不支持 | 项目按 20000 保守限制 | 不适用 | 支持 | 否 | 否 | 本地图片、文件、音视频统一降级为文本摘要 |
 | 飞书机器人/应用消息 | 支持 | 富文本 post | 不支持 | 支持 image_key | 应用消息支持 file_key | 应用消息支持 file_key | 应用消息支持 file_key | 按消息类型限制 | image 常见 10 MB，file 常见 30 MB | 部分卡片/富文本可引用 | 通常需要 | 是 | 自定义机器人无上传凭证时降级为文本或公网 URL |
 | 邮件 | 支持 | 可转文本 | 支持 | MIME inline/attachment | MIME attachment | MIME attachment | MIME attachment | 邮件服务商决定 | 邮件服务商决定，建议默认 20 MB 内 | 支持 | 否 | 是 | 超限时只发摘要和原始链接 |
@@ -47,7 +47,7 @@
 
 ### 企业微信应用消息
 
-- 当前运行时已实现 `image`：先上传临时素材，再按 `media_id` 发送图片消息。
+- 当前运行时已实现 `image`：调用上传临时素材接口 `media/upload?type=image` 获取 `media_id`，再发送图片消息；不使用面向图片 URL 的 `media/uploadimg` 接口，避免触发该接口的配额语义。
 - 当前运行时已实现 `file`：先上传 `type=file` 临时素材，再按 `msgtype=file` 发送（上限 20 MB）。
 - `audio`、`video` 官方支持但当前内置实现未接入，capability 声明为不支持并按文本摘要降级。
 - access_token 缓存和刷新继续由 Sink 内部维护。
