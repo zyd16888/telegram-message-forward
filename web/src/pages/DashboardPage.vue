@@ -161,8 +161,10 @@ onMounted(load)
             :class="`tone-${s.tone}`"
           >
             <span class="status-dot" />
-            <span class="status-num">{{ s.value }}</span>
-            <span class="status-name">{{ s.label }}</span>
+            <span class="status-body">
+              <span class="status-num">{{ s.value }}</span>
+              <span class="status-name">{{ s.label }}</span>
+            </span>
           </div>
         </div>
       </div>
@@ -173,8 +175,10 @@ onMounted(load)
         <div class="status-grid compact">
           <div v-for="s in queueItems" :key="s.label" class="status-pill" :class="`tone-${s.tone}`">
             <span class="status-dot" />
-            <span class="status-num">{{ s.value }}</span>
-            <span class="status-name">{{ s.label }}</span>
+            <span class="status-body">
+              <span class="status-num">{{ s.value }}</span>
+              <span class="status-name">{{ s.label }}</span>
+            </span>
           </div>
         </div>
       </n-card>
@@ -196,23 +200,31 @@ onMounted(load)
       <div class="status-grid compact-ai">
         <div class="status-pill tone-blue">
           <span class="status-dot" />
-          <span class="status-num">{{ aiStats.total }}</span>
-          <span class="status-name">最近运行 Profile</span>
+          <span class="status-body">
+            <span class="status-num">{{ aiStats.total }}</span>
+            <span class="status-name">最近运行 Profile</span>
+          </span>
         </div>
         <div class="status-pill tone-mint">
           <span class="status-dot" />
-          <span class="status-num">{{ aiStats.success }}</span>
-          <span class="status-name">成功</span>
+          <span class="status-body">
+            <span class="status-num">{{ aiStats.success }}</span>
+            <span class="status-name">成功</span>
+          </span>
         </div>
         <div class="status-pill tone-coral">
           <span class="status-dot" />
-          <span class="status-num">{{ aiStats.failed }}</span>
-          <span class="status-name">失败</span>
+          <span class="status-body">
+            <span class="status-num">{{ aiStats.failed }}</span>
+            <span class="status-name">失败</span>
+          </span>
         </div>
         <div class="status-pill tone-peach">
           <span class="status-dot" />
-          <span class="status-num">{{ aiStats.tokens }}</span>
-          <span class="status-name">Token</span>
+          <span class="status-body">
+            <span class="status-num">{{ aiStats.tokens }}</span>
+            <span class="status-name">Token</span>
+          </span>
         </div>
       </div>
     </n-card>
@@ -376,6 +388,7 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 76px;
   padding: 14px 16px;
   border: 0;
   border-radius: 12px;
@@ -396,14 +409,21 @@ onMounted(load)
   box-shadow: 0 0 0 4px var(--tone-soft), 0 2px 5px var(--tone-soft);
   flex-shrink: 0;
 }
+.status-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
 .status-num {
   font-size: 22px;
   font-weight: 900;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .status-name {
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.25;
   color: #8399ad;
 }
 
