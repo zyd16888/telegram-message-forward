@@ -231,6 +231,44 @@ export interface Rule {
   updated_at: string
 }
 
+export type FlowNodeType = 'source' | 'filter' | 'processor' | 'target'
+
+export interface FlowNodeConfig {
+  filter_ids?: number[]
+  conditions?: ConditionConfig[]
+  processors?: ProcessorConfig[]
+}
+
+export interface FlowNode {
+  id: number
+  type: FlowNodeType
+  ref_id?: number
+  config: FlowNodeConfig
+  template_id?: number
+  pos_x: number
+  pos_y: number
+}
+
+export interface FlowEdge {
+  id: number
+  from_node_id: number
+  to_node_id: number
+}
+
+export interface Flow {
+  id: number
+  name: string
+  enabled: boolean
+  priority: number
+  stop_on_match: boolean
+  nodes: FlowNode[]
+  edges: FlowEdge[]
+  created_at: string
+  updated_at: string
+}
+
+export type FlowRequest = Pick<Flow, 'name' | 'enabled' | 'priority' | 'stop_on_match' | 'nodes' | 'edges'>
+
 export interface Filter {
   id: number
   name: string

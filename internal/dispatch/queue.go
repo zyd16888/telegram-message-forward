@@ -53,9 +53,12 @@ func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessag
 			}
 			task := &domaindelivery.Task{
 				MessageID:       msg.ID,
-				RuleID:          m.Rule.ID,
+				RuleID:          ruleID(m),
 				SinkID:          target.SinkID,
 				TemplateID:      target.TemplateID,
+				OriginType:      matchOriginType(m),
+				OriginID:        m.OriginID,
+				OriginNodeID:    m.OriginNodeID,
 				Status:          domaindelivery.StatusPending,
 				MaxAttempts:     q.maxAttempts,
 				MessageSnapshot: m.Message,
@@ -70,6 +73,20 @@ func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessag
 		q.notifier.Notify()
 	}
 	return nil
+}
+
+func ruleID(m ruleengine.Match) int64 {
+	if m.Rule == nil {
+		return 0
+	}
+	return m.Rule.ID
+}
+
+func matchOriginType(m ruleengine.Match) string {
+	if m.OriginType != "" {
+		return m.OriginType
+	}
+	return "rule"
 }
 
 func (q *Queue) sinkEnabled(ctx context.Context, sinkID int64, cache map[int64]bool) (bool, error) {

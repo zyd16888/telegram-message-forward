@@ -1,23 +1,23 @@
 <script setup lang="ts">
 import { Handle, Position } from '@vue-flow/core'
-import type { FilterNodeData } from './types'
+import type { ProcessorNodeData } from './types'
 
 defineOptions({ inheritAttrs: false })
 
 defineProps<{
-  data: FilterNodeData
+  data: ProcessorNodeData
 }>()
 </script>
 
 <template>
-  <div class="flow-node filter-node">
+  <div class="flow-node processor-node">
     <div class="node-head">
-      <span class="filter-mark">F</span>
+      <span class="processor-mark">P</span>
       <span class="node-name">{{ data.name }}</span>
     </div>
-    <div class="node-meta">
-      <span class="node-tag">{{ data.conditionCount }} 个条件</span>
-      <span class="node-sub">{{ data.ruleCount ? `${data.ruleCount} 条规则引用` : '未被引用' }}</span>
+    <div class="chip-row">
+      <span v-for="chip in data.processorChips.slice(0, 4)" :key="chip" class="chip">{{ chip }}</span>
+      <span v-if="data.processorChips.length > 4" class="chip">+{{ data.processorChips.length - 4 }}</span>
     </div>
     <Handle type="target" :position="Position.Left" />
     <Handle type="source" :position="Position.Right" />
@@ -26,7 +26,7 @@ defineProps<{
 
 <style scoped>
 .flow-node {
-  width: 236px;
+  width: 260px;
   padding: 10px 12px;
   border: 1px solid var(--clay-border);
   border-radius: 12px;
@@ -35,8 +35,8 @@ defineProps<{
   font-size: 12px;
 }
 
-.filter-node {
-  border-left: 3px solid #3b82f6;
+.processor-node {
+  border-top: 3px solid #8b5cf6;
 }
 
 .node-head {
@@ -46,15 +46,15 @@ defineProps<{
   min-width: 0;
 }
 
-.filter-mark {
+.processor-mark {
   width: 20px;
   height: 20px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
   border-radius: 7px;
-  color: #1d4ed8;
-  background: rgba(59, 130, 246, 0.14);
+  color: #6d28d9;
+  background: rgba(139, 92, 246, 0.13);
   font-size: 11px;
   font-weight: 900;
 }
@@ -68,29 +68,25 @@ defineProps<{
   white-space: nowrap;
 }
 
-.node-meta {
+.chip-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   margin-top: 8px;
   min-width: 0;
   overflow: hidden;
 }
 
-.node-tag {
-  flex-shrink: 0;
+.chip {
+  flex-shrink: 1;
+  max-width: 120px;
   padding: 1px 8px;
-  border: 1px solid rgba(59, 130, 246, 0.24);
+  border: 1px solid rgba(139, 92, 246, 0.24);
   border-radius: 999px;
-  color: #1d6fb8;
-  background: rgba(59, 130, 246, 0.12);
-  font-size: 11px;
+  color: #7c3aed;
+  background: rgba(139, 92, 246, 0.12);
+  font-size: 10px;
   font-weight: 600;
-}
-
-.node-sub {
-  color: var(--clay-text-3);
-  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

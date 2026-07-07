@@ -26,6 +26,7 @@ type Deps struct {
 	Source         *handler.SourceHandler
 	Template       *handler.TemplateHandler
 	Rule           *handler.RuleHandler
+	Flow           *handler.FlowHandler
 	Filter         *handler.FilterHandler
 	Delivery       *handler.DeliveryHandler
 	AIDigest       *handler.AIDigestHandler
@@ -142,6 +143,18 @@ func NewRouter(deps Deps) *gin.Engine {
 			rules.GET("/:id", deps.Rule.Get)
 			rules.PUT("/:id", deps.Rule.Update)
 			rules.DELETE("/:id", deps.Rule.Delete)
+		}
+
+		if deps.Flow != nil {
+			flows := v1.Group("/flows")
+			{
+				flows.GET("", deps.Flow.List)
+				flows.GET("/meta", deps.Flow.Meta)
+				flows.POST("", deps.Flow.Create)
+				flows.GET("/:id", deps.Flow.Get)
+				flows.PUT("/:id", deps.Flow.Update)
+				flows.DELETE("/:id", deps.Flow.Delete)
+			}
 		}
 
 		if deps.Filter != nil {

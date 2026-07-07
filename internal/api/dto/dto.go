@@ -11,6 +11,7 @@ import (
 	domainaccount "telegram-message-forward/internal/domain/account"
 	domainapitoken "telegram-message-forward/internal/domain/apitoken"
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainloginflow "telegram-message-forward/internal/domain/loginflow"
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainrule "telegram-message-forward/internal/domain/rule"
@@ -518,6 +519,99 @@ func (r *RuleRequest) TargetsToDomain() []domainrule.Target {
 	out := make([]domainrule.Target, 0, len(r.Targets))
 	for _, t := range r.Targets {
 		out = append(out, domainrule.Target{SinkID: t.SinkID, TemplateID: t.TemplateID})
+	}
+	return out
+}
+
+// --- Flow ---
+
+type FlowNodeDTO struct {
+	ID         int64                 `json:"id"`
+	Type       string                `json:"type"`
+	RefID      *int64                `json:"ref_id,omitempty"`
+	Config     domainflow.NodeConfig `json:"config"`
+	TemplateID *int64                `json:"template_id,omitempty"`
+	PosX       float64               `json:"pos_x"`
+	PosY       float64               `json:"pos_y"`
+}
+
+type FlowEdgeDTO struct {
+	ID         int64 `json:"id"`
+	FromNodeID int64 `json:"from_node_id"`
+	ToNodeID   int64 `json:"to_node_id"`
+}
+
+type FlowDTO struct {
+	ID          int64         `json:"id"`
+	Name        string        `json:"name"`
+	Enabled     bool          `json:"enabled"`
+	Priority    int           `json:"priority"`
+	StopOnMatch bool          `json:"stop_on_match"`
+	Nodes       []FlowNodeDTO `json:"nodes"`
+	Edges       []FlowEdgeDTO `json:"edges"`
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
+}
+
+type FlowRequest struct {
+	Name        string        `json:"name" binding:"required"`
+	Enabled     bool          `json:"enabled"`
+	Priority    int           `json:"priority"`
+	StopOnMatch bool          `json:"stop_on_match"`
+	Nodes       []FlowNodeDTO `json:"nodes" binding:"required"`
+	Edges       []FlowEdgeDTO `json:"edges"`
+}
+
+func NewFlowDTO(f *domainflow.Flow) FlowDTO {
+	nodes := make([]FlowNodeDTO, 0, len(f.Nodes))
+	for _, n := range f.Nodes {
+		nodes = append(nodes, FlowNodeDTO{
+			ID:         n.ID,
+			Type:       string(n.Type),
+			RefID:      n.RefID,
+			Config:     n.Config,
+			TemplateID: n.TemplateID,
+			PosX:       n.PosX,
+			PosY:       n.PosY,
+		})
+	}
+	edges := make([]FlowEdgeDTO, 0, len(f.Edges))
+	for _, e := range f.Edges {
+		edges = append(edges, FlowEdgeDTO{ID: e.ID, FromNodeID: e.FromNodeID, ToNodeID: e.ToNodeID})
+	}
+	return FlowDTO{
+		ID:          f.ID,
+		Name:        f.Name,
+		Enabled:     f.Enabled,
+		Priority:    f.Priority,
+		StopOnMatch: f.StopOnMatch,
+		Nodes:       nodes,
+		Edges:       edges,
+		CreatedAt:   f.CreatedAt,
+		UpdatedAt:   f.UpdatedAt,
+	}
+}
+
+func (r *FlowRequest) NodesToDomain() []domainflow.Node {
+	out := make([]domainflow.Node, 0, len(r.Nodes))
+	for _, n := range r.Nodes {
+		out = append(out, domainflow.Node{
+			ID:         n.ID,
+			Type:       domainflow.NodeType(n.Type),
+			RefID:      n.RefID,
+			Config:     n.Config,
+			TemplateID: n.TemplateID,
+			PosX:       n.PosX,
+			PosY:       n.PosY,
+		})
+	}
+	return out
+}
+
+func (r *FlowRequest) EdgesToDomain() []domainflow.Edge {
+	out := make([]domainflow.Edge, 0, len(r.Edges))
+	for _, e := range r.Edges {
+		out = append(out, domainflow.Edge{ID: e.ID, FromNodeID: e.FromNodeID, ToNodeID: e.ToNodeID})
 	}
 	return out
 }

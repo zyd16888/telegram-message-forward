@@ -38,6 +38,7 @@ type Task struct {
 	TemplateID   *int64
 	OriginType   string
 	OriginID     int64
+	OriginNodeID int64
 	Status       Status
 	AttemptCount int
 	MaxAttempts  int

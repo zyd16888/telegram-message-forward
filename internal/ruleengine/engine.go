@@ -14,9 +14,12 @@ import (
 
 // Match 是一条命中规则及其目标渠道。
 type Match struct {
-	Rule    *domainrule.Rule
-	Targets []domainrule.Target
-	Message *domainmessage.NormalizedMessage
+	Rule         *domainrule.Rule
+	Targets      []domainrule.Target
+	Message      *domainmessage.NormalizedMessage
+	OriginType   string
+	OriginID     int64
+	OriginNodeID int64
 }
 
 // Engine 是规则引擎。

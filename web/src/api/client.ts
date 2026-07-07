@@ -12,6 +12,8 @@ import type {
   LoginFlow,
   Me,
   Rule,
+  Flow,
+  FlowRequest,
   RuleMeta,
   RulePreviewResult,
   SharedProxy,
@@ -288,6 +290,16 @@ export const rulesApi = {
   preview: (body: Record<string, unknown>) =>
     http.post<ApiItem<RulePreviewResult>>('/rules/preview', body).then((r) => r.data.data),
   remove: (id: number) => http.delete(`/rules/${id}`),
+}
+
+// --- Flows ---
+export const flowsApi = {
+  list: () => http.get<ApiList<Flow>>('/flows').then((r) => r.data.data),
+  meta: () => http.get<ApiItem<RuleMeta>>('/flows/meta').then((r) => r.data.data),
+  get: (id: number) => http.get<ApiItem<Flow>>(`/flows/${id}`).then((r) => r.data.data),
+  create: (body: FlowRequest) => http.post<ApiItem<Flow>>('/flows', body).then((r) => r.data.data),
+  update: (id: number, body: FlowRequest) => http.put<ApiItem<Flow>>(`/flows/${id}`, body).then((r) => r.data.data),
+  remove: (id: number) => http.delete(`/flows/${id}`),
 }
 
 // --- Filters（可复用过滤器） ---

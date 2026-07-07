@@ -4,6 +4,7 @@ import { MarkerType, VueFlow, useVueFlow, type Connection, type Edge, type EdgeM
 import { NButton, NTooltip } from 'naive-ui'
 import ClayIcon from '@/components/ClayIcon.vue'
 import FilterFlowNode from './FilterFlowNode.vue'
+import ProcessorFlowNode from './ProcessorFlowNode.vue'
 import SourceFlowNode from './SourceFlowNode.vue'
 import RuleFlowNode from './RuleFlowNode.vue'
 import SinkFlowNode from './SinkFlowNode.vue'
@@ -15,6 +16,7 @@ import {
   type CanvasNodeInput,
   type FilterNodeData,
   type FlowNodeKind,
+  type ProcessorNodeData,
   type RuleNodeData,
   type SinkNodeData,
   type SourceNodeData,
@@ -26,9 +28,12 @@ import '@vue-flow/core/dist/theme-default.css'
 const props = defineProps<{
   sources: CanvasNodeInput<SourceNodeData>[]
   filters: CanvasNodeInput<FilterNodeData>[]
+  processors?: CanvasNodeInput<ProcessorNodeData>[]
   rules: CanvasNodeInput<RuleNodeData>[]
   sinks: CanvasNodeInput<SinkNodeData>[]
+  targets?: CanvasNodeInput<SinkNodeData>[]
   edges: CanvasEdgeInput[]
+  editable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +41,7 @@ const emit = defineEmits<{
   'select-edge': [key: string]
   'clear-select': []
   connect: [connection: CanvasConnection]
+  'node-position': [kind: FlowNodeKind, id: number, position: { x: number; y: number }]
   'edit-rule': [id: number]
   'toggle-rule': [id: number, value: boolean]
 }>()
@@ -51,16 +57,21 @@ function columnHeight(count: number, nodeH: number): number {
 }
 
 const nodes = computed<Node[]>(() => {
+  const processors = props.processors ?? []
+  const targets = props.targets ?? []
+  const sinkLike = targets.length ? targets : props.sinks
   const heights = {
     source: columnHeight(props.sources.length, NODE_H.source),
     filter: columnHeight(props.filters.length, NODE_H.filter),
+    processor: columnHeight(processors.length, NODE_H.rule),
     rule: columnHeight(props.rules.length, NODE_H.rule),
-    sink: columnHeight(props.sinks.length, NODE_H.sink),
+    sink: columnHeight(sinkLike.length, NODE_H.sink),
   }
-  const maxHeight = Math.max(heights.source, heights.filter, heights.rule, heights.sink)
+  const maxHeight = Math.max(heights.source, heights.filter, heights.processor, heights.rule, heights.sink)
   const offset = {
     source: (maxHeight - heights.source) / 2,
     filter: (maxHeight - heights.filter) / 2,
+    processor: (maxHeight - heights.processor) / 2,
     rule: (maxHeight - heights.rule) / 2,
     sink: (maxHeight - heights.sink) / 2,
   }
@@ -70,20 +81,30 @@ const nodes = computed<Node[]>(() => {
     out.push({
       id: flowNodeId('source', item.id),
       type: 'source',
-      position: { x: COL_X.source, y: offset.source + index * (NODE_H.source + GAP) },
+      position: item.position ?? { x: COL_X.source, y: offset.source + index * (NODE_H.source + GAP) },
       data: item.data,
       class: item.stateClass ?? '',
-      draggable: false,
+      draggable: props.editable ?? false,
     })
   })
   props.filters.forEach((item, index) => {
     out.push({
       id: flowNodeId('filter', item.id),
       type: 'filter',
-      position: { x: COL_X.filter, y: offset.filter + index * (NODE_H.filter + GAP) },
+      position: item.position ?? { x: COL_X.filter, y: offset.filter + index * (NODE_H.filter + GAP) },
       data: item.data,
       class: item.stateClass ?? '',
-      draggable: false,
+      draggable: props.editable ?? false,
+    })
+  })
+  processors.forEach((item, index) => {
+    out.push({
+      id: flowNodeId('processor', item.id),
+      type: 'processor',
+      position: item.position ?? { x: hasFilterLayer ? COL_X.ruleWithFilter : COL_X.rule, y: offset.processor + index * (NODE_H.rule + GAP) },
+      data: item.data,
+      class: item.stateClass ?? '',
+      draggable: props.editable ?? false,
     })
   })
   props.rules.forEach((item, index) => {
@@ -93,17 +114,18 @@ const nodes = computed<Node[]>(() => {
       position: { x: hasFilterLayer ? COL_X.ruleWithFilter : COL_X.rule, y: offset.rule + index * (NODE_H.rule + GAP) },
       data: item.data,
       class: item.stateClass ?? '',
-      draggable: false,
+      draggable: props.editable ?? false,
     })
   })
-  props.sinks.forEach((item, index) => {
+  sinkLike.forEach((item, index) => {
+    const kind = targets.length ? 'target' : 'sink'
     out.push({
-      id: flowNodeId('sink', item.id),
+      id: flowNodeId(kind, item.id),
       type: 'sink',
-      position: { x: hasFilterLayer ? COL_X.sinkWithFilter : COL_X.sink, y: offset.sink + index * (NODE_H.sink + GAP) },
+      position: item.position ?? { x: hasFilterLayer ? COL_X.sinkWithFilter : COL_X.sink, y: offset.sink + index * (NODE_H.sink + GAP) },
       data: item.data,
       class: item.stateClass ?? '',
-      draggable: false,
+      draggable: props.editable ?? false,
     })
   })
   return out
@@ -146,6 +168,12 @@ function onNodeClick({ node }: NodeMouseEvent) {
   if (parsed) emit('select-node', parsed.kind, parsed.id)
 }
 
+function onNodeDragStop(event: NodeMouseEvent) {
+  const parsed = parseFlowNodeId(event.node.id)
+  if (!parsed) return
+  emit('node-position', parsed.kind, parsed.id, event.node.position)
+}
+
 function onEdgeClick({ edge }: EdgeMouseEvent) {
   emit('select-edge', edge.id)
 }
@@ -160,7 +188,7 @@ function ruleIdOf(nodeId: string): number {
     <VueFlow
       :nodes="nodes"
       :edges="edges"
-      :nodes-draggable="false"
+      :nodes-draggable="editable ?? false"
       :edges-updatable="false"
       :delete-key-code="null"
       :min-zoom="0.25"
@@ -168,6 +196,7 @@ function ruleIdOf(nodeId: string): number {
       :connection-radius="36"
       @connect="onConnect"
       @node-click="onNodeClick"
+      @node-drag-stop="onNodeDragStop"
       @edge-click="onEdgeClick"
       @pane-click="emit('clear-select')"
     >
@@ -176,6 +205,9 @@ function ruleIdOf(nodeId: string): number {
       </template>
       <template #node-filter="nodeProps">
         <FilterFlowNode :data="nodeProps.data as FilterNodeData" />
+      </template>
+      <template #node-processor="nodeProps">
+        <ProcessorFlowNode :data="nodeProps.data as ProcessorNodeData" />
       </template>
       <template #node-rule="nodeProps">
         <RuleFlowNode
@@ -205,9 +237,10 @@ function ruleIdOf(nodeId: string): number {
     <div class="canvas-legend">
       <span class="legend-item"><span class="legend-swatch source" />来源</span>
       <span v-if="filters.length" class="legend-item"><span class="legend-swatch filter" />过滤器</span>
+      <span v-if="(processors?.length ?? 0) > 0" class="legend-item"><span class="legend-swatch processor" />处理</span>
       <span class="legend-item"><span class="legend-swatch rule" />规则</span>
       <span class="legend-item"><span class="legend-swatch sink" />渠道</span>
-      <span class="legend-hint">拖动节点右侧圆点到下一层即可连线；来源直连渠道会创建新规则</span>
+      <span class="legend-hint">{{ editable ? '拖动节点调整位置，拖动圆点建立连线' : '拖动节点右侧圆点到下一层即可连线；来源直连渠道会创建新规则' }}</span>
     </div>
   </div>
 </template>
@@ -272,6 +305,10 @@ function ruleIdOf(nodeId: string): number {
 
 .legend-swatch.rule {
   background: var(--clay-primary);
+}
+
+.legend-swatch.processor {
+  background: #8b5cf6;
 }
 
 .legend-swatch.sink {

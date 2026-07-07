@@ -14,14 +14,15 @@ import type {
   CanvasEdgeInput,
   CanvasNodeInput,
   FilterNodeData,
+  ProcessorNodeData,
   RuleNodeData,
   SinkNodeData,
   SourceNodeData,
 } from '@/components/flow/types'
-import { filtersApi, rulesApi, sinksApi } from '@/api/client'
+import { filtersApi, flowsApi, rulesApi, sinksApi } from '@/api/client'
 import { useFlowBoard } from '@/composables/useFlowBoard'
 import { useForwardingGraph } from '@/composables/useForwardingGraph'
-import type { Filter, Rule, RuleInitialDraft, RuleMeta, Sink, SinkDescriptor, Source, RuleTarget } from '@/types'
+import type { Filter, Flow, FlowEdge, FlowNode, FlowNodeType, Rule, RuleInitialDraft, RuleMeta, Sink, SinkDescriptor, Source, RuleTarget } from '@/types'
 import { errText } from '@/utils/error'
 
 const router = useRouter()
@@ -34,6 +35,15 @@ const { accounts, sources, rules, sinks, templates, loading, ruleNodes, stats, l
 const ruleMeta = shallowRef<RuleMeta>({ conditions: [], processors: [] })
 const sinkDescriptors = shallowRef<SinkDescriptor[]>([])
 const filters = shallowRef<Filter[]>([])
+const flows = shallowRef<Flow[]>([])
+const flowDraft = shallowRef<Flow | null>(null)
+const flowError = shallowRef('')
+const canvasMode = shallowRef<'overview' | 'edit'>('overview')
+const activeFlowId = shallowRef<number | null>(null)
+const selectedSourceToAdd = shallowRef<number | null>(null)
+const selectedFilterToAdd = shallowRef<number | null>(null)
+const selectedSinkToAdd = shallowRef<number | null>(null)
+const selectedProcessorToAdd = shallowRef<string>('append_source')
 
 const showRuleModal = shallowRef(false)
 const editingRule = shallowRef<Rule | null>(null)
@@ -44,6 +54,22 @@ const processorLabelByType = computed(() => new Map(ruleMeta.value.processors.ma
 const sinkTypeLabelByType = computed(() => new Map(sinkDescriptors.value.map((d) => [d.type, d.label])))
 const accountNameById = computed(() => new Map(accounts.value.map((a) => [a.id, a.name])))
 const filterNameById = computed(() => new Map(filters.value.map((f) => [f.id, f.name])))
+const sourceById = computed(() => new Map(sources.value.map((s) => [s.id, s])))
+const sinkById = computed(() => new Map(sinks.value.map((s) => [s.id, s])))
+const templateById = computed(() => new Map(templates.value.map((t) => [t.id, t])))
+const flowOptions = computed(() => flows.value.map((f) => ({ label: f.name, value: f.id })))
+const sourceOptions = computed(() => sources.value.map((s) => ({ label: s.name, value: s.id })))
+const filterOptions = computed(() => filters.value.map((f) => ({ label: f.name, value: f.id })))
+const sinkOptions = computed(() => sinks.value.map((s) => ({ label: s.name, value: s.id })))
+const processorOptions = computed(() => ruleMeta.value.processors.map((p) => ({ label: p.label, value: p.type })))
+const templateOptions = computed(() => [
+  { label: '原文投递', value: 0 },
+  ...templates.value.map((t) => ({ label: `${t.name} · ${t.format}`, value: t.id })),
+])
+const selectedDraftNode = computed(() => {
+  if (canvasMode.value !== 'edit' || !selection.value || !flowDraft.value) return null
+  return flowDraft.value.nodes.find((node) => node.id === selection.value?.id) ?? null
+})
 
 const {
   selection,
@@ -391,6 +417,90 @@ const canvasEdges = computed<CanvasEdgeInput[]>(() => {
   return out
 })
 
+const draftSourceNodes = computed<CanvasNodeInput<SourceNodeData>[]>(() =>
+  draftNodes('source').map((node) => {
+    const source = node.ref_id ? sourceById.value.get(node.ref_id) : null
+    return {
+      id: node.id,
+      position: { x: node.pos_x, y: node.pos_y },
+      data: {
+        name: source?.name ?? `来源 #${node.ref_id ?? '?'}`,
+        typeLabel: source ? sourceTypeLabel(source) : 'Source',
+        accountLabel: source ? sourceAccountLabel(source) : '引用缺失',
+        runtimeLabel: source ? sourceRuntimeLabel(source) : '保存时后端会校验',
+        enabled: source?.enabled ?? false,
+        running: source?.runner_status === 'running',
+        ruleCount: 0,
+      },
+    }
+  }),
+)
+
+const draftFilterNodes = computed<CanvasNodeInput<FilterNodeData>[]>(() =>
+  draftNodes('filter').map((node) => {
+    const filterIds = node.config.filter_ids ?? []
+    const inlineConditions = node.config.conditions ?? []
+    const firstFilter = filterIds[0] ? filterNameById.value.get(filterIds[0]) : ''
+    return {
+      id: node.id,
+      position: { x: node.pos_x, y: node.pos_y },
+      data: {
+        name: firstFilter ?? (inlineConditions.length ? '内联过滤器' : '过滤器'),
+        conditionCount: filterIds.length || inlineConditions.length,
+        ruleCount: 0,
+      },
+    }
+  }),
+)
+
+const draftProcessorNodes = computed<CanvasNodeInput<ProcessorNodeData>[]>(() =>
+  draftNodes('processor').map((node) => ({
+    id: node.id,
+    position: { x: node.pos_x, y: node.pos_y },
+    data: {
+      name: '处理节点',
+      processorChips: (node.config.processors ?? []).map((item) => processorLabel(item.type)),
+    },
+  })),
+)
+
+const draftTargetNodes = computed<CanvasNodeInput<SinkNodeData>[]>(() =>
+  draftNodes('target').map((node) => {
+    const sink = node.ref_id ? sinkById.value.get(node.ref_id) : null
+    const tpl = node.template_id ? templateById.value.get(node.template_id) : null
+    return {
+      id: node.id,
+      position: { x: node.pos_x, y: node.pos_y },
+      data: {
+        name: sink?.name ?? `渠道 #${node.ref_id ?? '?'}`,
+        typeLabel: sink ? sinkTypeLabel(sink) : 'Target',
+        enabled: sink?.enabled ?? false,
+        deliveryLabel: tpl ? `模板：${tpl.name}` : '原文投递',
+        ruleCount: 0,
+      },
+    }
+  }),
+)
+
+const draftEdges = computed<CanvasEdgeInput[]>(() => {
+  const draft = flowDraft.value
+  if (!draft) return []
+  const kindByNode = new Map(draft.nodes.map((node) => [node.id, canvasKindOf(node.type)]))
+  const out: CanvasEdgeInput[] = []
+  for (const edge of draft.edges) {
+    const fromKind = kindByNode.get(edge.from_node_id)
+    const toKind = kindByNode.get(edge.to_node_id)
+    if (!fromKind || !toKind) continue
+    out.push({
+      key: `e${edge.from_node_id}:${edge.to_node_id}`,
+      from: { kind: fromKind, id: edge.from_node_id },
+      to: { kind: toKind, id: edge.to_node_id },
+    })
+  }
+  return out
+})
+
+const draftHasNodes = computed(() => Boolean(flowDraft.value?.nodes.length))
 const canvasHasNodes = computed(
   () => canvasSources.value.length > 0 || canvasFilters.value.length > 0 || canvasRules.value.length > 0 || canvasSinks.value.length > 0,
 )
@@ -399,7 +509,8 @@ const canvasHasNodes = computed(
 
 async function refresh() {
   try {
-    await load()
+    await Promise.all([load(), loadFlows()])
+    ensureEditorSelections()
   } catch (e) {
     message.error('加载编排关系失败：' + errText(e))
   }
@@ -410,6 +521,201 @@ async function loadMeta() {
     ;[ruleMeta.value, sinkDescriptors.value, filters.value] = await Promise.all([rulesApi.meta(), sinksApi.meta(), filtersApi.list()])
   } catch {
     // 元信息加载失败时退回展示原始类型标识，不阻塞页面。
+  }
+}
+
+function ensureEditorSelections() {
+  selectedSourceToAdd.value ??= sources.value[0]?.id ?? null
+  selectedFilterToAdd.value ??= filters.value[0]?.id ?? null
+  selectedSinkToAdd.value ??= sinks.value[0]?.id ?? null
+  selectedProcessorToAdd.value ||= ruleMeta.value.processors[0]?.type ?? 'append_source'
+}
+
+async function loadFlows() {
+  flows.value = await flowsApi.list()
+  if (!activeFlowId.value && flows.value.length) {
+    activeFlowId.value = flows.value[0].id
+  }
+  if (activeFlowId.value) {
+    const current = flows.value.find((item) => item.id === activeFlowId.value)
+    if (current) flowDraft.value = cloneFlow(current)
+  }
+  if (!flowDraft.value) {
+    flowDraft.value = emptyFlowDraft()
+  }
+}
+
+function draftNodes(type: FlowNodeType): FlowNode[] {
+  return flowDraft.value?.nodes.filter((node) => node.type === type) ?? []
+}
+
+function canvasKindOf(type: FlowNodeType) {
+  if (type === 'target') return 'target' as const
+  return type
+}
+
+function cloneFlow(flow: Flow): Flow {
+  return JSON.parse(JSON.stringify(flow)) as Flow
+}
+
+function emptyFlowDraft(): Flow {
+  return {
+    id: 0,
+    name: '新 Flow',
+    enabled: true,
+    priority: 0,
+    stop_on_match: false,
+    nodes: [],
+    edges: [],
+    created_at: '',
+    updated_at: '',
+  }
+}
+
+function nextTempNodeId(): number {
+  const ids = flowDraft.value?.nodes.map((node) => node.id) ?? []
+  return Math.min(0, ...ids) - 1
+}
+
+function addNode(node: Omit<FlowNode, 'id'>) {
+  if (!flowDraft.value) flowDraft.value = emptyFlowDraft()
+  flowDraft.value.nodes = [...flowDraft.value.nodes, { ...node, id: nextTempNodeId() }]
+  flowError.value = ''
+}
+
+function addSourceNode() {
+  if (!selectedSourceToAdd.value) return
+  addNode({
+    type: 'source',
+    ref_id: selectedSourceToAdd.value,
+    config: {},
+    pos_x: 0,
+    pos_y: flowDraft.value?.nodes.length ? flowDraft.value.nodes.length * 90 : 0,
+  })
+}
+
+function addFilterNode() {
+  if (!selectedFilterToAdd.value) return
+  addNode({
+    type: 'filter',
+    config: { filter_ids: [selectedFilterToAdd.value] },
+    pos_x: 280,
+    pos_y: flowDraft.value?.nodes.length ? flowDraft.value.nodes.length * 90 : 0,
+  })
+}
+
+function addProcessorNode() {
+  const processorType = selectedProcessorToAdd.value || processorOptions.value[0]?.value
+  if (!processorType) return
+  addNode({
+    type: 'processor',
+    config: { processors: [{ type: processorType, config: {} }] },
+    pos_x: 560,
+    pos_y: flowDraft.value?.nodes.length ? flowDraft.value.nodes.length * 90 : 0,
+  })
+}
+
+function addTargetNode() {
+  if (!selectedSinkToAdd.value) return
+  addNode({
+    type: 'target',
+    ref_id: selectedSinkToAdd.value,
+    config: {},
+    pos_x: 840,
+    pos_y: flowDraft.value?.nodes.length ? flowDraft.value.nodes.length * 90 : 0,
+  })
+}
+
+function onDraftConnect({ from, to }: CanvasConnection) {
+  const draft = flowDraft.value
+  if (!draft) return
+  if (from.id === to.id) {
+    message.warning('不能连接节点自身')
+    return
+  }
+  if (draft.edges.some((edge) => edge.from_node_id === from.id && edge.to_node_id === to.id)) {
+    message.info('这条连线已经存在')
+    return
+  }
+  draft.edges = [...draft.edges, { id: 0, from_node_id: from.id, to_node_id: to.id }]
+  flowError.value = ''
+}
+
+function onDraftNodePosition(_kind: string, id: number, position: { x: number; y: number }) {
+  const node = flowDraft.value?.nodes.find((item) => item.id === id)
+  if (!node) return
+  node.pos_x = Math.round(position.x)
+  node.pos_y = Math.round(position.y)
+}
+
+function removeDraftEdge(key: string) {
+  const match = /^e(-?\d+):(-?\d+)$/.exec(key)
+  if (!match || !flowDraft.value) return
+  const from = Number(match[1])
+  const to = Number(match[2])
+  flowDraft.value.edges = flowDraft.value.edges.filter((edge) => edge.from_node_id !== from || edge.to_node_id !== to)
+}
+
+function removeSelectedDraftNode() {
+  const node = selectedDraftNode.value
+  if (!node || !flowDraft.value) return
+  flowDraft.value.nodes = flowDraft.value.nodes.filter((item) => item.id !== node.id)
+  flowDraft.value.edges = flowDraft.value.edges.filter((edge) => edge.from_node_id !== node.id && edge.to_node_id !== node.id)
+  clearPaneSelection()
+}
+
+function updateSelectedTargetTemplate(value: number | null) {
+  const node = selectedDraftNode.value
+  if (!node || node.type !== 'target') return
+  node.template_id = value && value > 0 ? value : undefined
+}
+
+function newFlow() {
+  activeFlowId.value = null
+  flowDraft.value = emptyFlowDraft()
+  flowError.value = ''
+  canvasMode.value = 'edit'
+}
+
+function selectFlow(id: number) {
+  activeFlowId.value = id
+  const flow = flows.value.find((item) => item.id === id)
+  flowDraft.value = flow ? cloneFlow(flow) : emptyFlowDraft()
+  flowError.value = ''
+}
+
+async function saveFlow() {
+  if (!flowDraft.value) return
+  try {
+    const body = {
+      name: flowDraft.value.name,
+      enabled: flowDraft.value.enabled,
+      priority: flowDraft.value.priority,
+      stop_on_match: flowDraft.value.stop_on_match,
+      nodes: flowDraft.value.nodes,
+      edges: flowDraft.value.edges,
+    }
+    const saved = flowDraft.value.id ? await flowsApi.update(flowDraft.value.id, body) : await flowsApi.create(body)
+    message.success('Flow 已保存')
+    activeFlowId.value = saved.id
+    flowError.value = ''
+    await loadFlows()
+  } catch (e) {
+    flowError.value = errText(e)
+    message.error('保存 Flow 失败：' + flowError.value)
+  }
+}
+
+async function deleteFlow() {
+  if (!flowDraft.value?.id) return
+  try {
+    await flowsApi.remove(flowDraft.value.id)
+    message.success('Flow 已删除')
+    activeFlowId.value = null
+    flowDraft.value = null
+    await loadFlows()
+  } catch (e) {
+    message.error('删除 Flow 失败：' + errText(e))
   }
 }
 
@@ -449,6 +755,10 @@ async function toggleRule(ruleId: number, value: boolean) {
 }
 
 async function onCanvasConnect({ from, to }: CanvasConnection) {
+  if (canvasMode.value === 'edit') {
+    onDraftConnect({ from, to })
+    return
+  }
   if (from.kind === 'source' && to.kind === 'rule') {
     const rule = rules.value.find((r) => r.id === to.id)
     if (!rule) return
@@ -575,7 +885,7 @@ function queryId(key: string): number | null {
 }
 
 onMounted(async () => {
-  void loadMeta()
+  await loadMeta()
   await refresh()
   // 其它页面「查看编排」跳转过来时，直接选中对应节点进入联动高亮。
   const sourceId = queryId('source_id')
@@ -666,8 +976,27 @@ onMounted(async () => {
       :stats="stats"
     />
 
+    <section class="mode-panel">
+      <div class="mode-tabs">
+        <NButton :type="canvasMode === 'overview' ? 'primary' : 'default'" secondary @click="canvasMode = 'overview'">概览模式</NButton>
+        <NButton :type="canvasMode === 'edit' ? 'primary' : 'default'" secondary @click="canvasMode = 'edit'">编辑模式</NButton>
+      </div>
+      <div v-if="canvasMode === 'edit'" class="flow-select-row">
+        <NSelect
+          :value="activeFlowId"
+          :options="flowOptions"
+          clearable
+          placeholder="选择已有 Flow"
+          @update:value="(value: number | null) => value ? selectFlow(value) : newFlow()"
+        />
+        <NButton secondary @click="newFlow">新建 Flow</NButton>
+        <NButton type="primary" @click="saveFlow">保存 Flow</NButton>
+        <NButton v-if="flowDraft?.id" type="error" secondary @click="deleteFlow">删除</NButton>
+      </div>
+    </section>
+
     <ResourceShelf
-      v-if="!showUnusedNodes && hiddenResourceCount"
+      v-if="canvasMode === 'overview' && !showUnusedNodes && hiddenResourceCount"
       :unused-sources="unusedSources"
       :unused-sinks="unusedSinks"
       :source-type-label="sourceTypeLabel"
@@ -679,7 +1008,31 @@ onMounted(async () => {
     <div class="flow-workspace">
       <NSpin :show="loading">
         <FlowCanvas
-          v-if="canvasHasNodes"
+          v-if="canvasMode === 'edit' && draftHasNodes"
+          :key="`flow-edit-${flowDraft?.id ?? 'new'}-${flowDraft?.nodes.length ?? 0}`"
+          editable
+          :sources="draftSourceNodes"
+          :filters="draftFilterNodes"
+          :processors="draftProcessorNodes"
+          :rules="[]"
+          :sinks="[]"
+          :targets="draftTargetNodes"
+          :edges="draftEdges"
+          @select-node="toggleSelect"
+          @select-edge="removeDraftEdge"
+          @clear-select="onPaneClick"
+          @connect="onCanvasConnect"
+          @node-position="onDraftNodePosition"
+        />
+
+        <NEmpty v-else-if="canvasMode === 'edit'" description="这个 Flow 还没有节点">
+          <template #extra>
+            <NButton type="primary" @click="addSourceNode">先添加一个来源节点</NButton>
+          </template>
+        </NEmpty>
+
+        <FlowCanvas
+          v-else-if="canvasMode === 'overview' && canvasHasNodes"
           :key="`${showUnusedNodes ? 'all-resources' : 'linked-resources'}-${showResourceLayer ? 'resource-layer' : 'route-layer'}`"
           :sources="canvasSources"
           :filters="canvasFilters"
@@ -694,7 +1047,7 @@ onMounted(async () => {
           @toggle-rule="toggleRule"
         />
 
-        <NEmpty v-else-if="sources.length || rules.length || sinks.length" :description="canvasEmptyHint">
+        <NEmpty v-else-if="canvasMode === 'overview' && (sources.length || rules.length || sinks.length)" :description="canvasEmptyHint">
           <template #extra>
             <NSpace>
               <NButton v-if="boardFilterActive" secondary @click="clearBoardFilters">清除筛选</NButton>
@@ -704,7 +1057,7 @@ onMounted(async () => {
           </template>
         </NEmpty>
 
-        <NEmpty v-else description="还没有可编排的来源、规则或渠道">
+        <NEmpty v-else-if="canvasMode === 'overview'" description="还没有可编排的来源、规则或渠道">
           <template #extra>
             <NSpace>
               <NButton @click="go('accounts')">去配置账号</NButton>
@@ -715,6 +1068,7 @@ onMounted(async () => {
       </NSpin>
 
       <RouteInspector
+        v-if="canvasMode === 'overview'"
         :selection="selection"
         :selected-edge="selectedEdge"
         :rule-nodes="ruleNodes"
@@ -733,6 +1087,73 @@ onMounted(async () => {
         @detach-edge="detachSelectedEdge"
         @clear-edge="clearSelectedEdge"
       />
+
+      <aside v-else class="flow-editor-panel">
+        <header class="editor-head">
+          <span class="eyebrow">Flow 编辑</span>
+          <strong>{{ flowDraft?.name || '新 Flow' }}</strong>
+        </header>
+
+        <section class="editor-section">
+          <div class="editor-grid">
+            <NInput v-if="flowDraft" v-model:value="flowDraft.name" placeholder="Flow 名称" />
+            <NInputNumber v-if="flowDraft" v-model:value="flowDraft.priority" placeholder="优先级" />
+          </div>
+          <div class="editor-switches">
+            <NSwitch v-if="flowDraft" v-model:value="flowDraft.enabled" />
+            <span>启用</span>
+            <NSwitch v-if="flowDraft" v-model:value="flowDraft.stop_on_match" />
+            <span>命中后停止后续 Flow</span>
+          </div>
+        </section>
+
+        <NAlert v-if="flowError" type="error" :show-icon="false" class="editor-alert">
+          {{ flowError }}
+        </NAlert>
+
+        <section class="editor-section">
+          <div class="section-title">加入资源节点</div>
+          <div class="add-row">
+            <NSelect v-model:value="selectedSourceToAdd" :options="sourceOptions" filterable placeholder="来源" />
+            <NButton @click="addSourceNode">添加来源</NButton>
+          </div>
+          <div class="add-row">
+            <NSelect v-model:value="selectedFilterToAdd" :options="filterOptions" filterable placeholder="共享过滤器" />
+            <NButton @click="addFilterNode">添加过滤器</NButton>
+          </div>
+          <div class="add-row">
+            <NSelect v-model:value="selectedProcessorToAdd" :options="processorOptions" filterable placeholder="处理器" />
+            <NButton @click="addProcessorNode">添加处理</NButton>
+          </div>
+          <div class="add-row">
+            <NSelect v-model:value="selectedSinkToAdd" :options="sinkOptions" filterable placeholder="目标渠道" />
+            <NButton @click="addTargetNode">添加目标</NButton>
+          </div>
+        </section>
+
+        <section v-if="selectedDraftNode" class="editor-section">
+          <div class="section-title">选中节点</div>
+          <div class="kv">
+            <span>类型</span>
+            <strong>{{ selectedDraftNode.type }}</strong>
+          </div>
+          <div v-if="selectedDraftNode.type === 'target'" class="add-row">
+            <NSelect
+              :value="selectedDraftNode.template_id ?? 0"
+              :options="templateOptions"
+              placeholder="目标模板"
+              @update:value="(value: number | null) => updateSelectedTargetTemplate(value)"
+            />
+            <NButton secondary @click="updateSelectedTargetTemplate(0)">原文</NButton>
+          </div>
+          <NButton type="error" secondary @click="removeSelectedDraftNode">删除节点</NButton>
+        </section>
+
+        <section class="editor-section compact">
+          <div class="section-title">保存校验</div>
+          <p class="empty-text">后端会校验 DAG、source/target 方向、至少一条 source→target 通路、节点数和深度上限。点选连线可删除。</p>
+        </section>
+      </aside>
     </div>
 
     <RuleEditorModal
@@ -912,11 +1333,111 @@ onMounted(async () => {
   font-size: 12px;
 }
 
+.mode-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--clay-border);
+  border-radius: 12px;
+  background: var(--clay-surface);
+  box-shadow: var(--clay-out-sm);
+}
+
+.mode-tabs,
+.flow-select-row,
+.editor-switches {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.flow-select-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto;
+}
+
 .flow-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 14px;
   align-items: start;
+}
+
+.flow-editor-panel {
+  min-height: 420px;
+  padding: 14px;
+  border: 1px solid var(--clay-border);
+  border-radius: 14px;
+  background: var(--clay-surface);
+  box-shadow: var(--clay-out-sm);
+}
+
+.editor-head {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.editor-head strong {
+  color: var(--clay-text);
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.editor-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--clay-border);
+}
+
+.editor-section.compact {
+  gap: 6px;
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 8px;
+}
+
+.editor-alert {
+  margin: 8px 0;
+}
+
+.add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--clay-text-3);
+  font-size: 12px;
+}
+
+.kv strong {
+  color: var(--clay-text-2);
+  text-align: right;
+}
+
+.section-title {
+  color: var(--clay-text-2);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.empty-text {
+  margin: 0;
+  color: var(--clay-text-3);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 @media (max-width: 1100px) {
@@ -926,6 +1447,10 @@ onMounted(async () => {
 
   .flow-workspace {
     grid-template-columns: 1fr;
+  }
+
+  .flow-select-row {
+    grid-template-columns: 1fr 1fr;
   }
 }
 

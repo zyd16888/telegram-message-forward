@@ -19,6 +19,7 @@ import (
 	appauth "telegram-message-forward/internal/app/auth"
 	appdelivery "telegram-message-forward/internal/app/delivery"
 	appfilter "telegram-message-forward/internal/app/filter"
+	appflow "telegram-message-forward/internal/app/flow"
 	appingest "telegram-message-forward/internal/app/ingest"
 	apprule "telegram-message-forward/internal/app/rule"
 	appsettings "telegram-message-forward/internal/app/settings"
@@ -30,6 +31,7 @@ import (
 	"telegram-message-forward/internal/config"
 	"telegram-message-forward/internal/dispatch"
 	domainaccount "telegram-message-forward/internal/domain/account"
+	"telegram-message-forward/internal/flowengine"
 	"telegram-message-forward/internal/infra/clock"
 	"telegram-message-forward/internal/infra/crypto"
 	"telegram-message-forward/internal/infra/logger"
@@ -80,6 +82,7 @@ type Deps struct {
 	Sinks        *repository.SinkRepository
 	Templates    *repository.TemplateRepository
 	Rules        *repository.RuleRepository
+	Flows        *repository.FlowRepository
 	Messages     *repository.MessageRepository
 	Deliveries   *repository.DeliveryRepository
 	APITokens    *repository.APITokenRepository
@@ -87,12 +90,13 @@ type Deps struct {
 	TelegramApps *repository.TelegramAppRepository
 	Proxies      *repository.ProxyConfigRepository
 
-	Engine   *ruleengine.Engine
-	Renderer *tmpl.Renderer
-	Queue    *dispatch.Queue
-	Ingest   *appingest.Service
-	Delivery *appdelivery.Service
-	AIDigest *appaidigest.Service
+	Engine     *ruleengine.Engine
+	FlowEngine *flowengine.Engine
+	Renderer   *tmpl.Renderer
+	Queue      *dispatch.Queue
+	Ingest     *appingest.Service
+	Delivery   *appdelivery.Service
+	AIDigest   *appaidigest.Service
 }
 
 // Build 根据配置装配 App。
@@ -129,6 +133,7 @@ func Build(cfg *config.Config) (*App, error) {
 	templates := repository.NewTemplateRepository(db)
 	rules := repository.NewRuleRepository(db)
 	filters := repository.NewFilterRepository(db)
+	flows := repository.NewFlowRepository(db)
 	messages := repository.NewMessageRepository(db)
 	deliveries := repository.NewDeliveryRepository(db)
 	peers := repository.NewTelegramPeerRepository(db)
@@ -141,6 +146,7 @@ func Build(cfg *config.Config) (*App, error) {
 
 	// 规则引擎、渲染器、投递队列。
 	engine := ruleengine.NewEngine()
+	flowEngine := flowengine.NewEngine(flowengine.WithFilterResolver(filters))
 	renderer := tmpl.NewRenderer()
 	deliveryNotifier := dispatch.NewNotifier()
 	queue := dispatch.NewQueue(deliveries, cfg.Dispatch.MaxAttempts, deliveryNotifier).UseSinks(sinks)
@@ -183,7 +189,9 @@ func Build(cfg *config.Config) (*App, error) {
 		mediaStore.Swap(local, local, initialMedia.Retention())
 	}
 
-	ingestSvc := appingest.NewService(messages, rules, engine, queue, clk, log).UseMediaStore(mediaStore)
+	ingestSvc := appingest.NewService(messages, rules, engine, queue, clk, log).
+		UseMediaStore(mediaStore).
+		UseFlowEngine(flows, flowEngine, cfg.FlowEngine.Mode)
 	deliverySvc := appdelivery.NewService(deliveries, appdelivery.DisplayDeps{
 		Messages:  messages,
 		Sources:   sources,
@@ -272,6 +280,7 @@ func Build(cfg *config.Config) (*App, error) {
 	sinkSvc := appsink.NewService(sinks, deliveries)
 	templateSvc := apptemplate.NewService(templates)
 	ruleSvc := apprule.NewService(rules, apprule.ValidatorDeps{Sinks: sinks, Templates: templates, Filters: filters})
+	flowSvc := appflow.NewService(flows, flowEngine, appflow.ValidatorDeps{Sources: sources, Sinks: sinks, Templates: templates, Filters: filters})
 	filterSvc := appfilter.NewService(filters)
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)
 	sourceSvc.RegisterPlugin("rss", rssPlugin)
@@ -295,6 +304,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Source:         handler.NewSourceHandler(sourceSvc),
 		Template:       handler.NewTemplateHandler(templateSvc),
 		Rule:           handler.NewRuleHandler(ruleSvc),
+		Flow:           handler.NewFlowHandler(flowSvc),
 		Filter:         handler.NewFilterHandler(filterSvc),
 		Delivery:       handler.NewDeliveryHandler(deliverySvc),
 		AIDigest:       handler.NewAIDigestHandler(aiDigestSvc),
@@ -318,6 +328,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Sinks:        sinks,
 		Templates:    templates,
 		Rules:        rules,
+		Flows:        flows,
 		Messages:     messages,
 		Deliveries:   deliveries,
 		APITokens:    apiTokens,
@@ -325,6 +336,7 @@ func Build(cfg *config.Config) (*App, error) {
 		TelegramApps: telegramApps,
 		Proxies:      proxies,
 		Engine:       engine,
+		FlowEngine:   flowEngine,
 		Renderer:     renderer,
 		Queue:        queue,
 		Ingest:       ingestSvc,

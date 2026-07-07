@@ -34,3 +34,7 @@ dispatch:
   # 领取后超过该时长仍处于 processing 的任务，由 reaper 回退到 retrying。
   visibility_timeout: "5m"
   max_attempts: 3
+
+flow_engine:
+  # off: 旧 Rule 引擎主跑；shadow: 旧链路主跑并旁路比对 Flow；primary: Flow 引擎主跑。
+  mode: "off"

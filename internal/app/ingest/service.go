@@ -6,11 +6,18 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
+	"sort"
+	"strconv"
+	"strings"
 
 	"telegram-message-forward/internal/dispatch"
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainrule "telegram-message-forward/internal/domain/rule"
+	"telegram-message-forward/internal/flowengine"
 	"telegram-message-forward/internal/infra/clock"
 	"telegram-message-forward/internal/infra/mediastore"
 	"telegram-message-forward/internal/ruleengine"
@@ -18,13 +25,16 @@ import (
 
 // Service 是消息 ingest 应用服务。
 type Service struct {
-	messages domainmessage.Repository
-	rules    domainrule.Repository
-	engine   *ruleengine.Engine
-	queue    *dispatch.Queue
-	clock    clock.Clock
-	log      *slog.Logger
-	media    mediastore.Store
+	messages   domainmessage.Repository
+	rules      domainrule.Repository
+	flows      domainflow.Repository
+	engine     *ruleengine.Engine
+	flowEngine *flowengine.Engine
+	flowMode   string
+	queue      *dispatch.Queue
+	clock      clock.Clock
+	log        *slog.Logger
+	media      mediastore.Store
 }
 
 // NewService 创建 ingest 服务。
@@ -40,6 +50,14 @@ func NewService(
 		messages: messages, rules: rules, engine: engine,
 		queue: queue, clock: clk, log: log,
 	}
+}
+
+// UseFlowEngine 注入 Flow 图引擎。mode 支持 off、shadow、primary。
+func (s *Service) UseFlowEngine(flows domainflow.Repository, engine *flowengine.Engine, mode string) *Service {
+	s.flows = flows
+	s.flowEngine = engine
+	s.flowMode = strings.ToLower(strings.TrimSpace(mode))
+	return s
 }
 
 // UseMediaStore 注入媒体存储：Source 下载到临时目录的媒体在落库前收编到存储层。
@@ -65,15 +83,7 @@ func (s *Service) Ingest(ctx context.Context, msg *domainmessage.NormalizedMessa
 		return err
 	}
 
-	rules, err := s.rules.ListEnabledBySource(ctx, msg.SourceID)
-	if err != nil {
-		return err
-	}
-	if len(rules) == 0 {
-		return nil
-	}
-
-	matches, err := s.engine.Evaluate(ctx, msg, rules)
+	matches, err := s.evaluate(ctx, msg)
 	if err != nil {
 		return err
 	}
@@ -91,6 +101,86 @@ func (s *Service) Ingest(ctx context.Context, msg *domainmessage.NormalizedMessa
 		"matched_rules", len(matches),
 	)
 	return nil
+}
+
+func (s *Service) evaluate(ctx context.Context, msg *domainmessage.NormalizedMessage) ([]ruleengine.Match, error) {
+	switch s.flowMode {
+	case "primary":
+		return s.evaluateFlows(ctx, msg)
+	case "shadow":
+		matches, err := s.evaluateRules(ctx, msg)
+		if err != nil {
+			return nil, err
+		}
+		s.shadowCompare(ctx, msg, matches)
+		return matches, nil
+	default:
+		return s.evaluateRules(ctx, msg)
+	}
+}
+
+func (s *Service) evaluateRules(ctx context.Context, msg *domainmessage.NormalizedMessage) ([]ruleengine.Match, error) {
+	rules, err := s.rules.ListEnabledBySource(ctx, msg.SourceID)
+	if err != nil || len(rules) == 0 {
+		return nil, err
+	}
+	return s.engine.Evaluate(ctx, msg, rules)
+}
+
+func (s *Service) evaluateFlows(ctx context.Context, msg *domainmessage.NormalizedMessage) ([]ruleengine.Match, error) {
+	if s.flows == nil || s.flowEngine == nil {
+		return nil, nil
+	}
+	flows, err := s.flows.ListEnabledBySource(ctx, msg.SourceID)
+	if err != nil || len(flows) == 0 {
+		return nil, err
+	}
+	return s.flowEngine.Evaluate(ctx, msg, flows)
+}
+
+func (s *Service) shadowCompare(ctx context.Context, msg *domainmessage.NormalizedMessage, ruleMatches []ruleengine.Match) {
+	flowMatches, err := s.evaluateFlows(ctx, msg)
+	if err != nil {
+		s.log.Warn("Flow 影子求值失败", "message_id", msg.ID, "source_id", msg.SourceID, "err", err)
+		return
+	}
+	ruleSig := matchSignature(ruleMatches)
+	flowSig := matchSignature(flowMatches)
+	if strings.Join(ruleSig, "|") == strings.Join(flowSig, "|") {
+		return
+	}
+	s.log.Warn("Flow 影子求值 diff",
+		"message_id", msg.ID,
+		"source_id", msg.SourceID,
+		"rule_matches", len(ruleMatches),
+		"flow_matches", len(flowMatches),
+		"rule_signature", ruleSig,
+		"flow_signature", flowSig,
+	)
+}
+
+func matchSignature(matches []ruleengine.Match) []string {
+	out := make([]string, 0)
+	for _, m := range matches {
+		for _, target := range m.Targets {
+			tpl := "0"
+			if target.TemplateID != nil {
+				tpl = strconv.FormatInt(*target.TemplateID, 10)
+			}
+			out = append(out, strconv.FormatInt(target.SinkID, 10)+":"+tpl+":"+textDigest(m.Message))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func textDigest(msg *domainmessage.NormalizedMessage) string {
+	text := ""
+	if msg != nil {
+		text = msg.Text
+	}
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:8])
 }
 
 // persistMedia 把 Source 下载到临时目录的媒体文件移入媒体存储，

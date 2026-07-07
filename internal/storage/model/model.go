@@ -202,6 +202,43 @@ type RuleTarget struct {
 
 func (RuleTarget) TableName() string { return "rule_targets" }
 
+// Flow 对应 flows 表。
+type Flow struct {
+	ID          int64 `gorm:"primaryKey"`
+	Name        string
+	Enabled     bool
+	Priority    int
+	StopOnMatch bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (Flow) TableName() string { return "flows" }
+
+// FlowNode 对应 flow_nodes 表。
+type FlowNode struct {
+	ID         int64 `gorm:"primaryKey"`
+	FlowID     int64
+	Type       string
+	RefID      *int64
+	Config     datatypes.JSON
+	TemplateID *int64
+	PosX       float64
+	PosY       float64
+}
+
+func (FlowNode) TableName() string { return "flow_nodes" }
+
+// FlowEdge 对应 flow_edges 表。
+type FlowEdge struct {
+	ID         int64 `gorm:"primaryKey"`
+	FlowID     int64
+	FromNodeID int64
+	ToNodeID   int64
+}
+
+func (FlowEdge) TableName() string { return "flow_edges" }
+
 // Message 对应 messages 表。
 type Message struct {
 	ID                int64 `gorm:"primaryKey"`
@@ -233,6 +270,7 @@ type DeliveryTask struct {
 	TemplateID      *int64
 	OriginType      string
 	OriginID        *int64
+	OriginNodeID    *int64
 	Status          string
 	AttemptCount    int
 	MaxAttempts     int

@@ -1071,17 +1071,17 @@ flow_edges (id, flow_id, from_node_id, to_node_id, UNIQUE(flow_id, from_node_id,
 ### 18.5 阶段任务
 
 **F5-1 后端引擎（先行）**
-- [ ] `internal/domain/flow` + storage model/repository + goose migration（flows/flow_nodes/flow_edges + delivery_tasks 扩展）
-- [ ] `internal/flowengine`：编译（含图校验）+ 求值（扇出克隆、target 去重、Flow 间 priority/stop）+ 单元测试（含菱形、多源、多级 filter、stop_on_match 用例）
-- [ ] `/flows` CRUD API（DTO 校验图合法性，返回可读的校验错误）
-- [ ] `cmd/flowmigrate` + 影子模式接入 ingest + 引擎切换开关
-- [ ] 影子 diff 清零后切 primary
+- [x] `internal/domain/flow` + storage model/repository + goose migration（flows/flow_nodes/flow_edges + delivery_tasks 扩展）
+- [x] `internal/flowengine`：编译（含图校验）+ 求值（扇出克隆、target 去重、Flow 间 priority/stop）+ 单元测试（含菱形、多源、多级 filter、stop_on_match 用例）
+- [x] `/flows` CRUD API（DTO 校验图合法性，返回可读的校验错误）
+- [x] `cmd/flowmigrate` + 影子模式接入 ingest + 引擎切换开关
+- [x] 影子 diff 清零后切 primary（默认仍为 `off`，`shadow`/`primary` 由 `flow_engine.mode` 显式切换）
 
 **F5-2 画布自由编辑**
-- [ ] 画布进入「编辑模式」：节点可拖动、布局写回 pos_x/pos_y；节点面板（从来源/过滤器/渠道资源中拖入建节点，processor 节点从注册表选型）
-- [ ] 连线建边/删边直接读写 flow_edges；保存时后端校验错误在画布上定位标注
-- [ ] Route Inspector 适配 Flow（路径、Flow 间匹配顺序、节点配置摘要）
-- [ ] 现有三栏自动布局保留为「概览模式」（只读投影）
+- [x] 画布进入「编辑模式」：节点可拖动、布局写回 pos_x/pos_y；节点面板（来源/过滤器/渠道资源添加建节点，processor 节点从注册表选型）
+- [x] 连线建边/删边直接读写 flow_edges；保存时后端校验错误在画布侧展示
+- [x] Route Inspector 适配 Flow（编辑侧展示节点配置摘要，概览侧保留路径与匹配顺序）
+- [x] 现有三栏自动布局保留为「概览模式」（只读投影）
 
 **F5-3 RulesPage 转简单模式**
 - [ ] RuleEditorModal 管道表单改为读写线性 Flow（表单壳 + 线性图的双向转换）

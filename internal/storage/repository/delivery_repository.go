@@ -28,7 +28,7 @@ func NewDeliveryRepository(db *gorm.DB) *DeliveryRepository {
 
 var _ domaindelivery.Repository = (*DeliveryRepository)(nil)
 
-// Create 插入投递任务，按 (message_id, rule_id, sink_id) 幂等。
+// Create 插入投递任务，按来源类型的唯一键幂等。
 func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task) error {
 	if t.OriginType == "" {
 		t.OriginType = "rule"
@@ -50,6 +50,17 @@ func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task)
 		if qerr := r.db.WithContext(ctx).
 			Select("id").
 			Where("message_id = ? AND rule_id = ? AND sink_id = ? AND origin_type = ?", t.MessageID, t.RuleID, t.SinkID, "rule").
+			First(&existing).Error; qerr != nil {
+			return qerr
+		}
+		t.ID = existing.ID
+		return nil
+	}
+	if t.OriginType == "flow" {
+		var existing model.DeliveryTask
+		if qerr := r.db.WithContext(ctx).
+			Select("id").
+			Where("message_id = ? AND origin_type = ? AND origin_id = ? AND origin_node_id = ?", t.MessageID, "flow", t.OriginID, t.OriginNodeID).
 			First(&existing).Error; qerr != nil {
 			return qerr
 		}
@@ -346,6 +357,7 @@ func toDeliveryModel(t *domaindelivery.Task) (*model.DeliveryTask, error) {
 		originType = "rule"
 	}
 	originID := nullablePositive(t.OriginID)
+	originNodeID := nullablePositive(t.OriginNodeID)
 	return &model.DeliveryTask{
 		ID:              t.ID,
 		MessageID:       messageID,
@@ -354,6 +366,7 @@ func toDeliveryModel(t *domaindelivery.Task) (*model.DeliveryTask, error) {
 		TemplateID:      t.TemplateID,
 		OriginType:      originType,
 		OriginID:        originID,
+		OriginNodeID:    originNodeID,
 		Status:          string(t.Status),
 		AttemptCount:    t.AttemptCount,
 		MaxAttempts:     t.MaxAttempts,
@@ -384,6 +397,10 @@ func toDeliveryDomain(m *model.DeliveryTask) (*domaindelivery.Task, error) {
 	if m.OriginID != nil {
 		originID = *m.OriginID
 	}
+	originNodeID := int64(0)
+	if m.OriginNodeID != nil {
+		originNodeID = *m.OriginNodeID
+	}
 	return &domaindelivery.Task{
 		ID:              m.ID,
 		MessageID:       messageID,
@@ -392,6 +409,7 @@ func toDeliveryDomain(m *model.DeliveryTask) (*domaindelivery.Task, error) {
 		TemplateID:      m.TemplateID,
 		OriginType:      m.OriginType,
 		OriginID:        originID,
+		OriginNodeID:    originNodeID,
 		Status:          domaindelivery.Status(m.Status),
 		AttemptCount:    m.AttemptCount,
 		MaxAttempts:     m.MaxAttempts,

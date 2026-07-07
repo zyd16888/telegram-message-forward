@@ -5,12 +5,13 @@ import "time"
 
 // Config 是服务的全部配置。
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Log      LogConfig      `mapstructure:"log"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Security SecurityConfig `mapstructure:"security"`
-	Dispatch DispatchConfig `mapstructure:"dispatch"`
-	Media    MediaConfig    `mapstructure:"media"`
+	Server     ServerConfig     `mapstructure:"server"`
+	Log        LogConfig        `mapstructure:"log"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Security   SecurityConfig   `mapstructure:"security"`
+	Dispatch   DispatchConfig   `mapstructure:"dispatch"`
+	Media      MediaConfig      `mapstructure:"media"`
+	FlowEngine FlowEngineConfig `mapstructure:"flow_engine"`
 }
 
 // ServerConfig 是 HTTP 服务配置。
@@ -95,4 +96,10 @@ type DispatchConfig struct {
 	PollInterval      time.Duration `mapstructure:"poll_interval"`
 	VisibilityTimeout time.Duration `mapstructure:"visibility_timeout"`
 	MaxAttempts       int           `mapstructure:"max_attempts"`
+}
+
+// FlowEngineConfig 控制 Flow 图引擎切换模式。
+type FlowEngineConfig struct {
+	// Mode: off 使用旧 Rule 引擎；shadow 旧链路主跑并旁路比对 Flow；primary 使用 Flow 引擎。
+	Mode string `mapstructure:"mode"`
 }
