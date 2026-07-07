@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, onMounted, ref, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import PageHeader from '@/components/PageHeader.vue'
@@ -36,7 +36,7 @@ const ruleMeta = shallowRef<RuleMeta>({ conditions: [], processors: [] })
 const sinkDescriptors = shallowRef<SinkDescriptor[]>([])
 const filters = shallowRef<Filter[]>([])
 const flows = shallowRef<Flow[]>([])
-const flowDraft = shallowRef<Flow | null>(null)
+const flowDraft = ref<Flow | null>(null)
 const flowError = shallowRef('')
 const canvasMode = shallowRef<'overview' | 'edit'>('overview')
 const activeFlowId = shallowRef<number | null>(null)
@@ -70,6 +70,11 @@ const selectedDraftNode = computed(() => {
   if (canvasMode.value !== 'edit' || !selection.value || !flowDraft.value) return null
   return flowDraft.value.nodes.find((node) => node.id === selection.value?.id) ?? null
 })
+
+function draftStateClass(id: number): string {
+  if (canvasMode.value !== 'edit' || !selection.value) return ''
+  return selection.value.id === id ? 'is-selected' : ''
+}
 
 const {
   selection,
@@ -423,6 +428,7 @@ const draftSourceNodes = computed<CanvasNodeInput<SourceNodeData>[]>(() =>
     return {
       id: node.id,
       position: { x: node.pos_x, y: node.pos_y },
+      stateClass: draftStateClass(node.id),
       data: {
         name: source?.name ?? `来源 #${node.ref_id ?? '?'}`,
         typeLabel: source ? sourceTypeLabel(source) : 'Source',
@@ -444,6 +450,7 @@ const draftFilterNodes = computed<CanvasNodeInput<FilterNodeData>[]>(() =>
     return {
       id: node.id,
       position: { x: node.pos_x, y: node.pos_y },
+      stateClass: draftStateClass(node.id),
       data: {
         name: firstFilter ?? (inlineConditions.length ? '内联过滤器' : '过滤器'),
         conditionCount: filterIds.length || inlineConditions.length,
@@ -457,6 +464,7 @@ const draftProcessorNodes = computed<CanvasNodeInput<ProcessorNodeData>[]>(() =>
   draftNodes('processor').map((node) => ({
     id: node.id,
     position: { x: node.pos_x, y: node.pos_y },
+    stateClass: draftStateClass(node.id),
     data: {
       name: '处理节点',
       processorChips: (node.config.processors ?? []).map((item) => processorLabel(item.type)),
@@ -471,6 +479,7 @@ const draftTargetNodes = computed<CanvasNodeInput<SinkNodeData>[]>(() =>
     return {
       id: node.id,
       position: { x: node.pos_x, y: node.pos_y },
+      stateClass: draftStateClass(node.id),
       data: {
         name: sink?.name ?? `渠道 #${node.ref_id ?? '?'}`,
         typeLabel: sink ? sinkTypeLabel(sink) : 'Target',
