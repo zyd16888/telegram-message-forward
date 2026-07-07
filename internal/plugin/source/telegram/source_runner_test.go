@@ -61,3 +61,34 @@ func TestForwardToSubscriptionsOnlyMatchesSource(t *testing.T) {
 		t.Fatalf("应只分发给匹配 source，got=%v", got)
 	}
 }
+
+func TestPrivateUserSourceMatchesPrivateSender(t *testing.T) {
+	src := &domainsource.Source{ID: 1, AccountID: 10, PeerType: domainsource.PeerUser, PeerID: 200}
+	msg := &tg.Message{ID: 43, PeerID: &tg.PeerUser{UserID: 100}, Message: "hello"}
+	msg.SetFromID(&tg.PeerUser{UserID: 200})
+
+	if !matchesSource(msg, src) {
+		t.Fatal("私聊消息应允许用 FromID 匹配 user source")
+	}
+}
+
+func TestPrivateUserSourceDoesNotMatchGroupSender(t *testing.T) {
+	src := &domainsource.Source{ID: 1, AccountID: 10, PeerType: domainsource.PeerUser, PeerID: 200}
+	msg := &tg.Message{ID: 44, PeerID: &tg.PeerChat{ChatID: 300}, Message: "hello"}
+	msg.SetFromID(&tg.PeerUser{UserID: 200})
+
+	if matchesSource(msg, src) {
+		t.Fatal("群消息不能仅因 FromID 相同而命中私聊 user source")
+	}
+}
+
+func TestPrivateUserSourceDoesNotMatchOutgoingFromDifferentDialog(t *testing.T) {
+	src := &domainsource.Source{ID: 1, AccountID: 10, PeerType: domainsource.PeerUser, PeerID: 200}
+	msg := &tg.Message{ID: 45, PeerID: &tg.PeerUser{UserID: 300}, Message: "hello"}
+	msg.SetOut(true)
+	msg.SetFromID(&tg.PeerUser{UserID: 200})
+
+	if matchesSource(msg, src) {
+		t.Fatal("发给其他私聊对象的 outgoing 消息不能因 FromID 命中 user source")
+	}
+}

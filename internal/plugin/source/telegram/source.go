@@ -718,6 +718,21 @@ func (p *Plugin) forwardToSubscriptions(runCtx context.Context, accountID int64,
 	}
 	p.mu.Unlock()
 
+	if len(subs) == 0 {
+		peerType, peerID := messagePeer(msg.PeerID)
+		senderType, senderID := messageSender(msg)
+		p.deps.Log.Debug("Telegram 消息未匹配任何 source",
+			"account", accountID,
+			"message_id", msg.ID,
+			"peer_type", peerType,
+			"peer_id", peerID,
+			"sender_type", senderType,
+			"sender_id", senderID,
+			"out", msg.Out,
+		)
+		return
+	}
+
 	for _, sub := range subs {
 		now := time.Now()
 		p.mu.Lock()
@@ -774,7 +789,42 @@ func matchesSource(msg *tg.Message, src *domainsource.Source) bool {
 	case *tg.PeerChat:
 		return src.PeerType == domainsource.PeerChat && p.ChatID == src.PeerID
 	case *tg.PeerUser:
-		return src.PeerType == domainsource.PeerUser && p.UserID == src.PeerID
+		if src.PeerType != domainsource.PeerUser {
+			return false
+		}
+		if p.UserID == src.PeerID {
+			return true
+		}
+		if msg.Out {
+			return false
+		}
+		from, ok := msg.GetFromID()
+		if !ok {
+			return false
+		}
+		fromUser, ok := from.(*tg.PeerUser)
+		return ok && fromUser.UserID == src.PeerID
 	}
 	return false
+}
+
+func messagePeer(peer tg.PeerClass) (string, int64) {
+	switch p := peer.(type) {
+	case *tg.PeerChannel:
+		return "channel", p.ChannelID
+	case *tg.PeerChat:
+		return "chat", p.ChatID
+	case *tg.PeerUser:
+		return "user", p.UserID
+	default:
+		return "", 0
+	}
+}
+
+func messageSender(msg *tg.Message) (string, int64) {
+	from, ok := msg.GetFromID()
+	if !ok || from == nil {
+		return "", 0
+	}
+	return messagePeer(from)
 }
