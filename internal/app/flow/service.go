@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	domainfilter "telegram-message-forward/internal/domain/filter"
 	domainflow "telegram-message-forward/internal/domain/flow"
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domainsource "telegram-message-forward/internal/domain/source"
 	domaintemplate "telegram-message-forward/internal/domain/template"
@@ -50,6 +52,35 @@ type Input struct {
 	StopOnMatch bool
 	Nodes       []domainflow.Node
 	Edges       []domainflow.Edge
+}
+
+type PreviewMessage struct {
+	SourceID       int64
+	MessageType    string
+	SenderPeerType string
+	SenderID       int64
+	SenderName     string
+	Text           string
+	Media          []domainmessage.Media
+	OriginalURL    string
+	ReceivedAt     time.Time
+}
+
+type PreviewInput struct {
+	Flow    Input
+	Message PreviewMessage
+}
+
+type PreviewTarget struct {
+	SinkID     int64
+	TemplateID *int64
+}
+
+type PreviewResult struct {
+	Matched       bool
+	ProcessedText string
+	Media         []domainmessage.Media
+	Targets       []PreviewTarget
 }
 
 func (s *Service) List(ctx context.Context) ([]*domainflow.Flow, error) {
@@ -95,6 +126,54 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	}
 	s.engine.Invalidate(id)
 	return nil
+}
+
+// Preview 用一条手工样例消息预演当前 Flow 草稿，不要求 Flow 先落库。
+func (s *Service) Preview(ctx context.Context, in PreviewInput) (*PreviewResult, error) {
+	f := toFlow(-1, in.Flow)
+	f.Enabled = true
+	if err := s.validate(ctx, f); err != nil {
+		return nil, err
+	}
+	msg := &domainmessage.NormalizedMessage{
+		SourceID:       in.Message.SourceID,
+		MessageType:    in.Message.MessageType,
+		SenderPeerType: in.Message.SenderPeerType,
+		SenderID:       in.Message.SenderID,
+		SenderName:     in.Message.SenderName,
+		Text:           in.Message.Text,
+		Media:          in.Message.Media,
+		OriginalURL:    in.Message.OriginalURL,
+		ReceivedAt:     in.Message.ReceivedAt,
+	}
+	if msg.MessageType == "" {
+		msg.MessageType = "text"
+	}
+	if msg.ReceivedAt.IsZero() {
+		msg.ReceivedAt = time.Now()
+	}
+	engine := flowengine.NewEngine(flowengine.WithFilterResolver(s.filters))
+	matches, err := engine.Evaluate(ctx, msg, []*domainflow.Flow{f})
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return &PreviewResult{Matched: false, ProcessedText: msg.Text, Media: msg.Media}, nil
+	}
+	targets := make([]PreviewTarget, 0, len(matches))
+	processedText := matches[0].Message.Text
+	media := matches[0].Message.Media
+	for _, match := range matches {
+		for _, target := range match.Targets {
+			targets = append(targets, PreviewTarget{SinkID: target.SinkID, TemplateID: target.TemplateID})
+		}
+	}
+	return &PreviewResult{
+		Matched:       true,
+		ProcessedText: processedText,
+		Media:         media,
+		Targets:       targets,
+	}, nil
 }
 
 func (s *Service) ConditionDescriptors() []condition.Descriptor {

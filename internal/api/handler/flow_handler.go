@@ -39,6 +39,40 @@ func (h *FlowHandler) Meta(c *gin.Context) {
 	}})
 }
 
+func (h *FlowHandler) Preview(c *gin.Context) {
+	var req dto.FlowPreviewRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	result, err := h.svc.Preview(c.Request.Context(), appflow.PreviewInput{
+		Flow: toFlowInput(req.Flow),
+		Message: appflow.PreviewMessage{
+			SourceID:       req.Message.SourceID,
+			MessageType:    req.Message.MessageType,
+			SenderPeerType: req.Message.SenderPeerType,
+			SenderID:       req.Message.SenderID,
+			SenderName:     req.Message.SenderName,
+			Text:           req.Message.Text,
+			Media:          req.Message.Media,
+			OriginalURL:    req.Message.OriginalURL,
+		},
+	})
+	if err != nil {
+		respondFlowError(c, err)
+		return
+	}
+	targets := make([]dto.RulePreviewTargetDTO, 0, len(result.Targets))
+	for _, target := range result.Targets {
+		targets = append(targets, dto.RulePreviewTargetDTO{SinkID: target.SinkID, TemplateID: target.TemplateID})
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.RulePreviewDTO{
+		Matched:       result.Matched,
+		ProcessedText: result.ProcessedText,
+		Media:         result.Media,
+		Targets:       targets,
+	}})
+}
+
 func (h *FlowHandler) Get(c *gin.Context) {
 	id, ok := parseID(c)
 	if !ok {

@@ -272,8 +272,13 @@ function sinkSupportsFormat(sink: Sink, format: string): boolean {
 
 function validate(): boolean {
   if (!form.name.trim()) {
-    message.warning('请填写规则名称')
+    message.warning('请填写 Flow 名称')
     activeStage.value = 'route'
+    return false
+  }
+  if (!form.source_ids.length) {
+    message.warning('请至少选择一个监听来源')
+    activeStage.value = 'sources'
     return false
   }
   if (!form.targets.length) {
@@ -329,7 +334,7 @@ async function submit() {
     } else {
       await rulesApi.create(body)
     }
-    message.success('已保存规则')
+    message.success('已保存 Flow')
     show.value = false
     emit('saved')
   } catch (e) {
@@ -380,7 +385,7 @@ function previewTargetLabel(target: RuleTarget): string {
   <NModal
     v-model:show="show"
     preset="card"
-    :title="editing ? '编辑规则' : '新建规则'"
+    :title="editing ? '编辑线性 Flow' : '新建线性 Flow'"
     class="rule-modal"
     :style="{ width: 'min(920px, calc(100vw - 32px))' }"
   >
@@ -412,10 +417,10 @@ function previewTargetLabel(target: RuleTarget): string {
       <div class="stage-panel">
         <NForm label-placement="top">
           <template v-if="activeStage === 'route'">
-            <div class="panel-desc">路由模块决定这条规则在整体编排中的身份、优先级和命中后的继续匹配策略。</div>
+            <div class="panel-desc">路由模块决定这条线性 Flow 在整体编排中的身份、优先级和命中后的继续匹配策略。</div>
             <div class="route-grid">
-              <NFormItem label="规则名称" :show-feedback="false">
-                <NInput v-model:value="form.name" placeholder="规则名称（必填）" />
+              <NFormItem label="Flow 名称" :show-feedback="false">
+                <NInput v-model:value="form.name" placeholder="Flow 名称（必填）" />
               </NFormItem>
               <NFormItem label="优先级" :show-feedback="false">
                 <NInputNumber v-model:value="form.priority" class="full-input" />
@@ -445,20 +450,20 @@ function previewTargetLabel(target: RuleTarget): string {
           </template>
 
           <template v-else-if="activeStage === 'match'">
-            <div class="panel-desc">过滤模块为空时表示来源消息全部进入。共享过滤器可被多条规则复用；专用条件只跟随当前规则。</div>
+            <div class="panel-desc">过滤模块为空时表示来源消息全部进入。共享过滤器可被多条 Flow 复用；专用条件只跟随当前 Flow。</div>
             <NFormItem label="共享过滤器" :show-feedback="false">
               <NSelect
                 v-model:value="form.filter_ids"
                 multiple
                 clearable
                 :options="filterOptions"
-                placeholder="不选则使用本规则专用条件"
+                placeholder="不选则使用本 Flow 专用条件"
               />
             </NFormItem>
 
             <template v-if="usingFilter">
               <NAlert type="info" :show-icon="false" class="filter-note">
-                修改共享过滤器会联动所有引用它的规则与 AI 整理；如需单独调整，请清空选择后使用本规则专用条件。
+                修改共享过滤器会联动所有引用它的 Flow 与 AI 整理；如需单独调整，请清空选择后使用本 Flow 专用条件。
               </NAlert>
               <div class="filter-list">
                 <div v-for="filter in selectedFilters" :key="filter.id" class="filter-item">

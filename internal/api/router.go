@@ -136,6 +136,11 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		rules := v1.Group("/rules")
 		{
+			rules.Use(func(c *gin.Context) {
+				c.Header("Deprecation", "true")
+				c.Header("Link", `</api/v1/flows>; rel="successor-version"`)
+				c.Next()
+			})
 			rules.GET("", deps.Rule.List)
 			rules.GET("/meta", deps.Rule.Meta)
 			rules.POST("/preview", deps.Rule.Preview)
@@ -150,6 +155,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			{
 				flows.GET("", deps.Flow.List)
 				flows.GET("/meta", deps.Flow.Meta)
+				flows.POST("/preview", deps.Flow.Preview)
 				flows.POST("", deps.Flow.Create)
 				flows.GET("/:id", deps.Flow.Get)
 				flows.PUT("/:id", deps.Flow.Update)

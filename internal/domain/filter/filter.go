@@ -26,6 +26,6 @@ type Repository interface {
 	Create(ctx context.Context, f *Filter) error
 	Update(ctx context.Context, f *Filter) error
 	Delete(ctx context.Context, id int64) error
-	// CountReferences 返回引用该过滤器的转发规则 + AI Profile 总数。
+	// CountReferences 返回引用该过滤器的旧规则、Flow 节点与 AI Profile 总数。
 	CountReferences(ctx context.Context, id int64) (int64, error)
 }

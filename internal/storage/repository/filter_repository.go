@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	domainfilter "telegram-message-forward/internal/domain/filter"
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainrule "telegram-message-forward/internal/domain/rule"
 	"telegram-message-forward/internal/storage/model"
 )
@@ -89,11 +90,19 @@ func (r *FilterRepository) CountReferences(ctx context.Context, id int64) (int64
 	if err := r.db.WithContext(ctx).Model(&model.RuleFilter{}).Where("filter_id = ?", id).Count(&ruleCount).Error; err != nil {
 		return 0, err
 	}
+	var flowCount int64
+	if err := r.db.WithContext(ctx).
+		Model(&model.FlowNode{}).
+		Where("type = ?", string(domainflow.NodeTypeFilter)).
+		Where("COALESCE(config->'filter_ids', '[]'::jsonb) @> jsonb_build_array(?)", id).
+		Count(&flowCount).Error; err != nil {
+		return 0, err
+	}
 	var profileCount int64
 	if err := r.db.WithContext(ctx).Model(&model.AIDigestProfile{}).Where("filter_id = ?", id).Count(&profileCount).Error; err != nil {
 		return 0, err
 	}
-	return ruleCount + profileCount, nil
+	return ruleCount + flowCount + profileCount, nil
 }
 
 func toFilterModel(f *domainfilter.Filter) (*model.Filter, error) {

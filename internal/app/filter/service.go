@@ -69,7 +69,7 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 		return err
 	}
 	if count > 0 {
-		return fmt.Errorf("该过滤器仍被 %d 处（转发规则/AI 整理）引用，无法删除", count)
+		return fmt.Errorf("该过滤器仍被 %d 处（Flow/转发规则/AI 整理）引用，无法删除", count)
 	}
 	return s.repo.Delete(ctx, id)
 }

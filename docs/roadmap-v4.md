@@ -1094,9 +1094,11 @@ flow_edges (id, flow_id, from_node_id, to_node_id, UNIQUE(flow_id, from_node_id,
 - [x] 节点配置编辑补齐：processor 节点的处理器参数、filter 节点的内联条件在编辑面板可编辑（复用 RuleEditorModal 的条件/处理器构建器）；未保存草稿离开/切换 Flow 时提示
 
 **F5-3 RulesPage 转简单模式**
-- [ ] RuleEditorModal 管道表单改为读写线性 Flow（表单壳 + 线性图的双向转换）
-- [ ] Rule API 标记 deprecated，前端全部改走 `/flows`
-- [ ] roadmap 记录 Rule 表/`ruleengine` 的移除计划
+- [x] RuleEditorModal 管道表单改为读写线性 Flow（表单壳 + 线性图的双向转换）
+- [x] Rule API 标记 deprecated，前端全部改走 `/flows`
+- [x] roadmap 记录 Rule 表/`ruleengine` 的移除计划
+
+Rule 表与旧 `ruleengine` 移除计划：`primary` 模式稳定后，先保留 `/rules` 只读兼容一个小版本并持续返回 `Deprecation: true`；确认投递记录、过滤器引用计数、AI Digest 条件元数据不再依赖 rules 表后，新增 migration 归档/删除 `rules`、`rule_sources`、`rule_filters`、`rule_targets` 与 `flow_rule_migrations`，最后把 `internal/ruleengine` 缩为 flowengine 内部复用工具或直接内联到 flowengine。
 
 **F5-4 有状态节点（按需，另行确认后再做）**
 - [ ] stream 去重节点（逐条实时判定 + 键值状态）

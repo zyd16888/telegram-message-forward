@@ -562,6 +562,11 @@ type FlowRequest struct {
 	Edges       []FlowEdgeDTO `json:"edges"`
 }
 
+type FlowPreviewRequest struct {
+	Flow    FlowRequest               `json:"flow" binding:"required"`
+	Message RulePreviewMessageRequest `json:"message" binding:"required"`
+}
+
 func NewFlowDTO(f *domainflow.Flow) FlowDTO {
 	nodes := make([]FlowNodeDTO, 0, len(f.Nodes))
 	for _, n := range f.Nodes {
