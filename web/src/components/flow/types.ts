@@ -16,6 +16,7 @@ export interface RuleNodeData {
   name: string
   enabled: boolean
   priority: number
+  orderLabel: string
   stopOnMatch: boolean
   conditionChips: string[]
   processorChips: string[]

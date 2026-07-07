@@ -18,6 +18,7 @@ const emit = defineEmits<{
 
 <template>
   <div class="flow-node rule-node">
+    <span class="order-badge">{{ data.orderLabel }}</span>
     <div class="node-head">
       <span class="node-name">{{ data.name }}</span>
       <NTooltip v-if="data.warnings.length" trigger="hover">
@@ -68,7 +69,28 @@ const emit = defineEmits<{
 }
 
 .rule-node {
+  position: relative;
   border-top: 3px solid var(--clay-primary);
+}
+
+.order-badge {
+  position: absolute;
+  top: -11px;
+  left: 10px;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--clay-primary) 35%, var(--clay-border));
+  border-radius: 999px;
+  color: var(--clay-primary);
+  background: var(--clay-surface);
+  box-shadow: var(--clay-out-sm);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
 }
 
 .node-head {

@@ -6,8 +6,8 @@ import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
 import FlowCanvas from '@/components/flow/FlowCanvas.vue'
-import FlowContextBar from '@/components/flow/FlowContextBar.vue'
 import FlowToolbar from '@/components/flow/FlowToolbar.vue'
+import RouteInspector from '@/components/flow/RouteInspector.vue'
 import ResourceShelf from '@/components/flow/ResourceShelf.vue'
 import type {
   CanvasConnection,
@@ -58,7 +58,6 @@ const {
   unusedSinks,
   hiddenResourceCount,
   related,
-  selectionRuleCount,
   boardFilterActive,
   canvasEmptyHint,
   stateClass,
@@ -141,21 +140,6 @@ function onPaneClick() {
   clearPaneSelection()
 }
 
-const selectionLabel = computed(() => {
-  const sel = selection.value
-  if (!sel) return ''
-  if (sel.kind === 'source') return `来源「${sourceName(sel.id)}」`
-  if (sel.kind === 'rule') return `规则「${ruleName(sel.id)}」`
-  return `渠道「${sinkName(sel.id)}」`
-})
-
-const selectedEdgeLabel = computed(() => {
-  const edge = selectedEdge.value
-  if (!edge) return ''
-  if (edge.kind === 'source-rule') return `连线「${sourceName(edge.sourceId)} → ${ruleName(edge.ruleId)}」`
-  return `连线「${ruleName(edge.ruleId)} → ${sinkName(edge.sinkId)}」`
-})
-
 // --- 展示辅助 ---
 
 function sourceName(id: number): string {
@@ -230,6 +214,28 @@ function processorLabel(type: string): string {
   return processorLabelByType.value.get(type) ?? type
 }
 
+const ruleOrderBySource = computed(() => {
+  const orderMap = new Map<number, Map<number, number>>()
+  for (const source of sources.value) {
+    const orderedRules = rules.value
+      .filter((rule) => rule.source_ids.includes(source.id))
+      .sort((a, b) => b.priority - a.priority || a.id - b.id)
+    orderMap.set(source.id, new Map(orderedRules.map((rule, index) => [rule.id, index + 1])))
+  }
+  return orderMap
+})
+
+function ruleOrderLabel(rule: Rule): string {
+  const selectedSourceId = selection.value?.kind === 'source' ? selection.value.id : null
+  if (selectedSourceId && rule.source_ids.includes(selectedSourceId)) {
+    return `#${ruleOrderBySource.value.get(selectedSourceId)?.get(rule.id) ?? 1}`
+  }
+  if (rule.source_ids.length === 1) {
+    return `#${ruleOrderBySource.value.get(rule.source_ids[0])?.get(rule.id) ?? 1}`
+  }
+  return `P${rule.priority}`
+}
+
 // --- 画布数据组装 ---
 
 const canvasSources = computed<CanvasNodeInput<SourceNodeData>[]>(() =>
@@ -256,6 +262,7 @@ const canvasRules = computed<CanvasNodeInput<RuleNodeData>[]>(() =>
       name: node.rule.name,
       enabled: node.rule.enabled,
       priority: node.rule.priority,
+      orderLabel: ruleOrderLabel(node.rule),
       stopOnMatch: node.rule.stop_on_match,
       conditionChips: node.rule.filter_ids.length
         ? node.rule.filter_ids.map((id) => filterNameById.value.get(id) ?? `过滤器 #${id}`)
@@ -569,56 +576,63 @@ onMounted(async () => {
       @show-unused-nodes="showUnusedNodes = true"
     />
 
-    <FlowContextBar
-      :selection="selection"
-      :selected-edge="selectedEdge"
-      :selection-label="selectionLabel"
-      :selection-rule-count="selectionRuleCount"
-      :selected-edge-label="selectedEdgeLabel"
-      @create-rule="openCreateRule"
-      @edit-rule="openEditRule"
-      @manage-config="goToSelectedConfig"
-      @view-deliveries="goToDeliveries"
-      @clear-selection="clearSelection"
-      @detach-edge="detachSelectedEdge"
-      @clear-edge="clearSelectedEdge"
-    />
+    <div class="flow-workspace">
+      <NSpin :show="loading">
+        <FlowCanvas
+          v-if="canvasHasNodes"
+          :key="showUnusedNodes ? 'all-resources' : 'linked-resources'"
+          :sources="canvasSources"
+          :rules="canvasRules"
+          :sinks="canvasSinks"
+          :edges="canvasEdges"
+          @select-node="toggleSelect"
+          @select-edge="selectEdge"
+          @clear-select="onPaneClick"
+          @connect="onCanvasConnect"
+          @edit-rule="openEditRule"
+          @toggle-rule="toggleRule"
+        />
 
-    <NSpin :show="loading">
-      <FlowCanvas
-        v-if="canvasHasNodes"
-        :key="showUnusedNodes ? 'all-resources' : 'linked-resources'"
-        :sources="canvasSources"
-        :rules="canvasRules"
-        :sinks="canvasSinks"
-        :edges="canvasEdges"
-        @select-node="toggleSelect"
-        @select-edge="selectEdge"
-        @clear-select="onPaneClick"
-        @connect="onCanvasConnect"
+        <NEmpty v-else-if="sources.length || rules.length || sinks.length" :description="canvasEmptyHint">
+          <template #extra>
+            <NSpace>
+              <NButton v-if="boardFilterActive" secondary @click="clearBoardFilters">清除筛选</NButton>
+              <NButton v-else secondary @click="showUnusedNodes = true">显示未接入资源</NButton>
+              <NButton type="primary" @click="openCreateRule">新建规则</NButton>
+            </NSpace>
+          </template>
+        </NEmpty>
+
+        <NEmpty v-else description="还没有可编排的来源、规则或渠道">
+          <template #extra>
+            <NSpace>
+              <NButton @click="go('accounts')">去配置账号</NButton>
+              <NButton type="primary" @click="go('sources')">去同步来源</NButton>
+            </NSpace>
+          </template>
+        </NEmpty>
+      </NSpin>
+
+      <RouteInspector
+        :selection="selection"
+        :selected-edge="selectedEdge"
+        :rule-nodes="ruleNodes"
+        :sources="sources"
+        :sinks="sinks"
+        :filters="filters"
+        :source-type-label="sourceTypeLabel"
+        :sink-type-label="sinkTypeLabel"
+        :condition-label="conditionLabel"
+        :processor-label="processorLabel"
+        @create-rule="openCreateRule"
         @edit-rule="openEditRule"
-        @toggle-rule="toggleRule"
+        @manage-config="goToSelectedConfig"
+        @view-deliveries="goToDeliveries"
+        @clear-selection="clearSelection"
+        @detach-edge="detachSelectedEdge"
+        @clear-edge="clearSelectedEdge"
       />
-
-      <NEmpty v-else-if="sources.length || rules.length || sinks.length" :description="canvasEmptyHint">
-        <template #extra>
-          <NSpace>
-            <NButton v-if="boardFilterActive" secondary @click="clearBoardFilters">清除筛选</NButton>
-            <NButton v-else secondary @click="showUnusedNodes = true">显示未接入资源</NButton>
-            <NButton type="primary" @click="openCreateRule">新建规则</NButton>
-          </NSpace>
-        </template>
-      </NEmpty>
-
-      <NEmpty v-else description="还没有可编排的来源、规则或渠道">
-        <template #extra>
-          <NSpace>
-            <NButton @click="go('accounts')">去配置账号</NButton>
-            <NButton type="primary" @click="go('sources')">去同步来源</NButton>
-          </NSpace>
-        </template>
-      </NEmpty>
-    </NSpin>
+    </div>
 
     <RuleEditorModal
       v-model:show="showRuleModal"
@@ -797,9 +811,20 @@ onMounted(async () => {
   font-size: 12px;
 }
 
+.flow-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 14px;
+  align-items: start;
+}
+
 @media (max-width: 1100px) {
   .overview-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .flow-workspace {
+    grid-template-columns: 1fr;
   }
 }
 
