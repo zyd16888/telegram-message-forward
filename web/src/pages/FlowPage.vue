@@ -39,6 +39,7 @@ const selection = shallowRef<{ kind: NodeKind; id: number } | null>(null)
 const selectedEdge = shallowRef<EdgeRef | null>(null)
 const keyword = shallowRef('')
 const onlyWarnings = shallowRef(false)
+const showUnusedNodes = shallowRef(false)
 const templateFilterId = shallowRef<number | null>(null)
 
 const showRuleModal = shallowRef(false)
@@ -136,7 +137,7 @@ const visibleRuleNodes = computed(() => {
   })
 })
 
-const visibleSources = computed(() => {
+const searchedSources = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   if (!q) return sources.value
   return sources.value.filter((s) =>
@@ -144,13 +145,67 @@ const visibleSources = computed(() => {
   )
 })
 
-const visibleSinks = computed(() => {
+const searchedSinks = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   if (!q) return sinks.value
   return sinks.value.filter((s) =>
     [s.name, s.type, sinkTypeLabel(s)].some((item) => item.toLowerCase().includes(q)),
   )
 })
+
+const linkedSourceIds = computed(() => {
+  const ids = new Set<number>()
+  for (const node of ruleNodes.value) {
+    node.rule.source_ids.forEach((id) => ids.add(id))
+  }
+  return ids
+})
+
+const linkedSinkIds = computed(() => {
+  const ids = new Set<number>()
+  for (const node of ruleNodes.value) {
+    node.targets.forEach((target) => ids.add(target.sinkId))
+  }
+  return ids
+})
+
+const visibleRuleSourceIds = computed(() => {
+  const ids = new Set<number>()
+  for (const node of visibleRuleNodes.value) {
+    node.sources.forEach((source) => ids.add(source.sourceId))
+  }
+  return ids
+})
+
+const visibleRuleSinkIds = computed(() => {
+  const ids = new Set<number>()
+  for (const node of visibleRuleNodes.value) {
+    node.targets.forEach((target) => ids.add(target.sinkId))
+  }
+  return ids
+})
+
+const visibleSources = computed(() =>
+  searchedSources.value.filter(
+    (source) =>
+      showUnusedNodes.value ||
+      visibleRuleSourceIds.value.has(source.id) ||
+      (selection.value?.kind === 'source' && selection.value.id === source.id),
+  ),
+)
+
+const visibleSinks = computed(() =>
+  searchedSinks.value.filter(
+    (sink) =>
+      showUnusedNodes.value ||
+      visibleRuleSinkIds.value.has(sink.id) ||
+      (selection.value?.kind === 'sink' && selection.value.id === sink.id),
+  ),
+)
+
+const unusedSources = computed(() => searchedSources.value.filter((source) => !linkedSourceIds.value.has(source.id)))
+const unusedSinks = computed(() => searchedSinks.value.filter((sink) => !linkedSinkIds.value.has(sink.id)))
+const hiddenResourceCount = computed(() => (!showUnusedNodes.value ? unusedSources.value.length + unusedSinks.value.length : 0))
 
 // --- 选中与联动高亮 ---
 
@@ -202,6 +257,12 @@ function clearSelection() {
   if (Object.keys(route.query).length) {
     void router.replace({ name: 'flow', query: {} })
   }
+}
+
+function revealResource(kind: Exclude<NodeKind, 'rule'>, id: number) {
+  showUnusedNodes.value = true
+  selectedEdge.value = null
+  selection.value = { kind, id }
 }
 
 function onPaneClick() {
@@ -387,6 +448,8 @@ const canvasEdges = computed<CanvasEdgeInput[]>(() => {
   return out
 })
 
+const canvasHasNodes = computed(() => canvasSources.value.length > 0 || canvasRules.value.length > 0 || canvasSinks.value.length > 0)
+
 function parseEdgeKey(key: string): EdgeRef | null {
   let match = /^s(\d+):r(\d+)$/.exec(key)
   if (match) return { kind: 'source-rule', sourceId: Number(match[1]), ruleId: Number(match[2]) }
@@ -504,6 +567,12 @@ function openCreateRule() {
   editingRule.value = null
   initialDraft.value = buildDraftFromSelection()
   showRuleModal.value = true
+}
+
+function openCreateRuleFromResource(kind: Exclude<NodeKind, 'rule'>, id: number) {
+  selectedEdge.value = null
+  selection.value = { kind, id }
+  openCreateRule()
 }
 
 function openEditRule(ruleId: number) {
@@ -634,6 +703,10 @@ onMounted(async () => {
       <div class="toolbar-filters">
         <NInput v-model:value="keyword" clearable class="search-input" placeholder="搜索来源、规则、渠道" />
         <NCheckbox v-model:checked="onlyWarnings">只看异常规则</NCheckbox>
+        <NCheckbox v-model:checked="showUnusedNodes">
+          显示未接入资源
+          <template v-if="hiddenResourceCount">（{{ hiddenResourceCount }}）</template>
+        </NCheckbox>
         <NTag v-if="templateFilterId" closable size="small" type="info" @close="templateFilterId = null">
           模板：{{ templateFilterName }}
         </NTag>
@@ -645,6 +718,64 @@ onMounted(async () => {
         <span :class="{ 'stat-warn': stats.warningRules > 0 }">异常 {{ stats.warningRules }}</span>
       </div>
     </div>
+
+    <section v-if="!showUnusedNodes && hiddenResourceCount" class="resource-shelf">
+      <div class="resource-head">
+        <div>
+          <strong>未接入资源</strong>
+          <span>来源 {{ unusedSources.length }} 个 / 渠道 {{ unusedSinks.length }} 个</span>
+        </div>
+        <NButton size="small" secondary @click="showUnusedNodes = true">全部显示到画布</NButton>
+      </div>
+      <div class="resource-grid">
+        <div v-if="unusedSources.length" class="resource-column">
+          <span class="resource-title">来源</span>
+          <button
+            v-for="source in unusedSources.slice(0, 8)"
+            :key="source.id"
+            type="button"
+            class="resource-pill source"
+            @click="revealResource('source', source.id)"
+          >
+            <span>{{ source.name }}</span>
+            <small>{{ sourceTypeLabel(source) }}</small>
+          </button>
+          <NButton
+            v-for="source in unusedSources.slice(0, 3)"
+            :key="`src-rule-${source.id}`"
+            size="tiny"
+            text
+            type="primary"
+            @click="openCreateRuleFromResource('source', source.id)"
+          >
+            沿「{{ source.name }}」建规则
+          </NButton>
+        </div>
+        <div v-if="unusedSinks.length" class="resource-column">
+          <span class="resource-title">渠道</span>
+          <button
+            v-for="sink in unusedSinks.slice(0, 8)"
+            :key="sink.id"
+            type="button"
+            class="resource-pill sink"
+            @click="revealResource('sink', sink.id)"
+          >
+            <span>{{ sink.name }}</span>
+            <small>{{ sinkTypeLabel(sink) }}</small>
+          </button>
+          <NButton
+            v-for="sink in unusedSinks.slice(0, 3)"
+            :key="`sink-rule-${sink.id}`"
+            size="tiny"
+            text
+            type="primary"
+            @click="openCreateRuleFromResource('sink', sink.id)"
+          >
+            沿「{{ sink.name }}」建规则
+          </NButton>
+        </div>
+      </div>
+    </section>
 
     <div v-if="selection" class="context-bar">
       <span class="context-label">
@@ -670,7 +801,8 @@ onMounted(async () => {
 
     <NSpin :show="loading">
       <FlowCanvas
-        v-if="sources.length || rules.length || sinks.length"
+        v-if="canvasHasNodes"
+        :key="showUnusedNodes ? 'all-resources' : 'linked-resources'"
         :sources="canvasSources"
         :rules="canvasRules"
         :sinks="canvasSinks"
@@ -682,6 +814,15 @@ onMounted(async () => {
         @edit-rule="openEditRule"
         @toggle-rule="toggleRule"
       />
+
+      <NEmpty v-else-if="sources.length || rules.length || sinks.length" description="当前没有已接入的编排链路">
+        <template #extra>
+          <NSpace>
+            <NButton secondary @click="showUnusedNodes = true">显示未接入资源</NButton>
+            <NButton type="primary" @click="openCreateRule">新建规则</NButton>
+          </NSpace>
+        </template>
+      </NEmpty>
 
       <NEmpty v-else description="还没有可编排的来源、规则或渠道">
         <template #extra>
@@ -914,6 +1055,110 @@ onMounted(async () => {
   font-weight: 700;
 }
 
+.resource-shelf {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--clay-border);
+  border-radius: 14px;
+  background: var(--clay-surface);
+  box-shadow: var(--clay-out-sm);
+}
+
+.resource-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.resource-head strong {
+  display: block;
+  color: var(--clay-text);
+  font-size: 13px;
+}
+
+.resource-head span {
+  display: block;
+  margin-top: 2px;
+  color: var(--clay-text-3);
+  font-size: 12px;
+}
+
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.resource-column {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--clay-surface-2);
+}
+
+.resource-title {
+  width: 100%;
+  color: var(--clay-text-3);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.resource-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 5px 9px;
+  border: 1px solid var(--clay-border);
+  border-radius: 999px;
+  background: var(--clay-surface);
+  color: var(--clay-text-2);
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.resource-pill:hover,
+.resource-pill:focus-visible {
+  border-color: var(--clay-border-strong);
+  box-shadow: var(--clay-hover);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.resource-pill span,
+.resource-pill small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-pill span {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.resource-pill small {
+  flex-shrink: 0;
+  color: var(--clay-text-3);
+  font-size: 11px;
+}
+
+.resource-pill.source {
+  border-left: 3px solid #10b981;
+}
+
+.resource-pill.sink {
+  border-right: 3px solid #f59e0b;
+}
+
 .context-bar {
   display: flex;
   align-items: center;
@@ -961,6 +1206,10 @@ onMounted(async () => {
 
   .search-input {
     width: 100%;
+  }
+
+  .resource-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

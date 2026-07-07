@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, shallowRef, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import ConfigFormRenderer from '@/components/ConfigFormRenderer.vue'
 import { rulesApi } from '@/api/client'
@@ -18,7 +18,7 @@ import type {
 } from '@/types'
 import { errText } from '@/utils/error'
 
-type StageKey = 'sources' | 'match' | 'process' | 'targets' | 'preview'
+type StageKey = 'route' | 'sources' | 'match' | 'process' | 'targets' | 'preview'
 
 const show = defineModel<boolean>('show', { required: true })
 
@@ -39,7 +39,7 @@ const emit = defineEmits<{
 
 const message = useMessage()
 
-const activeStage = ref<StageKey>('sources')
+const activeStage = shallowRef<StageKey>('route')
 
 const form = reactive({
   name: '',
@@ -102,6 +102,13 @@ const targetChips = computed(() =>
 
 const stages = computed(() => [
   {
+    key: 'route' as StageKey,
+    title: '路由',
+    summary: form.name.trim() || '未命名规则',
+    warn: !form.name.trim(),
+    chips: [form.enabled ? '启用' : '停用', `优先级 ${form.priority}`, form.stop_on_match ? '命中即停' : '继续匹配'],
+  },
+  {
     key: 'sources' as StageKey,
     title: '来源',
     summary: form.source_ids.length ? `${form.source_ids.length} 个监听源` : '未指定来源',
@@ -110,7 +117,7 @@ const stages = computed(() => [
   },
   {
     key: 'match' as StageKey,
-    title: '条件',
+    title: '过滤',
     summary: usingFilter.value
       ? `${form.filter_ids.length} 个共享过滤器`
       : form.conditions.length
@@ -128,7 +135,7 @@ const stages = computed(() => [
   },
   {
     key: 'targets' as StageKey,
-    title: '目标',
+    title: '目标/模板',
     summary: form.targets.length ? `${form.targets.length} 个渠道` : '未配置目标',
     warn: form.targets.length === 0,
     chips: targetChips.value,
@@ -152,7 +159,7 @@ watch(
 )
 
 function resetForm() {
-  activeStage.value = 'sources'
+  activeStage.value = 'route'
   if (props.rule) {
     form.name = props.rule.name
     form.enabled = props.rule.enabled
@@ -266,6 +273,7 @@ function sinkSupportsFormat(sink: Sink, format: string): boolean {
 function validate(): boolean {
   if (!form.name.trim()) {
     message.warning('请填写规则名称')
+    activeStage.value = 'route'
     return false
   }
   if (!form.targets.length) {
@@ -377,28 +385,6 @@ function previewTargetLabel(target: RuleTarget): string {
     :style="{ width: 'min(920px, calc(100vw - 32px))' }"
   >
     <div class="modal-body">
-      <!-- 常驻基本信息 -->
-      <div class="base-bar">
-        <NInput v-model:value="form.name" class="name-input" placeholder="规则名称（必填）" />
-        <div class="base-item">
-          <span class="base-label">优先级</span>
-          <NInputNumber v-model:value="form.priority" size="small" class="priority-input" />
-        </div>
-        <div class="base-item">
-          <span class="base-label">启用</span>
-          <NSwitch v-model:value="form.enabled" size="small" />
-        </div>
-        <div class="base-item">
-          <NTooltip trigger="hover">
-            <template #trigger>
-              <span class="base-label dashed">命中即停</span>
-            </template>
-            命中本规则后，不再继续匹配更低优先级的规则。
-          </NTooltip>
-          <NSwitch v-model:value="form.stop_on_match" size="small" />
-        </div>
-      </div>
-
       <!-- 管道节点条：点节点配置对应环节 -->
       <div class="pipeline">
         <template v-for="(stage, index) in stages" :key="stage.key">
@@ -425,7 +411,33 @@ function previewTargetLabel(target: RuleTarget): string {
       <!-- 当前环节配置面板 -->
       <div class="stage-panel">
         <NForm label-placement="top">
-          <template v-if="activeStage === 'sources'">
+          <template v-if="activeStage === 'route'">
+            <div class="panel-desc">路由模块决定这条规则在整体编排中的身份、优先级和命中后的继续匹配策略。</div>
+            <div class="route-grid">
+              <NFormItem label="规则名称" :show-feedback="false">
+                <NInput v-model:value="form.name" placeholder="规则名称（必填）" />
+              </NFormItem>
+              <NFormItem label="优先级" :show-feedback="false">
+                <NInputNumber v-model:value="form.priority" class="full-input" />
+              </NFormItem>
+              <div class="route-switch">
+                <span class="switch-copy">
+                  <strong>启用规则</strong>
+                  <small>{{ form.enabled ? '消息会进入匹配' : '暂不参与匹配' }}</small>
+                </span>
+                <NSwitch v-model:value="form.enabled" />
+              </div>
+              <div class="route-switch">
+                <span class="switch-copy">
+                  <strong>命中即停</strong>
+                  <small>{{ form.stop_on_match ? '命中后停止低优先级规则' : '命中后继续匹配后续规则' }}</small>
+                </span>
+                <NSwitch v-model:value="form.stop_on_match" />
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="activeStage === 'sources'">
             <div class="panel-desc">选择哪些监听源的消息进入这条规则；也可以稍后在编排画布上直接连线。</div>
             <NFormItem label="监听来源" :show-feedback="false">
               <NSelect v-model:value="form.source_ids" multiple filterable :options="sourceOptions" placeholder="选择一个或多个来源" />
@@ -433,7 +445,7 @@ function previewTargetLabel(target: RuleTarget): string {
           </template>
 
           <template v-else-if="activeStage === 'match'">
-            <div class="panel-desc">为空表示来源消息全部进入。可多选共享过滤器（按顺序合并、全部通过才命中），或写本规则专用条件。</div>
+            <div class="panel-desc">过滤模块为空时表示来源消息全部进入。共享过滤器可被多条规则复用；专用条件只跟随当前规则。</div>
             <NFormItem label="共享过滤器" :show-feedback="false">
               <NSelect
                 v-model:value="form.filter_ids"
@@ -492,7 +504,7 @@ function previewTargetLabel(target: RuleTarget): string {
           </template>
 
           <template v-else-if="activeStage === 'process'">
-            <div class="panel-desc">在投递前按顺序改写或过滤消息内容；不添加则原样转发。</div>
+            <div class="panel-desc">处理模块在投递前按顺序改写消息快照；不添加处理器时，消息按原文进入目标模块。</div>
             <div v-for="(processor, index) in form.processors" :key="index" class="rule-block">
               <NSpace align="center" justify="space-between">
                 <NSelect
@@ -516,16 +528,19 @@ function previewTargetLabel(target: RuleTarget): string {
           </template>
 
           <template v-else-if="activeStage === 'targets'">
-            <div class="panel-desc">一条规则可以投递到多个渠道，每个渠道可单独选择渲染模板；不选模板则按纯文本投递。</div>
+            <div class="panel-desc">目标模块由渠道和渲染模板组成。模板绑定在当前目标上，以匹配不同渠道的格式能力；不选模板则按纯文本投递。</div>
             <div v-for="(target, index) in form.targets" :key="index" class="target-row">
-              <NSelect v-model:value="target.sink_id" class="target-select" placeholder="渠道" :options="sinkOptions" />
-              <NSelect
-                v-model:value="target.template_id"
-                class="target-select"
-                clearable
-                placeholder="模板（可空=纯文本）"
-                :options="templateOptionsFor(target.sink_id)"
-              />
+              <span class="target-index">目标 {{ index + 1 }}</span>
+              <div class="target-fields">
+                <NSelect v-model:value="target.sink_id" class="target-select" placeholder="渠道" :options="sinkOptions" />
+                <NSelect
+                  v-model:value="target.template_id"
+                  class="target-select"
+                  clearable
+                  placeholder="模板（可空=纯文本）"
+                  :options="templateOptionsFor(target.sink_id)"
+                />
+              </div>
               <NButton size="small" type="error" secondary @click="removeTarget(index)">移除</NButton>
             </div>
             <NButton size="small" dashed block @click="addTarget">添加目标</NButton>
@@ -588,47 +603,6 @@ function previewTargetLabel(target: RuleTarget): string {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-/* 基本信息条 */
-
-.base-bar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
-  border: 1px solid var(--clay-border);
-  border-radius: 10px;
-  background: var(--clay-surface-2);
-}
-
-.name-input {
-  flex: 1;
-  min-width: 200px;
-}
-
-.base-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.base-label {
-  color: var(--clay-text-2);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.base-label.dashed {
-  border-bottom: 1px dashed var(--clay-border-strong);
-  cursor: help;
-}
-
-.priority-input {
-  width: 96px;
 }
 
 /* 管道节点条 */
@@ -761,6 +735,45 @@ function previewTargetLabel(target: RuleTarget): string {
   line-height: 1.5;
 }
 
+.route-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.2fr) minmax(120px, 0.5fr);
+  gap: 12px;
+}
+
+.route-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--clay-border);
+  border-radius: 10px;
+  background: var(--clay-surface);
+}
+
+.switch-copy {
+  min-width: 0;
+}
+
+.switch-copy strong,
+.switch-copy small {
+  display: block;
+}
+
+.switch-copy strong {
+  color: var(--clay-text);
+  font-size: 13px;
+}
+
+.switch-copy small {
+  margin-top: 3px;
+  color: var(--clay-text-3);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .rule-block {
   border: 1px solid var(--clay-border);
   border-radius: 8px;
@@ -804,10 +817,27 @@ function previewTargetLabel(target: RuleTarget): string {
 
 .target-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--clay-border);
+  border-radius: 10px;
+  background: var(--clay-surface);
+}
+
+.target-index {
+  color: var(--clay-text-3);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.target-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 10px;
+  min-width: 0;
 }
 
 .target-select {
@@ -843,7 +873,12 @@ function previewTargetLabel(target: RuleTarget): string {
   }
 
   .target-row,
-  .preview-grid {
+  .preview-grid,
+  .route-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .target-fields {
     grid-template-columns: 1fr;
   }
 }
