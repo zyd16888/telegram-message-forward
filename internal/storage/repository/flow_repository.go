@@ -90,6 +90,24 @@ func (r *FlowRepository) ListEnabledBySource(ctx context.Context, sourceID int64
 	return r.assemble(ctx, ms)
 }
 
+func (r *FlowRepository) ListEnabledMigratedBySource(ctx context.Context, sourceID int64) ([]*domainflow.Flow, error) {
+	var ms []model.Flow
+	err := r.db.WithContext(ctx).
+		Joins("JOIN flow_rule_migrations frm ON frm.flow_id = flows.id").
+		Joins("JOIN rules ON rules.id = frm.rule_id").
+		Joins("JOIN rule_sources rs ON rs.rule_id = rules.id").
+		Joins("JOIN flow_nodes fn ON fn.flow_id = flows.id").
+		Where("rs.source_id = ? AND rules.enabled = ? AND flows.enabled = ?", sourceID, true, true).
+		Where("fn.type = ? AND fn.ref_id = ?", string(domainflow.NodeTypeSource), sourceID).
+		Group("flows.id").
+		Order("flows.priority DESC, flows.id").
+		Find(&ms).Error
+	if err != nil {
+		return nil, err
+	}
+	return r.assemble(ctx, ms)
+}
+
 func (r *FlowRepository) Delete(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.Flow{}, id).Error
 }

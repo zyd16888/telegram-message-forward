@@ -138,8 +138,19 @@ func (s *Service) evaluateFlows(ctx context.Context, msg *domainmessage.Normaliz
 	return s.flowEngine.Evaluate(ctx, msg, flows)
 }
 
+func (s *Service) evaluateMigratedFlows(ctx context.Context, msg *domainmessage.NormalizedMessage) ([]ruleengine.Match, error) {
+	if s.flows == nil || s.flowEngine == nil {
+		return nil, nil
+	}
+	flows, err := s.flows.ListEnabledMigratedBySource(ctx, msg.SourceID)
+	if err != nil || len(flows) == 0 {
+		return nil, err
+	}
+	return s.flowEngine.Evaluate(ctx, msg, flows)
+}
+
 func (s *Service) shadowCompare(ctx context.Context, msg *domainmessage.NormalizedMessage, ruleMatches []ruleengine.Match) {
-	flowMatches, err := s.evaluateFlows(ctx, msg)
+	flowMatches, err := s.evaluateMigratedFlows(ctx, msg)
 	if err != nil {
 		s.log.Warn("Flow 影子求值失败", "message_id", msg.ID, "source_id", msg.SourceID, "err", err)
 		return
@@ -156,6 +167,8 @@ func (s *Service) shadowCompare(ctx context.Context, msg *domainmessage.Normaliz
 		"flow_matches", len(flowMatches),
 		"rule_signature", ruleSig,
 		"flow_signature", flowSig,
+		"rule_detail", matchDetailSignature(ruleMatches),
+		"flow_detail", matchDetailSignature(flowMatches),
 	)
 }
 
@@ -172,6 +185,33 @@ func matchSignature(matches []ruleengine.Match) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func matchDetailSignature(matches []ruleengine.Match) []string {
+	out := make([]string, 0)
+	for _, m := range matches {
+		origin := matchOriginSignature(m)
+		for _, target := range m.Targets {
+			tpl := "0"
+			if target.TemplateID != nil {
+				tpl = strconv.FormatInt(*target.TemplateID, 10)
+			}
+			out = append(out, origin+":sink:"+strconv.FormatInt(target.SinkID, 10)+":tpl:"+tpl+":text:"+textDigest(m.Message))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func matchOriginSignature(m ruleengine.Match) string {
+	if m.OriginType == "flow" {
+		return "flow:" + strconv.FormatInt(m.OriginID, 10) + ":node:" + strconv.FormatInt(m.OriginNodeID, 10)
+	}
+	ruleID := int64(0)
+	if m.Rule != nil {
+		ruleID = m.Rule.ID
+	}
+	return "rule:" + strconv.FormatInt(ruleID, 10)
 }
 
 func textDigest(msg *domainmessage.NormalizedMessage) string {

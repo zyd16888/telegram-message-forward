@@ -3,12 +3,12 @@ package repository
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	domainmessage "telegram-message-forward/internal/domain/message"
 	"telegram-message-forward/internal/storage/model"
@@ -34,13 +34,16 @@ func (r *MessageRepository) Create(ctx context.Context, m *domainmessage.Normali
 	if err != nil {
 		return err
 	}
-	err = r.db.WithContext(ctx).Create(mo).Error
-	if err == nil {
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "source_id"}, {Name: "external_message_id"}},
+		DoNothing: true,
+	}).Create(mo)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
 		m.ID = mo.ID
 		return nil
-	}
-	if !errors.Is(err, gorm.ErrDuplicatedKey) {
-		return err
 	}
 	// 幂等：查回已存在的消息 ID。
 	var existing model.Message

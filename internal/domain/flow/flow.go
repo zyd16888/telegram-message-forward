@@ -59,5 +59,6 @@ type Repository interface {
 	GetByID(ctx context.Context, id int64) (*Flow, error)
 	List(ctx context.Context) ([]*Flow, error)
 	ListEnabledBySource(ctx context.Context, sourceID int64) ([]*Flow, error)
+	ListEnabledMigratedBySource(ctx context.Context, sourceID int64) ([]*Flow, error)
 	Delete(ctx context.Context, id int64) error
 }

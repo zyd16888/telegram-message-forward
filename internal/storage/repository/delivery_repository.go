@@ -3,12 +3,12 @@ package repository
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
 	domainmessage "telegram-message-forward/internal/domain/message"
@@ -37,15 +37,22 @@ func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task)
 	if err != nil {
 		return err
 	}
-	err = r.db.WithContext(ctx).Create(m).Error
-	if err == nil {
-		t.ID = m.ID
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrDuplicatedKey) {
-		return err
-	}
-	if t.OriginType == "rule" {
+	switch t.OriginType {
+	case "rule":
+		res := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "message_id"}, {Name: "rule_id"}, {Name: "sink_id"}},
+			TargetWhere: clause.Where{Exprs: []clause.Expression{
+				clause.Expr{SQL: "origin_type = 'rule'"},
+			}},
+			DoNothing: true,
+		}).Create(m)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected > 0 {
+			t.ID = m.ID
+			return nil
+		}
 		var existing model.DeliveryTask
 		if qerr := r.db.WithContext(ctx).
 			Select("id").
@@ -55,8 +62,21 @@ func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task)
 		}
 		t.ID = existing.ID
 		return nil
-	}
-	if t.OriginType == "flow" {
+	case "flow":
+		res := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "message_id"}, {Name: "origin_type"}, {Name: "origin_id"}, {Name: "origin_node_id"}},
+			TargetWhere: clause.Where{Exprs: []clause.Expression{
+				clause.Expr{SQL: "origin_type = 'flow'"},
+			}},
+			DoNothing: true,
+		}).Create(m)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected > 0 {
+			t.ID = m.ID
+			return nil
+		}
 		var existing model.DeliveryTask
 		if qerr := r.db.WithContext(ctx).
 			Select("id").
@@ -66,8 +86,13 @@ func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task)
 		}
 		t.ID = existing.ID
 		return nil
+	default:
+		if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+			return err
+		}
+		t.ID = m.ID
+		return nil
 	}
-	return nil
 }
 
 // Claim 使用 FOR UPDATE SKIP LOCKED 领取一批可执行任务，置为 processing。
