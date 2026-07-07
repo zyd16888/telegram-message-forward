@@ -2,6 +2,9 @@ package telegram
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -94,6 +97,41 @@ func TestDownloadMessageMediaImageOverLimit(t *testing.T) {
 	}
 }
 
+func TestDownloadMessageMediaImageRetriesTransientFailure(t *testing.T) {
+	oldDownload := downloadMediaToPath
+	oldDelay := downloadRetryBaseDelay
+	downloadRetryBaseDelay = 0
+	defer func() {
+		downloadMediaToPath = oldDownload
+		downloadRetryBaseDelay = oldDelay
+	}()
+
+	msg := newDocumentMessage("image/png", "preview.png", 1024)
+	media := extractMedia(msg)
+	storageKey := mediaStorageKey(77, msg.ID, 0, media[0])
+	localPath := filepathInTemp(storageKey)
+	_ = os.Remove(localPath)
+	t.Cleanup(func() { _ = os.Remove(localPath) })
+
+	attempts := 0
+	downloadMediaToPath = func(_ context.Context, _ *gotdtelegram.Client, _ tg.InputFileLocationClass, path string) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("write: broken pipe")
+		}
+		return os.WriteFile(path, []byte("png"), 0o644)
+	}
+
+	out := downloadMessageMedia(context.Background(), newTestClient(), 77, msg, media, DownloadPolicy{}, false)
+	got := out[0]
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if got.DownloadStatus != "downloaded" || got.LocalPath == "" || got.StorageKey == "" {
+		t.Fatalf("media = %+v", got)
+	}
+}
+
 func TestDownloadMessageMediaSkippedKeepsMetadata(t *testing.T) {
 	msg := newDocumentMessage("application/pdf", "report.pdf", 1024)
 	media := extractMedia(msg)
@@ -106,4 +144,8 @@ func TestDownloadMessageMediaSkippedKeepsMetadata(t *testing.T) {
 	if got.LocalPath != "" || got.StorageKey != "" {
 		t.Fatalf("跳过下载不应有本地产物: %+v", got)
 	}
+}
+
+func filepathInTemp(storageKey string) string {
+	return filepath.Join(os.TempDir(), "telegram-message-forward", "media", filepath.FromSlash(storageKey))
 }

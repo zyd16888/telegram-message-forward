@@ -18,6 +18,15 @@ import (
 const (
 	defaultImageMaxDownloadBytes int64 = 20 * 1024 * 1024
 	defaultFileMaxDownloadBytes  int64 = 50 * 1024 * 1024
+	imageDownloadMaxAttempts           = 3
+)
+
+var (
+	downloadRetryBaseDelay = 500 * time.Millisecond
+	downloadMediaToPath    = func(ctx context.Context, client *gotdtelegram.Client, location tg.InputFileLocationClass, localPath string) error {
+		_, err := client.Download(location).ToPath(ctx, localPath)
+		return err
+	}
 )
 
 // DownloadPolicy 是媒体下载策略（bootstrap 从系统设置转换注入，设置保存后热生效）。
@@ -110,7 +119,7 @@ func downloadMessageMedia(ctx context.Context, client *gotdtelegram.Client, sour
 		item.DownloadError = err.Error()
 		return out
 	}
-	if _, err := client.Download(location).ToPath(ctx, localPath); err != nil {
+	if err := downloadWithRetry(ctx, client, location, localPath, kind); err != nil {
 		item.DownloadStatus = "failed"
 		item.DownloadError = err.Error()
 		return out
@@ -120,6 +129,47 @@ func downloadMessageMedia(ctx context.Context, client *gotdtelegram.Client, sour
 	item.DownloadStatus = "downloaded"
 	item.CreatedAt = &now
 	return out
+}
+
+func downloadWithRetry(ctx context.Context, client *gotdtelegram.Client, location tg.InputFileLocationClass, localPath, kind string) error {
+	attempts := 1
+	if kind == "image" {
+		attempts = imageDownloadMaxAttempts
+	}
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := downloadMediaToPath(ctx, client, location, localPath); err != nil {
+			lastErr = err
+			_ = os.Remove(localPath)
+			if attempt == attempts {
+				break
+			}
+			if err := waitDownloadRetry(ctx, attempt); err != nil {
+				return err
+			}
+			continue
+		}
+		return nil
+	}
+	if attempts > 1 && lastErr != nil {
+		return fmt.Errorf("下载失败（已重试 %d 次）: %w", attempts, lastErr)
+	}
+	return lastErr
+}
+
+func waitDownloadRetry(ctx context.Context, attempt int) error {
+	delay := time.Duration(attempt) * downloadRetryBaseDelay
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // mediaDownloadLocation 返回可下载媒体的位置与类别：image（照片或图片 document）、file（其它 document）。
