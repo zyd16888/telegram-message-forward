@@ -96,7 +96,7 @@ onMounted(load)
   <NSpace vertical size="large">
     <PageHeader
       title="过滤器"
-      desc="可复用的一组匹配条件，供转发规则与 AI 整理共同引用；修改会联动所有引用它的地方"
+      desc="可复用的一组匹配条件；匹配后的处理动作在转发规则中配置"
       icon="shield"
     >
       <template #actions>

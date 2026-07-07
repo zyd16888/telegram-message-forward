@@ -43,8 +43,9 @@ v4 的目标是新增一条通用的 **AI 整理旁路**：原始消息继续按
 - **术语澄清**：原「规则」实为带目标渠道的**转发规则**，侧栏/顶栏/页面标题统一为「转发规则」；「账号」→「TG 账号」、「模板」→「渲染模板」。
 - **可复用过滤器实体（仅条件）**：
   - `00018_filters.sql`：新增 `filters` 表（一组命名的匹配条件），`rules` 与 `ai_digest_profiles` 各加 `filter_id` 外键（`ON DELETE SET NULL`）。
+  - `00019_rule_filters.sql`：转发规则改为通过 `rule_filters` 多选共享过滤器，旧 `rules.filter_id` 已移除；AI Profile 暂保留单 `filter_id`。
   - domain/filter + model + repository（含 `CountReferences` 引用计数）+ app/filter service（校验 + 删除保护）+ dto/handler/router `/filters` + bootstrap 接线。
-  - **引用即覆盖内联**：转发规则在仓储加载时按 `filter_id` 批量解析并覆盖 `Conditions`（引擎零改动，热路径批量一次查询）；AI 整理在 `resolveConditions` 解析。二者均支持「引用共享过滤器 / 自定义内联条件」二选一。规则预览与保存都会校验/解析引用的过滤器。
+  - **引用即覆盖内联**：转发规则在仓储加载时按 `filter_ids` 批量解析并合并覆盖 `Conditions`（多个过滤器按 AND 语义全部通过才命中）；AI 整理在 `resolveConditions` 解析单个 `filter_id`。二者均支持「引用共享过滤器 / 自定义内联条件」二选一。规则预览与保存都会校验/解析引用的过滤器。
   - 处理器**不进共享过滤器**（仍留在转发规则自身；AI 不跑处理器）。
   - 前端新增「过滤器」侧栏页 + `FilterEditorModal`（复用条件构建器与 `/rules/meta` 描述符）；`RuleEditorModal` 与 `AIDigestProfileForm` 增加「条件来源」选择与引用预览。
   - 删除保护：被转发规则或 AI Profile 引用的过滤器不可删除（返回引用数）。

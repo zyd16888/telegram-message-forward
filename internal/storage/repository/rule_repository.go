@@ -61,11 +61,19 @@ func (r *RuleRepository) replaceAssociations(tx *gorm.DB, rule *domainrule.Rule)
 	if err := tx.Where("rule_id = ?", rule.ID).Delete(&model.RuleSource{}).Error; err != nil {
 		return err
 	}
+	if err := tx.Where("rule_id = ?", rule.ID).Delete(&model.RuleFilter{}).Error; err != nil {
+		return err
+	}
 	if err := tx.Where("rule_id = ?", rule.ID).Delete(&model.RuleTarget{}).Error; err != nil {
 		return err
 	}
 	for _, sid := range rule.SourceIDs {
 		if err := tx.Create(&model.RuleSource{RuleID: rule.ID, SourceID: sid}).Error; err != nil {
+			return err
+		}
+	}
+	for i, fid := range rule.FilterIDs {
+		if err := tx.Create(&model.RuleFilter{RuleID: rule.ID, FilterID: fid, SortOrder: i}).Error; err != nil {
 			return err
 		}
 	}
@@ -140,8 +148,8 @@ func (r *RuleRepository) assembleRules(ctx context.Context, ms []model.Rule) ([]
 func (r *RuleRepository) resolveRuleFilters(ctx context.Context, rules []*domainrule.Rule) error {
 	idset := map[int64]struct{}{}
 	for _, rule := range rules {
-		if rule.FilterID > 0 {
-			idset[rule.FilterID] = struct{}{}
+		for _, filterID := range rule.FilterIDs {
+			idset[filterID] = struct{}{}
 		}
 	}
 	if len(idset) == 0 {
@@ -156,10 +164,12 @@ func (r *RuleRepository) resolveRuleFilters(ctx context.Context, rules []*domain
 		return err
 	}
 	for _, rule := range rules {
-		if rule.FilterID > 0 {
-			if conds, ok := condMap[rule.FilterID]; ok {
-				rule.Conditions = conds
+		if len(rule.FilterIDs) > 0 {
+			conds := make([]domainrule.ConditionConfig, 0)
+			for _, filterID := range rule.FilterIDs {
+				conds = append(conds, condMap[filterID]...)
 			}
+			rule.Conditions = conds
 		}
 	}
 	return nil
@@ -178,6 +188,15 @@ func (r *RuleRepository) loadFull(ctx context.Context, m *model.Rule) (*domainru
 	rule.SourceIDs = make([]int64, 0, len(rs))
 	for _, x := range rs {
 		rule.SourceIDs = append(rule.SourceIDs, x.SourceID)
+	}
+
+	var rf []model.RuleFilter
+	if err := r.db.WithContext(ctx).Where("rule_id = ?", m.ID).Order("sort_order, filter_id").Find(&rf).Error; err != nil {
+		return nil, err
+	}
+	rule.FilterIDs = make([]int64, 0, len(rf))
+	for _, x := range rf {
+		rule.FilterIDs = append(rule.FilterIDs, x.FilterID)
 	}
 
 	var rt []model.RuleTarget
@@ -213,7 +232,6 @@ func toRuleModel(rule *domainrule.Rule) (*model.Rule, error) {
 		Priority:    rule.Priority,
 		Conditions:  datatypes.JSON(conds),
 		Processors:  datatypes.JSON(procs),
-		FilterID:    nullablePositive(rule.FilterID),
 		StopOnMatch: rule.StopOnMatch,
 		CreatedAt:   rule.CreatedAt,
 		UpdatedAt:   rule.UpdatedAt,
@@ -243,9 +261,6 @@ func toRuleDomain(m *model.Rule) (*domainrule.Rule, error) {
 		StopOnMatch: m.StopOnMatch,
 		CreatedAt:   m.CreatedAt,
 		UpdatedAt:   m.UpdatedAt,
-	}
-	if m.FilterID != nil {
-		rule.FilterID = *m.FilterID
 	}
 	return rule, nil
 }

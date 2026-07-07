@@ -221,7 +221,7 @@ export interface Rule {
   name: string
   enabled: boolean
   priority: number
-  filter_id: number
+  filter_ids: number[]
   conditions: ConditionConfig[]
   processors: ProcessorConfig[]
   stop_on_match: boolean

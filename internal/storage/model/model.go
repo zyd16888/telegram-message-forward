@@ -156,7 +156,6 @@ type Rule struct {
 	Priority    int
 	Conditions  datatypes.JSON
 	Processors  datatypes.JSON
-	FilterID    *int64
 	StopOnMatch bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -183,6 +182,15 @@ type RuleSource struct {
 }
 
 func (RuleSource) TableName() string { return "rule_sources" }
+
+// RuleFilter 对应 rule_filters 表。
+type RuleFilter struct {
+	RuleID    int64 `gorm:"primaryKey"`
+	FilterID  int64 `gorm:"primaryKey"`
+	SortOrder int
+}
+
+func (RuleFilter) TableName() string { return "rule_filters" }
 
 // RuleTarget 对应 rule_targets 表。
 type RuleTarget struct {

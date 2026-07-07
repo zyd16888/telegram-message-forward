@@ -15,8 +15,8 @@ import (
 func init() {
 	RegisterWithDescriptor("keyword_contains", keywordContains{}, Descriptor{
 		Type:        "keyword_contains",
-		Label:       "包含关键词",
-		Description: "消息文本包含任一关键词时命中。",
+		Label:       "关键词匹配：命中后通过",
+		Description: "消息文本匹配任一关键词时通过。",
 		Fields: []formschema.FieldSpec{
 			{Key: "keywords", Label: "关键词", Type: formschema.FieldStringList, Required: true, Placeholder: "逐行输入关键词"},
 			{Key: "case_sensitive", Label: "区分大小写", Type: formschema.FieldBoolean, Default: false},
@@ -24,10 +24,10 @@ func init() {
 	})
 	RegisterWithDescriptor("keyword_excludes", keywordExcludes{}, Descriptor{
 		Type:        "keyword_excludes",
-		Label:       "排除关键词",
-		Description: "消息文本不包含任何排除词时命中。",
+		Label:       "关键词匹配：命中后阻止",
+		Description: "消息文本匹配任一关键词时阻止通过。",
 		Fields: []formschema.FieldSpec{
-			{Key: "keywords", Label: "排除词", Type: formschema.FieldStringList, Required: true, Placeholder: "逐行输入排除词"},
+			{Key: "keywords", Label: "关键词", Type: formschema.FieldStringList, Required: true, Placeholder: "逐行输入关键词"},
 			{Key: "case_sensitive", Label: "区分大小写", Type: formschema.FieldBoolean, Default: false},
 		},
 	})

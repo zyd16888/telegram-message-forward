@@ -142,6 +142,13 @@ function targetSummary(row: Rule): string {
     .join('、')
 }
 
+function filterSummary(row: Rule): string {
+  if (!row.filter_ids.length) return `${row.conditions.length} 个专用条件`
+  return row.filter_ids
+    .map((id) => filters.value.find((filter) => filter.id === id)?.name ?? `#${id}`)
+    .join('、')
+}
+
 function confirmDelete(row: Rule) {
   dialog.warning({
     title: '删除规则',
@@ -170,7 +177,13 @@ const columns: DataTableColumns<Rule> = [
     width: 90,
     render: (row) => h(NTag, { size: 'small', type: row.enabled ? 'success' : 'default' }, { default: () => (row.enabled ? '是' : '否') }),
   },
-  { title: '条件', key: 'conditions', width: 80, render: (row) => row.conditions.length },
+  {
+    title: '过滤器/条件',
+    key: 'filters',
+    width: 180,
+    ellipsis: { tooltip: true },
+    render: (row) => h(NText, { depth: row.filter_ids.length || row.conditions.length ? 1 : 3 }, { default: () => filterSummary(row) }),
+  },
   { title: '处理器', key: 'processors', width: 80, render: (row) => row.processors.length },
   {
     title: '来源',

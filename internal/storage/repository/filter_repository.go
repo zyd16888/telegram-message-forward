@@ -86,7 +86,7 @@ func (r *FilterRepository) Delete(ctx context.Context, id int64) error {
 
 func (r *FilterRepository) CountReferences(ctx context.Context, id int64) (int64, error) {
 	var ruleCount int64
-	if err := r.db.WithContext(ctx).Model(&model.Rule{}).Where("filter_id = ?", id).Count(&ruleCount).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&model.RuleFilter{}).Where("filter_id = ?", id).Count(&ruleCount).Error; err != nil {
 		return 0, err
 	}
 	var profileCount int64
@@ -126,7 +126,7 @@ func toFilterDomain(m *model.Filter) (*domainfilter.Filter, error) {
 	}, nil
 }
 
-// loadFilterConditions 一次查询取回多个过滤器的条件，供规则加载时按 filter_id 覆盖内联条件。
+// loadFilterConditions 一次查询取回多个过滤器的条件，供规则加载时按 filter_ids 覆盖内联条件。
 func loadFilterConditions(ctx context.Context, db *gorm.DB, ids []int64) (map[int64][]domainrule.ConditionConfig, error) {
 	out := map[int64][]domainrule.ConditionConfig{}
 	if len(ids) == 0 {

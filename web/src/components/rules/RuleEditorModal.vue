@@ -42,7 +42,7 @@ const form = reactive({
   enabled: true,
   priority: 0,
   stop_on_match: false,
-  filter_id: 0,
+  filter_ids: [] as number[],
   conditions: [] as ConditionConfig[],
   processors: [] as ProcessorConfig[],
   source_ids: [] as number[],
@@ -61,12 +61,15 @@ const preview = reactive({
 })
 
 const editing = computed(() => Boolean(props.rule))
-const usingFilter = computed(() => form.filter_id > 0)
-const selectedFilter = computed(() => props.filters.find((f) => f.id === form.filter_id) ?? null)
-const conditionSourceOptions = computed(() => [
-  { label: '自定义条件（本规则专用）', value: 0 },
-  ...props.filters.map((f) => ({ label: f.description ? `${f.name} — ${f.description}` : f.name, value: f.id })),
-])
+const usingFilter = computed(() => form.filter_ids.length > 0)
+const selectedFilters = computed(() =>
+  form.filter_ids
+    .map((id) => props.filters.find((f) => f.id === id))
+    .filter((item): item is Filter => Boolean(item)),
+)
+const filterOptions = computed(() =>
+  props.filters.map((f) => ({ label: f.description ? `${f.name} — ${f.description}` : f.name, value: f.id })),
+)
 const sourceOptions = computed(() => props.sources.map((source) => ({ label: `${source.name} (#${source.id})`, value: source.id })))
 const sinkOptions = computed(() => props.sinks.map((sink) => ({ label: `${sink.name} (${sink.type})`, value: sink.id })))
 const conditionOptions = computed(() => props.conditionDescriptors.map((item) => ({ label: item.label, value: item.type })))
@@ -99,7 +102,7 @@ function resetForm() {
     form.enabled = props.rule.enabled
     form.priority = props.rule.priority
     form.stop_on_match = props.rule.stop_on_match
-    form.filter_id = props.rule.filter_id ?? 0
+    form.filter_ids = [...props.rule.filter_ids]
     form.conditions = props.rule.conditions.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } }))
     form.processors = props.rule.processors.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } }))
     form.source_ids = [...props.rule.source_ids]
@@ -112,7 +115,7 @@ function resetForm() {
   form.enabled = true
   form.priority = 0
   form.stop_on_match = false
-  form.filter_id = 0
+  form.filter_ids = []
   form.conditions = []
   form.processors = []
   form.source_ids = [...(draft?.source_ids ?? [])]
@@ -239,7 +242,7 @@ function ruleBody() {
     enabled: form.enabled,
     priority: form.priority,
     stop_on_match: form.stop_on_match,
-    filter_id: form.filter_id,
+    filter_ids: form.filter_ids,
     conditions: usingFilter.value ? [] : form.conditions,
     processors: form.processors,
     source_ids: form.source_ids,
@@ -337,29 +340,41 @@ function previewTargetLabel(target: RuleTarget): string {
           <div class="section-head">
             <div>
               <div class="section-title">匹配条件</div>
-              <div class="section-desc">为空时表示来源消息直接进入这条规则。可引用共享过滤器，或写本规则专用的条件。</div>
+              <div class="section-desc">为空时表示来源消息直接进入这条规则。可多选共享过滤器，或写本规则专用条件。</div>
             </div>
             <NButton v-if="!usingFilter" size="small" dashed @click="addCondition">添加条件</NButton>
           </div>
-          <NFormItem label="条件来源">
-            <NSelect v-model:value="form.filter_id" :options="conditionSourceOptions" />
+          <NFormItem label="共享过滤器">
+            <NSelect
+              v-model:value="form.filter_ids"
+              multiple
+              clearable
+              :options="filterOptions"
+              placeholder="不选则使用本规则专用条件"
+            />
           </NFormItem>
 
           <template v-if="usingFilter">
             <NAlert type="info" :show-icon="false" class="filter-note">
-              使用共享过滤器「{{ selectedFilter?.name }}」的 {{ selectedFilter?.conditions.length ?? 0 }} 个条件。
-              修改该过滤器会联动所有引用它的规则与 AI 整理；如需单独调整，请改选「自定义条件」。
+              当前规则会按顺序合并 {{ selectedFilters.length }} 个共享过滤器的条件，全部通过后才会命中。
+              修改共享过滤器会联动所有引用它的规则与 AI 整理；如需单独调整，请清空选择后使用本规则专用条件。
             </NAlert>
-            <div v-if="selectedFilter?.conditions.length" class="filter-cond-list">
-              <NTag
-                v-for="(c, i) in selectedFilter?.conditions"
-                :key="i"
-                size="small"
-                :bordered="false"
-                type="info"
-              >
-                {{ conditionDescriptor(c.type)?.label ?? c.type }}
-              </NTag>
+            <div class="filter-list">
+              <div v-for="filter in selectedFilters" :key="filter.id" class="filter-item">
+                <div class="filter-name">{{ filter.name }}</div>
+                <div v-if="filter.conditions.length" class="filter-cond-list">
+                  <NTag
+                    v-for="(c, i) in filter.conditions"
+                    :key="`${filter.id}-${i}`"
+                    size="small"
+                    :bordered="false"
+                    type="info"
+                  >
+                    {{ conditionDescriptor(c.type)?.label ?? c.type }}
+                  </NTag>
+                </div>
+                <NText v-else depth="3">未配置条件</NText>
+              </div>
             </div>
           </template>
 
@@ -554,6 +569,25 @@ function previewTargetLabel(target: RuleTarget): string {
 
 .filter-note {
   margin-bottom: 10px;
+}
+
+.filter-list {
+  display: grid;
+  gap: 8px;
+}
+
+.filter-item {
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--clay-surface);
+}
+
+.filter-name {
+  margin-bottom: 6px;
+  color: var(--clay-text);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .filter-cond-list {

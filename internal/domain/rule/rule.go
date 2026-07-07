@@ -32,9 +32,9 @@ type Rule struct {
 	Name     string
 	Enabled  bool
 	Priority int
-	// FilterID 引用共享过滤器；为 0 表示使用内联 Conditions。
-	// 仓储加载时若 FilterID>0，会用过滤器的条件覆盖 Conditions。
-	FilterID    int64
+	// FilterIDs 引用共享过滤器；为空表示使用内联 Conditions。
+	// 仓储加载时若 FilterIDs 非空，会按顺序合并过滤器条件并覆盖 Conditions。
+	FilterIDs   []int64
 	Conditions  []ConditionConfig
 	Processors  []ProcessorConfig
 	StopOnMatch bool

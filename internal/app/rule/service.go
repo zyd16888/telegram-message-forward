@@ -57,7 +57,7 @@ type Input struct {
 	Name        string
 	Enabled     bool
 	Priority    int
-	FilterID    int64
+	FilterIDs   []int64
 	Conditions  []domainrule.ConditionConfig
 	Processors  []domainrule.ProcessorConfig
 	StopOnMatch bool
@@ -103,7 +103,7 @@ func (s *Service) Create(ctx context.Context, in Input) (*domainrule.Rule, error
 	if err := s.validateTargets(ctx, r.Targets); err != nil {
 		return nil, err
 	}
-	if err := s.validateFilter(ctx, r.FilterID); err != nil {
+	if err := s.validateFilters(ctx, r.FilterIDs); err != nil {
 		return nil, err
 	}
 	if err := s.repo.Create(ctx, r); err != nil {
@@ -126,7 +126,7 @@ func (s *Service) Update(ctx context.Context, id int64, in Input) (*domainrule.R
 	if err := s.validateTargets(ctx, r.Targets); err != nil {
 		return nil, err
 	}
-	if err := s.validateFilter(ctx, r.FilterID); err != nil {
+	if err := s.validateFilters(ctx, r.FilterIDs); err != nil {
 		return nil, err
 	}
 	if err := s.repo.Update(ctx, r); err != nil {
@@ -154,12 +154,16 @@ func (s *Service) ProcessorDescriptors() []processor.Descriptor {
 func (s *Service) Preview(ctx context.Context, in PreviewInput) (*PreviewResult, error) {
 	r := toRule(0, in.Rule)
 	r.Enabled = true
-	if r.FilterID > 0 && s.filters != nil {
-		f, err := s.filters.GetByID(ctx, r.FilterID)
-		if err != nil {
-			return nil, fmt.Errorf("引用的过滤器不存在 (id=%d): %w", r.FilterID, err)
+	if len(r.FilterIDs) > 0 && s.filters != nil {
+		conds := make([]domainrule.ConditionConfig, 0)
+		for _, filterID := range r.FilterIDs {
+			f, err := s.filters.GetByID(ctx, filterID)
+			if err != nil {
+				return nil, fmt.Errorf("引用的过滤器不存在 (id=%d): %w", filterID, err)
+			}
+			conds = append(conds, f.Conditions...)
 		}
-		r.Conditions = f.Conditions
+		r.Conditions = conds
 	}
 	if err := s.validateRuleConfig(r); err != nil {
 		return nil, err
@@ -210,7 +214,7 @@ func toRule(id int64, in Input) *domainrule.Rule {
 		Name:        in.Name,
 		Enabled:     in.Enabled,
 		Priority:    in.Priority,
-		FilterID:    in.FilterID,
+		FilterIDs:   in.FilterIDs,
 		Conditions:  in.Conditions,
 		Processors:  in.Processors,
 		StopOnMatch: in.StopOnMatch,
@@ -233,12 +237,22 @@ func (s *Service) validateRuleConfig(r *domainrule.Rule) error {
 	return nil
 }
 
-func (s *Service) validateFilter(ctx context.Context, filterID int64) error {
-	if filterID <= 0 || s.filters == nil {
+func (s *Service) validateFilters(ctx context.Context, filterIDs []int64) error {
+	if len(filterIDs) == 0 || s.filters == nil {
 		return nil
 	}
-	if _, err := s.filters.GetByID(ctx, filterID); err != nil {
-		return fmt.Errorf("引用的过滤器不存在 (id=%d): %w", filterID, err)
+	seen := map[int64]struct{}{}
+	for _, filterID := range filterIDs {
+		if filterID <= 0 {
+			return fmt.Errorf("过滤器 id 无效: %d", filterID)
+		}
+		if _, ok := seen[filterID]; ok {
+			return fmt.Errorf("规则不能重复引用同一个过滤器 (id=%d)", filterID)
+		}
+		seen[filterID] = struct{}{}
+		if _, err := s.filters.GetByID(ctx, filterID); err != nil {
+			return fmt.Errorf("引用的过滤器不存在 (id=%d): %w", filterID, err)
+		}
 	}
 	return nil
 }

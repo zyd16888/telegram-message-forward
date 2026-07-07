@@ -108,17 +108,17 @@ async function submit(): Promise<void> {
     <NForm label-placement="top" :show-feedback="false">
       <div class="meta-grid">
         <NFormItem label="名称" required>
-          <NInput v-model:value="form.name" placeholder="例如：只要含关键词且排除广告" />
+          <NInput v-model:value="form.name" placeholder="例如：关键词匹配：排除广告" />
         </NFormItem>
       </div>
       <NFormItem label="用途说明">
-        <NInput v-model:value="form.description" placeholder="一句话说明适用场景，便于在规则/AI 整理中挑选" />
+        <NInput v-model:value="form.description" placeholder="例如：命中广告词时阻止规则继续投递" />
       </NFormItem>
 
       <div class="section-head">
         <div>
           <div class="section-title">匹配条件</div>
-          <div class="section-desc">多个条件为「与」关系（全部满足才通过）。此过滤器可被转发规则与 AI 整理共同引用。</div>
+          <div class="section-desc">多个条件为「与」关系（全部满足才通过）。命中后的处理动作在转发规则中配置。</div>
         </div>
         <NButton size="small" dashed @click="addCondition">添加条件</NButton>
       </div>
