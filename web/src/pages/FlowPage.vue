@@ -13,6 +13,7 @@ import type {
   CanvasConnection,
   CanvasEdgeInput,
   CanvasNodeInput,
+  FilterNodeData,
   RuleNodeData,
   SinkNodeData,
   SourceNodeData,
@@ -49,6 +50,7 @@ const {
   keyword,
   onlyWarnings,
   showUnusedNodes,
+  showResourceLayer,
   templateFilterId,
   templateFilterName,
   visibleRuleNodes,
@@ -154,6 +156,10 @@ function sinkName(id: number): string {
   return sinks.value.find((s) => s.id === id)?.name ?? `#${id}`
 }
 
+function filterName(id: number): string {
+  return filterNameById.value.get(id) ?? `过滤器 #${id}`
+}
+
 function sourceTypeLabel(source: Source): string {
   if (source.type === 'rss') return 'RSS'
   if (source.type === 'webhook') return 'Webhook'
@@ -214,6 +220,32 @@ function processorLabel(type: string): string {
   return processorLabelByType.value.get(type) ?? type
 }
 
+const filterRuleCountById = computed(() => {
+  const counts = new Map<number, number>()
+  for (const rule of rules.value) {
+    for (const filterId of rule.filter_ids) {
+      counts.set(filterId, (counts.get(filterId) ?? 0) + 1)
+    }
+  }
+  return counts
+})
+
+const visibleFilterIds = computed(() => {
+  const ids = new Set<number>()
+  if (showResourceLayer.value) {
+    for (const node of visibleRuleNodes.value) {
+      node.rule.filter_ids.forEach((id) => ids.add(id))
+    }
+  }
+  if (selection.value?.kind === 'rule') {
+    rules.value.find((rule) => rule.id === selection.value?.id)?.filter_ids.forEach((id) => ids.add(id))
+  }
+  if (selection.value?.kind === 'filter') {
+    ids.add(selection.value.id)
+  }
+  return ids
+})
+
 const ruleOrderBySource = computed(() => {
   const orderMap = new Map<number, Map<number, number>>()
   for (const source of sources.value) {
@@ -254,6 +286,20 @@ const canvasSources = computed<CanvasNodeInput<SourceNodeData>[]>(() =>
   })),
 )
 
+const canvasFilters = computed<CanvasNodeInput<FilterNodeData>[]>(() =>
+  filters.value
+    .filter((filter) => visibleFilterIds.value.has(filter.id))
+    .map((filter) => ({
+      id: filter.id,
+      stateClass: stateClass('filter', filter.id),
+      data: {
+        name: filter.name,
+        conditionCount: filter.conditions.length,
+        ruleCount: filterRuleCountById.value.get(filter.id) ?? 0,
+      },
+    })),
+)
+
 const canvasRules = computed<CanvasNodeInput<RuleNodeData>[]>(() =>
   visibleRuleNodes.value.map((node) => ({
     id: node.rule.id,
@@ -265,7 +311,7 @@ const canvasRules = computed<CanvasNodeInput<RuleNodeData>[]>(() =>
       orderLabel: ruleOrderLabel(node.rule),
       stopOnMatch: node.rule.stop_on_match,
       conditionChips: node.rule.filter_ids.length
-        ? node.rule.filter_ids.map((id) => filterNameById.value.get(id) ?? `过滤器 #${id}`)
+        ? node.rule.filter_ids.map((id) => filterName(id))
         : node.rule.conditions.map((item) => conditionLabel(item.type)),
       processorChips: node.rule.processors.map((item) => processorLabel(item.type)),
       warnings: node.warnings,
@@ -289,11 +335,25 @@ const canvasSinks = computed<CanvasNodeInput<SinkNodeData>[]>(() =>
 
 const canvasEdges = computed<CanvasEdgeInput[]>(() => {
   const sourceIds = new Set(visibleSources.value.map((s) => s.id))
+  const filterIds = new Set(canvasFilters.value.map((filter) => filter.id))
   const sinkIds = new Set(visibleSinks.value.map((s) => s.id))
   const rel = related.value
   const out: CanvasEdgeInput[] = []
   for (const node of visibleRuleNodes.value) {
     const ruleId = node.rule.id
+    for (const filterId of node.rule.filter_ids) {
+      if (!filterIds.has(filterId)) continue
+      const hot = rel ? rel.ruleIds.has(ruleId) && rel.filterIds.has(filterId) : false
+      out.push({
+        key: `f${filterId}:r${ruleId}`,
+        from: { kind: 'filter', id: filterId },
+        to: { kind: 'rule', id: ruleId },
+        label: filterName(filterId),
+        warn: !filterNameById.value.has(filterId),
+        hot,
+        stateClass: rel ? (hot ? 'is-hot' : 'is-faded') : '',
+      })
+    }
     for (const src of node.sources) {
       if (!sourceIds.has(src.sourceId)) continue
       const hot = rel ? rel.ruleIds.has(ruleId) && rel.sourceIds.has(src.sourceId) : false
@@ -324,7 +384,9 @@ const canvasEdges = computed<CanvasEdgeInput[]>(() => {
   return out
 })
 
-const canvasHasNodes = computed(() => canvasSources.value.length > 0 || canvasRules.value.length > 0 || canvasSinks.value.length > 0)
+const canvasHasNodes = computed(
+  () => canvasSources.value.length > 0 || canvasFilters.value.length > 0 || canvasRules.value.length > 0 || canvasSinks.value.length > 0,
+)
 
 // --- 数据与操作 ---
 
@@ -361,7 +423,7 @@ function ruleBodyOf(rule: Rule) {
 
 async function saveRule(
   rule: Rule,
-  patch: Partial<{ enabled: boolean; source_ids: number[]; targets: RuleTarget[] }>,
+  patch: Partial<{ enabled: boolean; filter_ids: number[]; source_ids: number[]; targets: RuleTarget[] }>,
   okMessage: string,
 ) {
   try {
@@ -390,6 +452,16 @@ async function onCanvasConnect({ from, to }: CanvasConnection) {
     await saveRule(rule, { source_ids: [...rule.source_ids, from.id] }, `已接入来源「${sourceName(from.id)}」`)
     return
   }
+  if (from.kind === 'filter' && to.kind === 'rule') {
+    const rule = rules.value.find((r) => r.id === to.id)
+    if (!rule) return
+    if (rule.filter_ids.includes(from.id)) {
+      message.info('该过滤器已接入此规则')
+      return
+    }
+    await saveRule(rule, { filter_ids: [...rule.filter_ids, from.id] }, `已接入过滤器「${filterName(from.id)}」`)
+    return
+  }
   if (from.kind === 'rule' && to.kind === 'sink') {
     const rule = rules.value.find((r) => r.id === from.id)
     if (!rule) return
@@ -410,7 +482,7 @@ async function onCanvasConnect({ from, to }: CanvasConnection) {
     showRuleModal.value = true
     return
   }
-  message.warning('只支持 来源→规则、规则→渠道、来源→渠道 三种连线')
+  message.warning('只支持 来源→规则、过滤器→规则、规则→渠道、来源→渠道 四种连线')
 }
 
 async function detachSelectedEdge() {
@@ -420,6 +492,8 @@ async function detachSelectedEdge() {
   if (!rule) return
   if (edge.kind === 'source-rule') {
     await saveRule(rule, { source_ids: rule.source_ids.filter((id) => id !== edge.sourceId) }, '已解除来源关联')
+  } else if (edge.kind === 'filter-rule') {
+    await saveRule(rule, { filter_ids: rule.filter_ids.filter((id) => id !== edge.filterId) }, '已解除过滤器关联')
   } else {
     await saveRule(rule, { targets: rule.targets.filter((t) => t.sink_id !== edge.sinkId) }, '已解除目标关联')
   }
@@ -454,7 +528,7 @@ function buildDraftFromSelection(): RuleInitialDraft | null {
 
 function goToDeliveries() {
   const sel = selection.value
-  if (!sel) return
+  if (!sel || sel.kind === 'filter') return
   const query: Record<string, string> = {}
   if (sel.kind === 'source') query.source_id = String(sel.id)
   if (sel.kind === 'rule') query.rule_id = String(sel.id)
@@ -466,6 +540,7 @@ function goToSelectedConfig() {
   const sel = selection.value
   if (!sel) return
   if (sel.kind === 'source') router.push({ name: 'sources', query: { source_id: String(sel.id) } })
+  if (sel.kind === 'filter') router.push({ name: 'filters', query: { filter_id: String(sel.id) } })
   if (sel.kind === 'rule') router.push({ name: 'rules', query: { rule_id: String(sel.id) } })
   if (sel.kind === 'sink') router.push({ name: 'sinks', query: { sink_id: String(sel.id) } })
 }
@@ -485,11 +560,16 @@ onMounted(async () => {
   await refresh()
   // 其它页面「查看编排」跳转过来时，直接选中对应节点进入联动高亮。
   const sourceId = queryId('source_id')
+  const filterId = queryId('filter_id')
   const ruleId = queryId('rule_id')
   const sinkId = queryId('sink_id')
   const templateId = queryId('template_id')
   if (ruleId) selection.value = { kind: 'rule', id: ruleId }
   else if (sourceId) selection.value = { kind: 'source', id: sourceId }
+  else if (filterId) {
+    selection.value = { kind: 'filter', id: filterId }
+    showResourceLayer.value = true
+  }
   else if (sinkId) selection.value = { kind: 'sink', id: sinkId }
   if (templateId) templateFilterId.value = templateId
 })
@@ -560,6 +640,7 @@ onMounted(async () => {
       v-model:keyword="keyword"
       v-model:only-warnings="onlyWarnings"
       v-model:show-unused-nodes="showUnusedNodes"
+      v-model:show-resource-layer="showResourceLayer"
       v-model:template-filter-id="templateFilterId"
       :hidden-resource-count="hiddenResourceCount"
       :template-filter-name="templateFilterName"
@@ -580,8 +661,9 @@ onMounted(async () => {
       <NSpin :show="loading">
         <FlowCanvas
           v-if="canvasHasNodes"
-          :key="showUnusedNodes ? 'all-resources' : 'linked-resources'"
+          :key="`${showUnusedNodes ? 'all-resources' : 'linked-resources'}-${showResourceLayer ? 'resource-layer' : 'route-layer'}`"
           :sources="canvasSources"
+          :filters="canvasFilters"
           :rules="canvasRules"
           :sinks="canvasSinks"
           :edges="canvasEdges"

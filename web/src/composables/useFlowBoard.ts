@@ -9,6 +9,7 @@ export type FlowBoardSelection = { kind: FlowBoardNodeKind; id: number }
 
 export type FlowBoardEdgeRef =
   | { kind: 'source-rule'; sourceId: number; ruleId: number }
+  | { kind: 'filter-rule'; filterId: number; ruleId: number }
   | { kind: 'rule-sink'; ruleId: number; sinkId: number }
 
 interface UseFlowBoardOptions {
@@ -25,6 +26,7 @@ export function useFlowBoard({ sources, sinks, templates, ruleNodes, sinkTypeLab
   const keyword = shallowRef('')
   const onlyWarnings = shallowRef(false)
   const showUnusedNodes = shallowRef(false)
+  const showResourceLayer = shallowRef(false)
   const templateFilterId = shallowRef<number | null>(null)
 
   const templateFilterName = computed(() => {
@@ -125,16 +127,21 @@ export function useFlowBoard({ sources, sinks, templates, ruleNodes, sinkTypeLab
     const sel = selection.value
     if (!sel) return null
     const sourceIds = new Set<number>()
+    const filterIds = new Set<number>()
     const ruleIds = new Set<number>()
     const sinkIds = new Set<number>()
     const collect = (node: FlowRuleGraphNode) => {
       ruleIds.add(node.rule.id)
       node.rule.source_ids.forEach((id) => sourceIds.add(id))
+      node.rule.filter_ids.forEach((id) => filterIds.add(id))
       node.targets.forEach((t) => sinkIds.add(t.sinkId))
     }
     if (sel.kind === 'source') {
       sourceIds.add(sel.id)
       ruleNodes.value.filter((n) => n.rule.source_ids.includes(sel.id)).forEach(collect)
+    } else if (sel.kind === 'filter') {
+      filterIds.add(sel.id)
+      ruleNodes.value.filter((n) => n.rule.filter_ids.includes(sel.id)).forEach(collect)
     } else if (sel.kind === 'rule') {
       const node = ruleNodes.value.find((n) => n.rule.id === sel.id)
       if (node) collect(node)
@@ -142,7 +149,7 @@ export function useFlowBoard({ sources, sinks, templates, ruleNodes, sinkTypeLab
       sinkIds.add(sel.id)
       ruleNodes.value.filter((n) => n.targets.some((t) => t.sinkId === sel.id)).forEach(collect)
     }
-    return { sourceIds, ruleIds, sinkIds }
+    return { sourceIds, filterIds, ruleIds, sinkIds }
   })
 
   const selectionRuleCount = computed(() => (related.value ? related.value.ruleIds.size : 0))
@@ -161,7 +168,14 @@ export function useFlowBoard({ sources, sinks, templates, ruleNodes, sinkTypeLab
     const sel = selection.value
     if (!sel || !related.value) return ''
     if (sel.kind === kind && sel.id === id) return 'is-selected'
-    const set = kind === 'source' ? related.value.sourceIds : kind === 'rule' ? related.value.ruleIds : related.value.sinkIds
+    const set =
+      kind === 'source'
+        ? related.value.sourceIds
+        : kind === 'filter'
+          ? related.value.filterIds
+          : kind === 'rule'
+            ? related.value.ruleIds
+            : related.value.sinkIds
     return set.has(id) ? 'is-linked' : 'is-dimmed'
   }
 
@@ -185,7 +199,7 @@ export function useFlowBoard({ sources, sinks, templates, ruleNodes, sinkTypeLab
     selectedEdge.value = null
   }
 
-  function revealResource(kind: Exclude<FlowBoardNodeKind, 'rule'>, id: number) {
+  function revealResource(kind: Exclude<FlowBoardNodeKind, 'filter' | 'rule'>, id: number) {
     showUnusedNodes.value = true
     selectedEdge.value = null
     selection.value = { kind, id }
@@ -212,6 +226,7 @@ export function useFlowBoard({ sources, sinks, templates, ruleNodes, sinkTypeLab
     keyword,
     onlyWarnings,
     showUnusedNodes,
+    showResourceLayer,
     templateFilterId,
     templateFilterName,
     visibleRuleNodes,
@@ -238,6 +253,8 @@ export function useFlowBoard({ sources, sinks, templates, ruleNodes, sinkTypeLab
 function parseEdgeKey(key: string): FlowBoardEdgeRef | null {
   let match = /^s(\d+):r(\d+)$/.exec(key)
   if (match) return { kind: 'source-rule', sourceId: Number(match[1]), ruleId: Number(match[2]) }
+  match = /^f(\d+):r(\d+)$/.exec(key)
+  if (match) return { kind: 'filter-rule', filterId: Number(match[1]), ruleId: Number(match[2]) }
   match = /^r(\d+):k(\d+)$/.exec(key)
   if (match) return { kind: 'rule-sink', ruleId: Number(match[1]), sinkId: Number(match[2]) }
   return null

@@ -2,6 +2,7 @@
 const keyword = defineModel<string>('keyword', { required: true })
 const onlyWarnings = defineModel<boolean>('onlyWarnings', { required: true })
 const showUnusedNodes = defineModel<boolean>('showUnusedNodes', { required: true })
+const showResourceLayer = defineModel<boolean>('showResourceLayer', { required: true })
 const templateFilterId = defineModel<number | null>('templateFilterId', { required: true })
 
 defineProps<{
@@ -28,6 +29,7 @@ defineProps<{
         显示未接入资源
         <template v-if="hiddenResourceCount">（{{ hiddenResourceCount }}）</template>
       </NCheckbox>
+      <NCheckbox v-model:checked="showResourceLayer">显示资源层</NCheckbox>
       <NTag v-if="templateFilterId" closable size="small" type="info" @close="templateFilterId = null">
         模板：{{ templateFilterName }}
       </NTag>

@@ -10,7 +10,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'reveal-resource': [kind: Exclude<FlowNodeKind, 'rule'>, id: number]
+  'reveal-resource': [kind: Exclude<FlowNodeKind, 'filter' | 'rule'>, id: number]
   'show-unused-nodes': []
 }>()
 </script>

@@ -43,6 +43,11 @@ const selectedSource = computed(() => {
   return sourceById(props.selection.id)
 })
 
+const selectedFilter = computed(() => {
+  if (props.selection?.kind !== 'filter') return null
+  return filterById(props.selection.id)
+})
+
 const selectedSink = computed(() => {
   if (props.selection?.kind !== 'sink') return null
   return sinkById(props.selection.id)
@@ -59,6 +64,13 @@ const selectedSinkRules = computed(() => {
     .map((node) => node.rule)
 })
 
+const selectedFilterRules = computed(() => {
+  if (!selectedFilter.value) return []
+  return props.ruleNodes
+    .filter((node) => node.rule.filter_ids.includes(selectedFilter.value?.id ?? 0))
+    .map((node) => node.rule)
+})
+
 const selectedEdgeRuleNode = computed(() => {
   if (!props.selectedEdge) return null
   return props.ruleNodes.find((node) => node.rule.id === props.selectedEdge?.ruleId) ?? null
@@ -67,6 +79,11 @@ const selectedEdgeRuleNode = computed(() => {
 const selectedEdgeSource = computed(() => {
   if (props.selectedEdge?.kind !== 'source-rule') return null
   return sourceById(props.selectedEdge.sourceId)
+})
+
+const selectedEdgeFilter = computed(() => {
+  if (props.selectedEdge?.kind !== 'filter-rule') return null
+  return filterById(props.selectedEdge.filterId)
 })
 
 const selectedEdgeSink = computed(() => {
@@ -86,6 +103,10 @@ function sourceById(id: number): Source | null {
 
 function sinkById(id: number): Sink | null {
   return props.sinks.find((sink) => sink.id === id) ?? null
+}
+
+function filterById(id: number): Filter | null {
+  return props.filters.find((filter) => filter.id === id) ?? null
 }
 
 function ruleNodeById(id: number): FlowRuleGraphNode | null {
@@ -129,9 +150,6 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
     }))
 }
 
-function orderForRuleAtSource(sourceId: number, ruleId: number): number {
-  return matchingRulesForSource(sourceId).find((item) => item.rule.id === ruleId)?.order ?? 0
-}
 </script>
 
 <template>
@@ -139,10 +157,19 @@ function orderForRuleAtSource(sourceId: number, ruleId: number): number {
     <template v-if="selection">
       <header class="inspector-head">
         <span class="eyebrow">
-          {{ selection.kind === 'source' ? '监听来源' : selection.kind === 'rule' ? '转发规则' : '目标渠道' }}
+          {{
+            selection.kind === 'source'
+              ? '监听来源'
+              : selection.kind === 'filter'
+                ? '过滤器'
+                : selection.kind === 'rule'
+                  ? '转发规则'
+                  : '目标渠道'
+          }}
         </span>
         <strong class="title">
           <template v-if="selection.kind === 'source'">{{ sourceName(selection.id) }}</template>
+          <template v-else-if="selection.kind === 'filter'">{{ filterName(selection.id) }}</template>
           <template v-else-if="selection.kind === 'rule'">{{ ruleName(selection.id) }}</template>
           <template v-else>{{ sinkName(selection.id) }}</template>
         </strong>
@@ -240,10 +267,35 @@ function orderForRuleAtSource(sourceId: number, ruleId: number): number {
         <p v-else class="empty-text">这个渠道还没有被任何规则使用。</p>
       </section>
 
+      <section v-if="selectedFilter" class="section">
+        <div class="section-title">引用它的规则路径</div>
+        <div v-if="selectedFilterRules.length" class="path-list">
+          <div v-for="rule in selectedFilterRules" :key="rule.id" class="path-card">
+            <div class="path-title">
+              <strong>{{ rule.name }}</strong>
+              <span class="priority">P{{ rule.priority }}</span>
+              <span v-if="rule.stop_on_match" class="stop">命中即停</span>
+            </div>
+            <div class="path-line">
+              {{ rule.source_ids.map((sourceId) => sourceName(sourceId)).join(' / ') || '未配置来源' }}
+              <span>→</span>
+              {{ rule.targets.map((target) => sinkName(target.sink_id)).join(' / ') || '未配置目标' }}
+            </div>
+          </div>
+        </div>
+        <p v-else class="empty-text">这个过滤器还没有被任何规则引用。</p>
+      </section>
+
       <section v-if="selectedSource" class="section compact">
         <div class="section-title">状态</div>
         <div class="kv"><span>类型</span><strong>{{ sourceTypeLabel(selectedSource) }}</strong></div>
         <div class="kv"><span>启用</span><strong>{{ selectedSource.enabled ? '是' : '否' }}</strong></div>
+      </section>
+
+      <section v-if="selectedFilter" class="section compact">
+        <div class="section-title">状态</div>
+        <div class="kv"><span>条件数</span><strong>{{ selectedFilter.conditions.length }}</strong></div>
+        <div class="kv"><span>引用规则</span><strong>{{ selectedFilterRules.length }}</strong></div>
       </section>
 
       <section v-if="selectedSink" class="section compact">
@@ -253,10 +305,10 @@ function orderForRuleAtSource(sourceId: number, ruleId: number): number {
       </section>
 
       <div class="actions">
-        <NButton v-if="selection.kind !== 'rule'" size="small" @click="emit('create-rule')">沿此建规则</NButton>
+        <NButton v-if="selection.kind === 'source' || selection.kind === 'sink'" size="small" @click="emit('create-rule')">沿此建规则</NButton>
         <NButton v-if="selection.kind === 'rule'" size="small" type="primary" @click="emit('edit-rule', selection.id)">编辑规则</NButton>
         <NButton size="small" @click="emit('manage-config')">管理配置</NButton>
-        <NButton size="small" @click="emit('view-deliveries')">投递记录</NButton>
+        <NButton v-if="selection.kind !== 'filter'" size="small" @click="emit('view-deliveries')">投递记录</NButton>
         <NButton size="small" text type="primary" @click="emit('clear-selection')">清除选中</NButton>
       </div>
     </template>
@@ -267,6 +319,9 @@ function orderForRuleAtSource(sourceId: number, ruleId: number): number {
         <strong class="title">
           <template v-if="selectedEdge.kind === 'source-rule'">
             {{ sourceName(selectedEdge.sourceId) }} → {{ ruleName(selectedEdge.ruleId) }}
+          </template>
+          <template v-else-if="selectedEdge.kind === 'filter-rule'">
+            {{ filterName(selectedEdge.filterId) }} → {{ ruleName(selectedEdge.ruleId) }}
           </template>
           <template v-else>{{ ruleName(selectedEdge.ruleId) }} → {{ sinkName(selectedEdge.sinkId) }}</template>
         </strong>
@@ -285,6 +340,13 @@ function orderForRuleAtSource(sourceId: number, ruleId: number): number {
           <span class="priority">P{{ item.rule.priority }}</span>
           <span v-if="item.rule.stop_on_match" class="stop">命中即停</span>
         </div>
+      </section>
+
+      <section v-if="selectedEdge.kind === 'filter-rule' && selectedEdgeFilter && selectedEdgeRuleNode" class="section">
+        <div class="section-title">过滤器绑定</div>
+        <div class="kv"><span>过滤器</span><strong>{{ selectedEdgeFilter.name }}</strong></div>
+        <div class="kv"><span>条件数</span><strong>{{ selectedEdgeFilter.conditions.length }}</strong></div>
+        <div class="kv"><span>规则</span><strong>{{ selectedEdgeRuleNode.rule.name }}</strong></div>
       </section>
 
       <section v-if="selectedEdge.kind === 'rule-sink' && selectedEdgeSink && selectedEdgeRuleNode" class="section">

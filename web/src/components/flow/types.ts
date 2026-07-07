@@ -1,6 +1,6 @@
 // 编排画布的节点/连线输入类型，由 FlowPage 组装、FlowCanvas 渲染。
 
-export type FlowNodeKind = 'source' | 'rule' | 'sink'
+export type FlowNodeKind = 'source' | 'filter' | 'rule' | 'sink'
 
 export interface SourceNodeData {
   name: string
@@ -23,6 +23,12 @@ export interface RuleNodeData {
   warnings: string[]
 }
 
+export interface FilterNodeData {
+  name: string
+  conditionCount: number
+  ruleCount: number
+}
+
 export interface SinkNodeData {
   name: string
   typeLabel: string
@@ -39,7 +45,7 @@ export interface CanvasNodeInput<T> {
 
 export interface CanvasEdgeInput {
   key: string
-  from: { kind: 'source' | 'rule'; id: number }
+  from: { kind: 'source' | 'filter' | 'rule'; id: number }
   to: { kind: 'rule' | 'sink'; id: number }
   label?: string
   warn?: boolean
@@ -57,7 +63,7 @@ export function flowNodeId(kind: FlowNodeKind, id: number): string {
 }
 
 export function parseFlowNodeId(nodeId: string): { kind: FlowNodeKind; id: number } | null {
-  const match = /^(source|rule|sink)-(\d+)$/.exec(nodeId)
+  const match = /^(source|filter|rule|sink)-(\d+)$/.exec(nodeId)
   if (!match) return null
   return { kind: match[1] as FlowNodeKind, id: Number(match[2]) }
 }
