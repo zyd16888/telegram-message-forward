@@ -1011,3 +1011,123 @@ git diff --check
 优先级：
 按 V4-1 到 V4-6 顺序推进，一口气全部完成。预览完成后不需要停下来等用户确认输出质量，自测通过就继续做投递和定时调度；输出质量调优放在全链路跑通之后。
 ```
+
+## 18. Flow 图引擎（转发编排引擎化）设计与路线
+
+### 18.0 背景与结论
+
+编排画布已完成三轮演进（画布化 → 结构治理 + 路径检查器 → 过滤器资源节点），但执行模型仍是 Rule 列表。用户确认需要**图本身成为执行模型**：源、过滤、处理、目标节点在画布上自由组合，连线即数据流，全实时逐条处理。已拍板的方向性决策：
+
+1. **模板由目标节点继承**：模板是目标节点的属性（可空 = 原文投递），不做独立模板节点。
+2. **priority / stop_on_match 提升为 Flow 级属性**：同源多条 Flow 按 priority 排序，命中即停作用于 Flow 之间；Flow 内部分支并行、无顺序语义。
+3. **RulesPage 转「简单模式」**：读写线性形状的 Flow，与画布双向等价；后续视使用情况考虑砍掉。
+4. batch 汇聚（合并转发/AI 摘要节点）**不在本期**：图引擎先做无状态实时链路，节点接口为未来有状态节点（实时去重、batch 汇聚）留扩展位。aidigest 保持独立垂直不动。
+
+### 18.1 语义模型
+
+**节点类型（4 种）**：
+
+| 类型 | 语义 | 配置 |
+|---|---|---|
+| `source` | 入口：消息从这里进图 | `ref_id` = source_id |
+| `filter` | 谓词：全部条件通过才继续向下游 | `config` = `{filter_ids}` 或 `{conditions}`（二选一，节点内 AND，复用 condition 注册表与共享过滤器语义） |
+| `processor` | 改写本分支的消息快照 | `config` = `{processors: []}`（有序，复用 processor 注册表；通常一个，允许多个以减少节点数） |
+| `target` | 出口：生成投递任务 | `ref_id` = sink_id，`template_id` 可空 = 原文投递 |
+
+**连线与求值语义（引擎实现的规范）**：
+
+- 串联 filter = AND；一个节点多条出边 = **分支扇出**，扇出时对每条分支克隆消息快照（沿用 `cloneMessage`），processor 只改本分支快照。
+- 同一源被多条链/多条 Flow 引用 = 天然 OR。
+- 汇入（多条入边指向同一节点）：每条到达路径独立执行该节点及其下游；但**同一 target 节点在一次求值中最多产出一次任务**（按 node id 去重，取先到达的快照），避免菱形拓扑重复投递。
+- 图约束（保存时校验）：DAG 无环；source 只有出边、target 只有入边；每个 Flow 至少一条 source→target 通路；节点数/深度上限（建议 64 节点 / 16 深度）。
+- Flow 间语义：按 `priority DESC, id ASC` 求值；某 Flow 产出 ≥1 个 target 任务且 `stop_on_match=true` 时，停止更低优先级 Flow——与现有 Rule 语义逐位对齐，保证迁移零失真。
+
+### 18.2 执行架构
+
+- 新增 `internal/domain/flow`（Flow/Node/Edge 领域模型 + Repository 接口）与 `internal/flowengine`（编译 + 求值）。
+- **编译-执行分离**：加载图 → 编译为可执行计划（按 source_id 索引的邻接表 + 拓扑序），按 Flow `updated_at` 版本缓存，图不变不重编译。
+- `ingest.Ingest()` 把 `rules.ListEnabledBySource + engine.Evaluate` 替换为 flow 版本；产出仍是 `[]Match`（快照 + sink + template），`dispatch.Queue` 及以下投递平面零改动。
+- condition/processor 插件注册表、模板渲染、sink 适配器、重试机制全部原样复用。`ruleengine` 包在影子期保留，切换后移除或退化为 flowengine 的内部工具。
+- 节点执行接口设计为可扩展（未来 stream 去重节点、batch 汇聚节点以新节点类型接入，不改图模型）。
+
+### 18.3 数据模型（goose migration）
+
+```sql
+flows      (id, name, enabled, priority, stop_on_match, created_at, updated_at)
+flow_nodes (id, flow_id, type, ref_id NULL, config JSON, template_id NULL, pos_x, pos_y)
+           -- 自由编辑要求布局持久化；索引 (type, ref_id) 支持按源反查 Flow
+flow_edges (id, flow_id, from_node_id, to_node_id, UNIQUE(flow_id, from_node_id, to_node_id))
+```
+
+- `delivery_tasks`：`origin_type` 增加 `'flow'`（复用 V4-5 已有的 origin 机制），新增 `origin_node_id` 记录产出任务的 target 节点；幂等键 flow 任务按 `(message_id, origin_type, origin_id, origin_node_id)`。`rule_id` 保留供存量数据查询。
+- API DTO / domain / GORM model 三层分离；handler 不触 GORM；正式 schema 变更只走 `migrations/*.sql`。
+
+### 18.4 迁移与影子验证（切换安全带，必须做）
+
+1. **Rule→Flow 编译器**：`cmd/flowmigrate`（Go 命令，读 rules 写 flows）。每条 Rule 编译为一条线性 Flow：源节点们 → filter 节点（filter_ids/内联条件）→ processor 节点 → 各 target 节点（含 template_id）；Flow 的 name/priority/stop_on_match/enabled 原样继承。迁移可重复执行（按 rule id 幂等）。
+2. **影子并跑**：config 增加 `flow_engine.mode: off | shadow | primary`。shadow 模式下 ingest 主链路仍走旧引擎，同时用 flowengine 求值同一消息，diff 两边产出（命中 flow/rule 集合、sink+template+快照文本），不一致记 WARN 日志；跑稳后切 primary。
+3. 切 primary 后旧 Rule 表进入只读期，RulesPage 改造完成后再废弃 Rule API。
+
+### 18.5 阶段任务
+
+**F5-1 后端引擎（先行）**
+- [ ] `internal/domain/flow` + storage model/repository + goose migration（flows/flow_nodes/flow_edges + delivery_tasks 扩展）
+- [ ] `internal/flowengine`：编译（含图校验）+ 求值（扇出克隆、target 去重、Flow 间 priority/stop）+ 单元测试（含菱形、多源、多级 filter、stop_on_match 用例）
+- [ ] `/flows` CRUD API（DTO 校验图合法性，返回可读的校验错误）
+- [ ] `cmd/flowmigrate` + 影子模式接入 ingest + 引擎切换开关
+- [ ] 影子 diff 清零后切 primary
+
+**F5-2 画布自由编辑**
+- [ ] 画布进入「编辑模式」：节点可拖动、布局写回 pos_x/pos_y；节点面板（从来源/过滤器/渠道资源中拖入建节点，processor 节点从注册表选型）
+- [ ] 连线建边/删边直接读写 flow_edges；保存时后端校验错误在画布上定位标注
+- [ ] Route Inspector 适配 Flow（路径、Flow 间匹配顺序、节点配置摘要）
+- [ ] 现有三栏自动布局保留为「概览模式」（只读投影）
+
+**F5-3 RulesPage 转简单模式**
+- [ ] RuleEditorModal 管道表单改为读写线性 Flow（表单壳 + 线性图的双向转换）
+- [ ] Rule API 标记 deprecated，前端全部改走 `/flows`
+- [ ] roadmap 记录 Rule 表/`ruleengine` 的移除计划
+
+**F5-4 有状态节点（按需，另行确认后再做）**
+- [ ] stream 去重节点（逐条实时判定 + 键值状态）
+- [ ] batch 汇聚/AI 摘要节点（含 aidigest 收敛评估）
+
+### 18.6 验证与提交要求
+
+- 每个 Go 阶段：`go build ./...`、`go vet ./...`、`go test ./...`；flowengine 与旧 engine 的**对照测试**（同一批样例消息在两个引擎产出一致）作为 F5-1 的硬性验收。
+- 改 web 后：`cd web && npm run build`；画布编辑用本地后端 + 浏览器端到端自测（建图、连线、保存、校验错误展示、消息实际流经新链路产生投递任务）。
+- 迁移验证：对至少覆盖「多源、多目标、共享过滤器、内联条件、处理器、stop_on_match」的规则集合执行 flowmigrate，影子模式 diff 为零。
+- 按功能边界拆中文 commit，每个 commit 可 build；提交前 `git status`，不 stage 无关文件（尤其用户的 docker-compose.yml 改动）。
+
+### 18.7 目标模式提示词
+
+```text
+你在 D:\project\go_project\telegram-message-forward 工作。
+
+先阅读：
+- AGENTS.md
+- docs/product-architecture-v1.md
+- docs/roadmap-v4.md 第 18 章（Flow 图引擎设计与路线）
+- internal/ruleengine/、internal/app/ingest/、internal/dispatch/ 现有实现
+
+目标：
+按 roadmap-v4 第 18 章推进 Flow 图引擎，完成 F5-1（后端引擎 + 迁移 + 影子验证 + 切换）与 F5-2（画布自由编辑），F5-3 视进度推进。执行语义、数据模型、校验规则以 18.1–18.4 为准，不要自行更改已拍板的决策（模板由目标节点继承、priority/stop_on_match 为 Flow 级、图必须 DAG、target 节点单次求值去重）。中途不要停下来请示；遇到编译失败、测试不过、接口不通自行调试解决。只有出现第 18 章未覆盖的方向性分歧，或需要只有用户能提供的凭证时才停下提问。
+
+运行与调试授权：
+- 授权在本机开发环境自由运行调试：go run ./cmd/server、go run ./cmd/migrate、cd web && npm run dev；依赖可用 docker compose 启动，但不得修改或提交用户对 docker-compose.yml 的已有改动。
+- 不得对外部生产渠道做投递测试。
+
+必须遵守：
+- 默认中文沟通。
+- 切换前旧链路行为不得变化；影子模式 diff 清零是切 primary 的前置条件。
+- flowengine 复用 condition/processor 注册表与模板渲染，不重造轮子；dispatch 及以下投递平面零改动。
+- handler 不直接访问 GORM；GORM model 只在 storage/model；API DTO、domain、model 三层分离；schema 变更只新增 migrations/*.sql。
+- 不打印不提交 session、密钥、密码；不提交 configs/config.yaml、web/dist、node_modules、本地数据库。
+- 工作区已有的用户改动不覆盖不回滚；提交前只 stage 当前任务相关文件。
+- 每完成一个阶段更新 roadmap-v4 第 18.5 节的勾选状态。
+
+推进顺序：
+1. F5-1 按 18.5 清单顺序：domain/storage/migration → flowengine + 单测与对照测试 → /flows API → flowmigrate + 影子模式 → diff 清零切 primary。
+2. F5-2 画布编辑模式，端到端自测通过。
+3. F5-3 视进度推进；F5-4 不做，仅保留接口扩展位。
+```
