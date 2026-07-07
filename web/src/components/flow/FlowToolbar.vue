@@ -23,8 +23,8 @@ defineProps<{
 <template>
   <div class="board-toolbar">
     <div class="toolbar-filters">
-      <NInput v-model:value="keyword" clearable class="search-input" placeholder="搜索来源、规则、渠道" />
-      <NCheckbox v-model:checked="onlyWarnings">只看异常规则</NCheckbox>
+      <NInput v-model:value="keyword" clearable class="search-input" placeholder="搜索来源、Flow、渠道" />
+      <NCheckbox v-model:checked="onlyWarnings">只看异常 Flow</NCheckbox>
       <NCheckbox v-model:checked="showUnusedNodes">
         显示未接入资源
         <template v-if="hiddenResourceCount">（{{ hiddenResourceCount }}）</template>
@@ -36,7 +36,7 @@ defineProps<{
     </div>
     <div class="toolbar-stats">
       <span>来源 {{ stats.linkedSources }}/{{ stats.totalSources }} 已接入</span>
-      <span>规则 {{ stats.enabledRules }}/{{ stats.totalRules }} 启用</span>
+      <span>Flow {{ stats.enabledRules }}/{{ stats.totalRules }} 启用</span>
       <span>渠道 {{ stats.enabledSinks }}/{{ stats.totalSinks }} 启用</span>
       <span :class="{ 'stat-warn': stats.warningRules > 0 }">异常 {{ stats.warningRules }}</span>
     </div>

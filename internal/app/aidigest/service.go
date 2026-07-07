@@ -20,8 +20,8 @@ import (
 	domainaidigest "telegram-message-forward/internal/domain/aidigest"
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
 	domainfilter "telegram-message-forward/internal/domain/filter"
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
-	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsettings "telegram-message-forward/internal/domain/settings"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domainsource "telegram-message-forward/internal/domain/source"
@@ -432,7 +432,7 @@ func validateOutputTemplate(t *domainaidigest.OutputTemplate) error {
 }
 
 // resolveConditions 优先返回引用的共享过滤器条件，否则回退内联条件。
-func (s *Service) resolveConditions(ctx context.Context, p *domainaidigest.Profile) []domainrule.ConditionConfig {
+func (s *Service) resolveConditions(ctx context.Context, p *domainaidigest.Profile) []domainflow.ConditionConfig {
 	if p.FilterID > 0 && s.filters != nil {
 		if f, err := s.filters.GetByID(ctx, p.FilterID); err == nil && f != nil {
 			return f.Conditions
@@ -461,7 +461,7 @@ type ProfileInput struct {
 	Enabled          bool
 	SourceIDs        []int64
 	FilterID         int64
-	Conditions       []domainrule.ConditionConfig
+	Conditions       []domainflow.ConditionConfig
 	Schedule         domainaidigest.ScheduleConfig
 	Window           domainaidigest.WindowConfig
 	Dedupe           domainaidigest.DedupeConfig
@@ -806,7 +806,7 @@ func (s *Service) filterMessages(ctx context.Context, p *domainaidigest.Profile,
 	return items, included
 }
 
-func (s *Service) matchesConditions(ctx context.Context, msg *domainmessage.NormalizedMessage, configs []domainrule.ConditionConfig) (bool, error) {
+func (s *Service) matchesConditions(ctx context.Context, msg *domainmessage.NormalizedMessage, configs []domainflow.ConditionConfig) (bool, error) {
 	for _, cfg := range configs {
 		if cfg.Type == "source" {
 			continue

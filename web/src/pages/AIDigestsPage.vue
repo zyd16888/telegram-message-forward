@@ -2,7 +2,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue'
 import { NButton, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
-import { aiApi, filtersApi, rulesApi, sinksApi, sourcesApi } from '@/api/client'
+import { aiApi, filtersApi, flowsApi, sinksApi, sourcesApi } from '@/api/client'
 import type {
   AIDigestProfile,
   AIDigestProfileRequest,
@@ -223,7 +223,7 @@ async function loadAll(): Promise<void> {
       aiApi.profiles.list(),
       sourcesApi.list(),
       sinksApi.list(),
-      rulesApi.meta(),
+      flowsApi.meta(),
       aiApi.providers.list(),
       aiApi.presets.list(),
       aiApi.outputTemplates.list(),

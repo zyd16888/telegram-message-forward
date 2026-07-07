@@ -2,8 +2,8 @@
 import { computed, h, onMounted, shallowRef } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NTag, NText, NTooltip, useMessage, type DataTableColumns, type PaginationProps, type SelectOption } from 'naive-ui'
-import { deliveriesApi, rulesApi, sinksApi, sourcesApi } from '@/api/client'
-import type { Delivery, Rule, Sink, SinkDescriptor, Source } from '@/types'
+import { deliveriesApi, sinksApi, sourcesApi } from '@/api/client'
+import type { Delivery, Sink, SinkDescriptor, Source } from '@/types'
 import { errText } from '@/utils/error'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
@@ -14,7 +14,6 @@ const route = useRoute()
 const deliveries = shallowRef<Delivery[]>([])
 const loading = shallowRef(false)
 const status = shallowRef('')
-const ruleId = shallowRef<number | null>(null)
 const sourceId = shallowRef<number | null>(null)
 const sinkId = shallowRef<number | null>(null)
 const page = shallowRef(1)
@@ -25,15 +24,11 @@ const detailLoading = shallowRef(false)
 const detail = shallowRef<Delivery | null>(null)
 
 const sourceList = shallowRef<Source[]>([])
-const ruleList = shallowRef<Rule[]>([])
 const sinkList = shallowRef<Sink[]>([])
 const sinkDescriptors = shallowRef<SinkDescriptor[]>([])
 
 const sourceOptions = computed<SelectOption[]>(() =>
   sourceList.value.map((s) => ({ label: s.name, value: s.id })),
-)
-const ruleOptions = computed<SelectOption[]>(() =>
-  ruleList.value.map((r) => ({ label: r.name, value: r.id })),
 )
 const sinkOptions = computed<SelectOption[]>(() =>
   sinkList.value.map((s) => ({ label: s.name, value: s.id })),
@@ -112,9 +107,8 @@ async function load() {
 
 async function loadFilterOptions() {
   try {
-    ;[sourceList.value, ruleList.value, sinkList.value, sinkDescriptors.value] = await Promise.all([
+    ;[sourceList.value, sinkList.value, sinkDescriptors.value] = await Promise.all([
       sourcesApi.list(),
-      rulesApi.list(),
       sinksApi.list(),
       sinksApi.meta(),
     ])
@@ -125,7 +119,6 @@ async function loadFilterOptions() {
 
 function deliveryFilters(): Record<string, number> {
   const out: Record<string, number> = {}
-  if (ruleId.value) out.rule_id = ruleId.value
   if (sourceId.value) out.source_id = sourceId.value
   if (sinkId.value) out.sink_id = sinkId.value
   return out
@@ -209,7 +202,7 @@ function engineLabel(row: Delivery): string {
   if (row.engine_name) return row.engine_name
   if (row.origin_type === 'flow') return 'Flow 引擎'
   if (row.origin_type === 'ai_digest') return 'AI 整理'
-  return '规则引擎'
+  return 'Flow 引擎'
 }
 
 function engineTagType(row: Delivery): 'success' | 'warning' | 'error' | 'info' | 'default' {
@@ -227,8 +220,7 @@ function deliveryOriginLabel(row: Delivery): string {
   if (row.origin_type === 'ai_digest') {
     return row.origin_id ? `AI整理：#${row.origin_id}` : 'AI整理'
   }
-  if (row.rule_name) return `规则：${row.rule_name}`
-  return row.rule_id ? `规则：#${row.rule_id}` : ''
+  return row.flow_name || (row.origin_id ? `Flow：#${row.origin_id}` : '')
 }
 
 function renderTarget(row: Delivery) {
@@ -340,7 +332,6 @@ function queryId(key: string): number | null {
 onMounted(() => {
   // 支持从编排页等入口带筛选条件跳转。
   sourceId.value = queryId('source_id')
-  ruleId.value = queryId('rule_id')
   sinkId.value = queryId('sink_id')
   void load()
   void loadFilterOptions()
@@ -358,15 +349,6 @@ onMounted(() => {
           filterable
           placeholder="全部来源"
           :options="sourceOptions"
-          @update:value="reloadFromFirstPage"
-        />
-        <n-select
-          v-model:value="ruleId"
-          class="entity-filter"
-          clearable
-          filterable
-          placeholder="全部规则"
-          :options="ruleOptions"
           @update:value="reloadFromFirstPage"
         />
         <n-select

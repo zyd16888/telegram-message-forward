@@ -36,7 +36,7 @@ const emit = defineEmits<{
               <template #icon><ClayIcon name="edit" :size="14" /></template>
             </NButton>
           </template>
-          编辑规则
+          编辑 Flow
         </NTooltip>
         <NSwitch size="small" :value="data.enabled" @update:value="(value: boolean) => emit('toggle', value)" />
       </span>

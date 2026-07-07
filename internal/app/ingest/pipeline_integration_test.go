@@ -20,14 +20,14 @@ import (
 	"telegram-message-forward/internal/dispatch"
 	domainaccount "telegram-message-forward/internal/domain/account"
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
-	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domainsource "telegram-message-forward/internal/domain/source"
 	domaintemplate "telegram-message-forward/internal/domain/template"
+	"telegram-message-forward/internal/flowengine"
 	"telegram-message-forward/internal/infra/clock"
 	"telegram-message-forward/internal/infra/crypto"
-	"telegram-message-forward/internal/ruleengine"
 	"telegram-message-forward/internal/storage"
 	"telegram-message-forward/internal/storage/repository"
 	tmpl "telegram-message-forward/internal/template"
@@ -93,14 +93,15 @@ func setupPipeline(t *testing.T) *pipelineEnv {
 	sources := repository.NewSourceRepository(db)
 	sinks := repository.NewSinkRepository(db, cipher)
 	templates := repository.NewTemplateRepository(db)
-	rules := repository.NewRuleRepository(db)
+	filters := repository.NewFilterRepository(db)
+	flows := repository.NewFlowRepository(db)
 	messages := repository.NewMessageRepository(db)
 	deliveries := repository.NewDeliveryRepository(db)
 
-	engine := ruleengine.NewEngine()
+	flowEngine := flowengine.NewEngine(flowengine.WithFilterResolver(filters))
 	renderer := tmpl.NewRenderer()
 	queue := dispatch.NewQueue(deliveries, cfg.Dispatch.MaxAttempts)
-	ingestSvc := appingest.NewService(messages, rules, engine, queue, clk, log)
+	ingestSvc := appingest.NewService(messages, flows, flowEngine, queue, clk, log)
 	worker := dispatch.NewWorker("test-worker", cfg.Dispatch, deliveries, sinks, templates, messages, renderer, clk, log)
 
 	ctx := context.Background()
@@ -114,7 +115,7 @@ func setupPipeline(t *testing.T) *pipelineEnv {
 	}
 
 	cleanup := func() {
-		// 删除账号级联 sources/messages/delivery_tasks；再清理独立的 sinks/templates/rules。
+		// 删除账号级联 sources/messages/delivery_tasks；独立的 sinks/templates/flows 在测试里清理。
 		accounts.Delete(ctx, acc.ID)
 	}
 
@@ -124,7 +125,7 @@ func setupPipeline(t *testing.T) *pipelineEnv {
 	}
 }
 
-// TestPipelineSuccess 验证 消息→规则→渲染→Webhook 投递成功 全链路。
+// TestPipelineSuccess 验证 消息→Flow→渲染→Webhook 投递成功 全链路。
 func TestPipelineSuccess(t *testing.T) {
 	env := setupPipeline(t)
 	defer env.cleanup()
@@ -143,7 +144,7 @@ func TestPipelineSuccess(t *testing.T) {
 
 	sinks := env.sinks
 	templates := repository.NewTemplateRepository(env.db)
-	rules := repository.NewRuleRepository(env.db)
+	flows := repository.NewFlowRepository(env.db)
 
 	sk := &domainsink.Sink{Type: "webhook", Name: "it-webhook", Enabled: true,
 		Config:       map[string]any{"url": srv.URL},
@@ -159,17 +160,11 @@ func TestPipelineSuccess(t *testing.T) {
 	}
 	defer templates.Delete(ctx, tpl.ID)
 
-	rl := &domainrule.Rule{
-		Name: "it-rule", Enabled: true, Priority: 10,
-		Conditions: []domainrule.ConditionConfig{{Type: "keyword_contains", Config: map[string]any{"keywords": []any{"golang"}}}},
-		Processors: []domainrule.ProcessorConfig{{Type: "append_source", Config: map[string]any{"label": "it-source"}}},
-		SourceIDs:  []int64{env.sourceID},
-		Targets:    []domainrule.Target{{SinkID: sk.ID, TemplateID: &tpl.ID}},
+	flow := testFlow(env.sourceID, sk.ID, &tpl.ID)
+	if err := flows.Create(ctx, flow); err != nil {
+		t.Fatalf("创建 Flow 失败: %v", err)
 	}
-	if err := rules.Create(ctx, rl); err != nil {
-		t.Fatalf("创建规则失败: %v", err)
-	}
-	defer rules.Delete(ctx, rl.ID)
+	defer flows.Delete(ctx, flow.ID)
 
 	m := &domainmessage.NormalizedMessage{
 		SourceID: env.sourceID, ExternalMessageID: 5001, MessageType: "text",
@@ -221,7 +216,6 @@ func TestPipelineDead(t *testing.T) {
 	defer srv.Close()
 
 	sinks := env.sinks
-	rules := repository.NewRuleRepository(env.db)
 
 	sk := &domainsink.Sink{Type: "webhook", Name: "it-webhook-fail", Enabled: true,
 		Config: map[string]any{"url": srv.URL}, Capabilities: domainsink.Capabilities{SupportsText: true}}
@@ -230,16 +224,6 @@ func TestPipelineDead(t *testing.T) {
 	}
 	defer sinks.Delete(ctx, sk.ID)
 
-	rl := &domainrule.Rule{
-		Name: "it-rule-fail", Enabled: true,
-		SourceIDs: []int64{env.sourceID},
-		Targets:   []domainrule.Target{{SinkID: sk.ID}},
-	}
-	if err := rules.Create(ctx, rl); err != nil {
-		t.Fatal(err)
-	}
-	defer rules.Delete(ctx, rl.ID)
-
 	// 用 max_attempts=1 的队列，令首次失败即 dead。
 	queue := dispatch.NewQueue(env.deliveries, 1)
 	m := &domainmessage.NormalizedMessage{SourceID: env.sourceID, ExternalMessageID: 6001, MessageType: "text", Text: "fail me", ReceivedAt: time.Now()}
@@ -247,7 +231,14 @@ func TestPipelineDead(t *testing.T) {
 	if err := messages.Create(ctx, m); err != nil {
 		t.Fatal(err)
 	}
-	matches := []ruleengine.Match{{Rule: rl, Targets: rl.Targets}}
+	matches := []domainflow.Match{{
+		FlowID:       1,
+		Targets:      []domainflow.Target{{SinkID: sk.ID}},
+		Message:      m,
+		OriginType:   "flow",
+		OriginID:     1,
+		OriginNodeID: 3,
+	}}
 	if err := queue.Enqueue(ctx, m, matches); err != nil {
 		t.Fatal(err)
 	}
@@ -271,5 +262,26 @@ func TestPipelineDead(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("失败任务应进入 dead 状态")
+	}
+}
+
+func testFlow(sourceID, sinkID int64, templateID *int64) *domainflow.Flow {
+	return &domainflow.Flow{
+		Name: "it-flow", Enabled: true, Priority: 10,
+		Nodes: []domainflow.Node{
+			{ID: 1, Type: domainflow.NodeTypeSource, RefID: &sourceID, PosX: 0, PosY: 0},
+			{ID: 2, Type: domainflow.NodeTypeFilter, Config: domainflow.NodeConfig{
+				Conditions: []domainflow.ConditionConfig{{Type: "keyword_contains", Config: map[string]any{"keywords": []any{"golang"}}}},
+			}, PosX: 160, PosY: 0},
+			{ID: 3, Type: domainflow.NodeTypeProcessor, Config: domainflow.NodeConfig{
+				Processors: []domainflow.ProcessorConfig{{Type: "append_source", Config: map[string]any{"label": "it-source"}}},
+			}, PosX: 320, PosY: 0},
+			{ID: 4, Type: domainflow.NodeTypeTarget, RefID: &sinkID, TemplateID: templateID, PosX: 480, PosY: 0},
+		},
+		Edges: []domainflow.Edge{
+			{FromNodeID: 1, ToNodeID: 2},
+			{FromNodeID: 2, ToNodeID: 3},
+			{FromNodeID: 3, ToNodeID: 4},
+		},
 	}
 }

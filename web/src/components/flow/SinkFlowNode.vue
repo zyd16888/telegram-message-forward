@@ -17,7 +17,7 @@ defineProps<{
     </div>
     <div class="node-meta">
       <span class="node-tag">{{ data.typeLabel }}</span>
-      <span class="node-sub">{{ data.ruleCount ? `${data.ruleCount} 条规则` : '未接规则' }}</span>
+      <span class="node-sub">{{ data.ruleCount ? `${data.ruleCount} 个 Flow` : '未接 Flow' }}</span>
     </div>
     <div class="node-foot">{{ data.deliveryLabel }}</div>
     <Handle type="target" :position="Position.Left" />

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useMessage } from 'naive-ui'
-import { accountsApi, aiApi, deliveriesApi, rulesApi, sinksApi, sourcesApi } from '@/api/client'
+import { accountsApi, aiApi, deliveriesApi, flowsApi, sinksApi, sourcesApi } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import type { Delivery } from '@/types'
 import { errText } from '@/utils/error'
@@ -10,7 +10,7 @@ import ClayIcon from '@/components/ClayIcon.vue'
 const message = useMessage()
 const auth = useAuthStore()
 
-const counts = ref({ accounts: 0, sources: 0, sinks: 0, rules: 0 })
+const counts = ref({ accounts: 0, sources: 0, sinks: 0, flows: 0 })
 const deliveries = ref<Delivery[]>([])
 const aiStats = ref({ total: 0, success: 0, failed: 0, tokens: 0 })
 const statusTotals = ref<Record<string, number>>({})
@@ -35,7 +35,7 @@ const tiles = computed(() => [
   { key: 'accounts', label: '账号', value: counts.value.accounts, icon: 'accounts', tone: 'blue' },
   { key: 'sources', label: '监听源', value: counts.value.sources, icon: 'sources', tone: 'mint' },
   { key: 'sinks', label: '目标渠道', value: counts.value.sinks, icon: 'sinks', tone: 'peach' },
-  { key: 'rules', label: '规则', value: counts.value.rules, icon: 'rules', tone: 'coral' },
+  { key: 'flows', label: 'Flow', value: counts.value.flows, icon: 'flow', tone: 'coral' },
 ])
 
 // 投递状态点缀。
@@ -61,7 +61,7 @@ const topFailures = computed(() => ({
 function deliveryOriginLabel(item: Delivery): string {
   if (item.origin_type === 'flow') return item.flow_name || `Flow #${item.origin_id || 0}`
   if (item.origin_type === 'ai_digest') return item.origin_id ? `AI整理 #${item.origin_id}` : 'AI整理'
-  return item.rule_name || `Rule #${item.rule_id}`
+  return item.flow_name || (item.origin_id ? `Flow #${item.origin_id}` : 'Flow')
 }
 
 function topBy(items: Delivery[], keyFn: (item: Delivery) => string) {
@@ -83,11 +83,11 @@ async function load() {
   }
   loading.value = true
   try {
-    const [accs, srcs, snks, rls, all, success, retrying, pending, processing, dead, failed] = await Promise.all([
+    const [accs, srcs, snks, fls, all, success, retrying, pending, processing, dead, failed] = await Promise.all([
       accountsApi.list(),
       sourcesApi.list(),
       sinksApi.list(),
-      rulesApi.list(),
+      flowsApi.list(),
       deliveriesApi.page('', 1, 0, { since_hours: windowHours }),
       deliveriesApi.page('success', 1, 0, { since_hours: windowHours }),
       deliveriesApi.page('retrying', 1, 0, { since_hours: windowHours }),
@@ -97,7 +97,7 @@ async function load() {
       deliveriesApi.page('failed', 250, 0, { since_hours: windowHours }),
     ])
     const aiProfiles = await aiApi.profiles.list()
-    counts.value = { accounts: accs.length, sources: srcs.length, sinks: snks.length, rules: rls.length }
+    counts.value = { accounts: accs.length, sources: srcs.length, sinks: snks.length, flows: fls.length }
     windowTotal.value = all.total
     statusTotals.value = {
       success: success.total,
@@ -191,7 +191,7 @@ onMounted(load)
       <n-card class="panel" title="失败 Top">
         <div class="top-grid">
           <div v-for="(items, key) in topFailures" :key="key" class="top-list">
-            <div class="top-title">{{ key === 'sink' ? 'Sink' : key === 'rule' ? 'Rule' : 'Source' }}</div>
+            <div class="top-title">{{ key === 'sink' ? 'Sink' : key === 'rule' ? 'Flow' : 'Source' }}</div>
             <n-empty v-if="!items.length" size="small" description="暂无失败" />
             <div v-for="item in items" :key="item.label" class="top-item">
               <span>{{ item.label }}</span>

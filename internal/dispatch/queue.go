@@ -5,12 +5,12 @@ import (
 	"context"
 
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
-	"telegram-message-forward/internal/ruleengine"
 )
 
-// Queue 根据规则引擎的匹配结果生成投递任务。
+// Queue 根据 Flow 引擎的匹配结果生成投递任务。
 type Queue struct {
 	tasks       domaindelivery.Repository
 	sinks       domainsink.Repository
@@ -36,11 +36,10 @@ func (q *Queue) UseSinks(sinks domainsink.Repository) *Queue {
 	return q
 }
 
-// Enqueue 为每个命中规则的每个目标渠道生成一个 pending 投递任务。
+// Enqueue 为每个 Flow 命中的每个目标渠道生成一个 pending 投递任务。
 //
-// 任务创建按来源类型幂等：rule 为 (message_id, rule_id, sink_id)，
-// flow 为 (message_id, origin_id, origin_node_id)，重复不产生新任务。
-func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessage, matches []ruleengine.Match) error {
+// Flow 任务按 (message_id, origin_type, origin_id, origin_node_id) 幂等，重复不产生新任务。
+func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessage, matches []domainflow.Match) error {
 	created := false
 	enabledSinks := map[int64]bool{}
 	for _, m := range matches {
@@ -54,10 +53,9 @@ func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessag
 			}
 			task := &domaindelivery.Task{
 				MessageID:       msg.ID,
-				RuleID:          ruleID(m),
 				SinkID:          target.SinkID,
 				TemplateID:      target.TemplateID,
-				OriginType:      matchOriginType(m),
+				OriginType:      "flow",
 				OriginID:        m.OriginID,
 				OriginNodeID:    m.OriginNodeID,
 				Status:          domaindelivery.StatusPending,
@@ -74,22 +72,6 @@ func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessag
 		q.notifier.Notify()
 	}
 	return nil
-}
-
-func ruleID(m ruleengine.Match) int64 {
-	// flow 来源的任务不写 rule_id：delivery_tasks.rule_id 外键指向 rules 表，
-	// flow.ID 既可能不存在于 rules（插入失败），也可能撞上无关规则（级联误删）。
-	if m.OriginType == "flow" || m.Rule == nil {
-		return 0
-	}
-	return m.Rule.ID
-}
-
-func matchOriginType(m ruleengine.Match) string {
-	if m.OriginType != "" {
-		return m.OriginType
-	}
-	return "rule"
 }
 
 func (q *Queue) sinkEnabled(ctx context.Context, sinkID int64, cache map[int64]bool) (bool, error) {

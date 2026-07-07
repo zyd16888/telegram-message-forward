@@ -118,7 +118,7 @@ async function submit(): Promise<void> {
       <div class="section-head">
         <div>
           <div class="section-title">匹配条件</div>
-          <div class="section-desc">多个条件为「与」关系（全部满足才通过）。命中后的处理动作在转发规则中配置。</div>
+          <div class="section-desc">多个条件为「与」关系（全部满足才通过）。命中后的处理动作在 Flow 中配置。</div>
         </div>
         <NButton size="small" dashed @click="addCondition">添加条件</NButton>
       </div>

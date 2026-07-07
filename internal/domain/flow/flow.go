@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	domainrule "telegram-message-forward/internal/domain/rule"
+	domainmessage "telegram-message-forward/internal/domain/message"
 )
 
 type NodeType string
@@ -41,9 +41,9 @@ type Node struct {
 }
 
 type NodeConfig struct {
-	FilterIDs  []int64                      `json:"filter_ids,omitempty"`
-	Conditions []domainrule.ConditionConfig `json:"conditions,omitempty"`
-	Processors []domainrule.ProcessorConfig `json:"processors,omitempty"`
+	FilterIDs  []int64           `json:"filter_ids,omitempty"`
+	Conditions []ConditionConfig `json:"conditions,omitempty"`
+	Processors []ProcessorConfig `json:"processors,omitempty"`
 }
 
 type Edge struct {
@@ -53,12 +53,42 @@ type Edge struct {
 	ToNodeID   int64
 }
 
+// ConditionConfig 是一个条件的配置。
+// Type 对应 condition 注册表中的条件类型，如 keyword_contains、regex 等。
+type ConditionConfig struct {
+	Type   string         `json:"type"`
+	Config map[string]any `json:"config,omitempty"`
+}
+
+// ProcessorConfig 是一个处理器的配置。
+type ProcessorConfig struct {
+	Type   string         `json:"type"`
+	Config map[string]any `json:"config,omitempty"`
+}
+
+// Target 是 Flow target 节点产出的一个投递目标。
+// TemplateID 为空表示按纯文本渲染。
+type Target struct {
+	SinkID     int64
+	TemplateID *int64
+}
+
+// Match 是 Flow 引擎对一条消息的命中结果。
+type Match struct {
+	FlowID       int64
+	FlowName     string
+	Targets      []Target
+	Message      *domainmessage.NormalizedMessage
+	OriginType   string
+	OriginID     int64
+	OriginNodeID int64
+}
+
 type Repository interface {
 	Create(ctx context.Context, f *Flow) error
 	Update(ctx context.Context, f *Flow) error
 	GetByID(ctx context.Context, id int64) (*Flow, error)
 	List(ctx context.Context) ([]*Flow, error)
 	ListEnabledBySource(ctx context.Context, sourceID int64) ([]*Flow, error)
-	ListEnabledMigratedBySource(ctx context.Context, sourceID int64) ([]*Flow, error)
 	Delete(ctx context.Context, id int64) error
 }

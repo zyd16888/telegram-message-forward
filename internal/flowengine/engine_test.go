@@ -2,7 +2,6 @@ package flowengine
 
 import (
 	"context"
-	"reflect"
 	"sort"
 	"strconv"
 	"testing"
@@ -10,8 +9,6 @@ import (
 
 	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
-	domainrule "telegram-message-forward/internal/domain/rule"
-	"telegram-message-forward/internal/ruleengine"
 )
 
 func TestEvaluateDiamondDedupesTargetNode(t *testing.T) {
@@ -51,7 +48,7 @@ func TestEvaluateFanoutClonesBranchSnapshot(t *testing.T) {
 		ID: 1, Name: "fanout", Enabled: true, UpdatedAt: time.Now(),
 		Nodes: []domainflow.Node{
 			sourceNode(src, 10),
-			processorNode(proc, domainrule.ProcessorConfig{Type: "append_source", Config: map[string]any{"text": " [p]"}}),
+			processorNode(proc, domainflow.ProcessorConfig{Type: "append_source", Config: map[string]any{"text": " [p]"}}),
 			targetNode(target1, sink1, nil),
 			targetNode(target2, sink2, nil),
 		},
@@ -85,7 +82,7 @@ func TestEvaluateMultiSourceAndMultiLevelFilters(t *testing.T) {
 			sourceNode(1, 10),
 			sourceNode(2, 20),
 			filterNode(3, contains("go")),
-			filterNode(4, domainrule.ConditionConfig{Type: "message_type", Config: map[string]any{"types": []any{"text"}}}),
+			filterNode(4, domainflow.ConditionConfig{Type: "message_type", Config: map[string]any{"types": []any{"text"}}}),
 			targetNode(5, sinkID, nil),
 		},
 		Edges: []domainflow.Edge{
@@ -129,35 +126,19 @@ func TestEvaluateStopOnMatchBetweenFlows(t *testing.T) {
 	}
 }
 
-func TestFlowEngineMatchesLegacyRuleEngineForLinearRule(t *testing.T) {
+func TestEvaluateLinearFlowWithProcessorsAndMultipleTargets(t *testing.T) {
 	tpl := int64(9)
-	r := &domainrule.Rule{
-		ID:        7,
-		Name:      "linear",
-		Enabled:   true,
-		Priority:  10,
-		SourceIDs: []int64{10},
-		Conditions: []domainrule.ConditionConfig{
-			contains("go"),
-			{Type: "message_type", Config: map[string]any{"types": []any{"text"}}},
-		},
-		Processors: []domainrule.ProcessorConfig{{Type: "append_source", Config: map[string]any{"text": " [p]"}}},
-		Targets: []domainrule.Target{
-			{SinkID: 100, TemplateID: &tpl},
-			{SinkID: 200},
-		},
-		StopOnMatch: true,
+	conds := []domainflow.ConditionConfig{
+		contains("go"),
+		{Type: "message_type", Config: map[string]any{"types": []any{"text"}}},
 	}
-	oldMatches, err := ruleengine.NewEngine().Evaluate(context.Background(), msg("go"), []*domainrule.Rule{r})
-	if err != nil {
-		t.Fatal(err)
-	}
+	procs := []domainflow.ProcessorConfig{{Type: "append_source", Config: map[string]any{"text": " [p]"}}}
 	flow := &domainflow.Flow{
-		ID: 7, Name: r.Name, Enabled: true, Priority: r.Priority, StopOnMatch: r.StopOnMatch, UpdatedAt: time.Now(),
+		ID: 7, Name: "linear", Enabled: true, Priority: 10, StopOnMatch: true, UpdatedAt: time.Now(),
 		Nodes: []domainflow.Node{
 			sourceNode(1, 10),
-			filterNode(2, r.Conditions...),
-			processorNode(3, r.Processors...),
+			filterNode(2, conds...),
+			processorNode(3, procs...),
 			targetNode(4, 100, &tpl),
 			targetNode(5, 200, nil),
 		},
@@ -172,8 +153,9 @@ func TestFlowEngineMatchesLegacyRuleEngineForLinearRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(signatures(oldMatches), signatures(flowMatches)) {
-		t.Fatalf("legacy=%v flow=%v", signatures(oldMatches), signatures(flowMatches))
+	want := []string{"100:9:go [p]", "200:0:go [p]"}
+	if got := signatures(flowMatches); !sameStrings(got, want) {
+		t.Fatalf("flow signatures=%v, want %v", got, want)
 	}
 }
 
@@ -181,11 +163,11 @@ func sourceNode(id, sourceID int64) domainflow.Node {
 	return domainflow.Node{ID: id, Type: domainflow.NodeTypeSource, RefID: &sourceID}
 }
 
-func filterNode(id int64, conds ...domainrule.ConditionConfig) domainflow.Node {
+func filterNode(id int64, conds ...domainflow.ConditionConfig) domainflow.Node {
 	return domainflow.Node{ID: id, Type: domainflow.NodeTypeFilter, Config: domainflow.NodeConfig{Conditions: conds}}
 }
 
-func processorNode(id int64, procs ...domainrule.ProcessorConfig) domainflow.Node {
+func processorNode(id int64, procs ...domainflow.ProcessorConfig) domainflow.Node {
 	return domainflow.Node{ID: id, Type: domainflow.NodeTypeProcessor, Config: domainflow.NodeConfig{Processors: procs}}
 }
 
@@ -193,7 +175,7 @@ func targetNode(id, sinkID int64, templateID *int64) domainflow.Node {
 	return domainflow.Node{ID: id, Type: domainflow.NodeTypeTarget, RefID: &sinkID, TemplateID: templateID}
 }
 
-func linearFlow(id, sourceID, sinkID int64, cond domainrule.ConditionConfig, tpl *int64) *domainflow.Flow {
+func linearFlow(id, sourceID, sinkID int64, cond domainflow.ConditionConfig, tpl *int64) *domainflow.Flow {
 	return &domainflow.Flow{
 		ID: id, Name: "linear", Enabled: true, UpdatedAt: time.Now(),
 		Nodes: []domainflow.Node{sourceNode(1, sourceID), filterNode(2, cond), targetNode(3, sinkID, tpl)},
@@ -201,15 +183,15 @@ func linearFlow(id, sourceID, sinkID int64, cond domainrule.ConditionConfig, tpl
 	}
 }
 
-func contains(keyword string) domainrule.ConditionConfig {
-	return domainrule.ConditionConfig{Type: "keyword_contains", Config: map[string]any{"keywords": []any{keyword}}}
+func contains(keyword string) domainflow.ConditionConfig {
+	return domainflow.ConditionConfig{Type: "keyword_contains", Config: map[string]any{"keywords": []any{keyword}}}
 }
 
 func msg(text string) *domainmessage.NormalizedMessage {
 	return &domainmessage.NormalizedMessage{SourceID: 10, MessageType: "text", Text: text, ReceivedAt: time.Now()}
 }
 
-func signatures(matches []ruleengine.Match) []string {
+func signatures(matches []domainflow.Match) []string {
 	out := make([]string, 0)
 	for _, m := range matches {
 		for _, target := range m.Targets {
@@ -222,4 +204,16 @@ func signatures(matches []ruleengine.Match) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

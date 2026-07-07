@@ -25,7 +25,6 @@ type Deps struct {
 	Sink           *handler.SinkHandler
 	Source         *handler.SourceHandler
 	Template       *handler.TemplateHandler
-	Rule           *handler.RuleHandler
 	Flow           *handler.FlowHandler
 	Filter         *handler.FilterHandler
 	Delivery       *handler.DeliveryHandler
@@ -132,22 +131,6 @@ func NewRouter(deps Deps) *gin.Engine {
 			templates.GET("/:id", deps.Template.Get)
 			templates.PUT("/:id", deps.Template.Update)
 			templates.DELETE("/:id", deps.Template.Delete)
-		}
-
-		rules := v1.Group("/rules")
-		{
-			rules.Use(func(c *gin.Context) {
-				c.Header("Deprecation", "true")
-				c.Header("Link", `</api/v1/flows>; rel="successor-version"`)
-				c.Next()
-			})
-			rules.GET("", deps.Rule.List)
-			rules.GET("/meta", deps.Rule.Meta)
-			rules.POST("/preview", deps.Rule.Preview)
-			rules.POST("", deps.Rule.Create)
-			rules.GET("/:id", deps.Rule.Get)
-			rules.PUT("/:id", deps.Rule.Update)
-			rules.DELETE("/:id", deps.Rule.Delete)
 		}
 
 		if deps.Flow != nil {

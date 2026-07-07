@@ -1,12 +1,12 @@
 // Package filter 定义可复用「过滤器」领域模型：一组命名的匹配条件，
-// 供转发规则与 AI 整理共同引用。过滤器只承载条件，不含处理器与目标渠道。
+// 供 Flow 与 AI 整理共同引用。过滤器只承载条件，不含处理器与目标渠道。
 package filter
 
 import (
 	"context"
 	"time"
 
-	domainrule "telegram-message-forward/internal/domain/rule"
+	domainflow "telegram-message-forward/internal/domain/flow"
 )
 
 // Filter 是一组可复用的匹配条件。
@@ -14,7 +14,7 @@ type Filter struct {
 	ID          int64
 	Name        string
 	Description string
-	Conditions  []domainrule.ConditionConfig
+	Conditions  []domainflow.ConditionConfig
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -26,6 +26,6 @@ type Repository interface {
 	Create(ctx context.Context, f *Filter) error
 	Update(ctx context.Context, f *Filter) error
 	Delete(ctx context.Context, id int64) error
-	// CountReferences 返回引用该过滤器的旧规则、Flow 节点与 AI Profile 总数。
+	// CountReferences 返回引用该过滤器的 Flow 节点与 AI Profile 总数。
 	CountReferences(ctx context.Context, id int64) (int64, error)
 }

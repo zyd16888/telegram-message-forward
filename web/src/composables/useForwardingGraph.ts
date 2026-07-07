@@ -1,6 +1,6 @@
 import { computed, shallowRef } from 'vue'
-import { accountsApi, rulesApi, sinksApi, sourcesApi, templatesApi } from '@/api/client'
-import type { Account, Rule, Sink, Source, Template } from '@/types'
+import { accountsApi, flowToLinearFlow, flowsApi, sinksApi, sourcesApi, templatesApi } from '@/api/client'
+import type { Account, LinearFlow, Sink, Source, Template } from '@/types'
 
 export interface FlowTargetNode {
   sink: Sink | null
@@ -10,7 +10,7 @@ export interface FlowTargetNode {
 }
 
 export interface FlowRuleNode {
-  rule: Rule
+  rule: LinearFlow
   targets: FlowTargetNode[]
 }
 
@@ -28,7 +28,7 @@ export interface FlowRuleSourceNode {
 }
 
 export interface FlowRuleGraphNode {
-  rule: Rule
+  rule: LinearFlow
   sources: FlowRuleSourceNode[]
   targets: FlowTargetNode[]
   warnings: string[]
@@ -37,7 +37,7 @@ export interface FlowRuleGraphNode {
 export function useForwardingGraph() {
   const accounts = shallowRef<Account[]>([])
   const sources = shallowRef<Source[]>([])
-  const rules = shallowRef<Rule[]>([])
+  const rules = shallowRef<LinearFlow[]>([])
   const sinks = shallowRef<Sink[]>([])
   const templates = shallowRef<Template[]>([])
   const loading = shallowRef(false)
@@ -124,7 +124,7 @@ export function useForwardingGraph() {
       ;[accounts.value, sources.value, rules.value, sinks.value, templates.value] = await Promise.all([
         accountsApi.list(),
         sourcesApi.list(),
-        rulesApi.list(),
+        flowsApi.list().then((items) => items.map(flowToLinearFlow)),
         sinksApi.list(),
         templatesApi.list(),
       ])
@@ -136,15 +136,15 @@ export function useForwardingGraph() {
   function warningsFor(source: Source, matchedRules: FlowRuleNode[]): string[] {
     const warnings: string[] = []
     if (!source.enabled) warnings.push('监听源已停用')
-    if (matchedRules.length === 0) warnings.push('尚未关联规则')
+    if (matchedRules.length === 0) warnings.push('尚未关联 Flow')
     for (const item of matchedRules) {
-      if (!item.rule.enabled) warnings.push(`规则「${item.rule.name}」已停用`)
-      if (item.targets.length === 0) warnings.push(`规则「${item.rule.name}」没有目标渠道`)
+      if (!item.rule.enabled) warnings.push(`Flow「${item.rule.name}」已停用`)
+      if (item.targets.length === 0) warnings.push(`Flow「${item.rule.name}」没有目标渠道`)
       for (const target of item.targets) {
-        if (!target.sink) warnings.push(`规则「${item.rule.name}」引用了不存在的渠道 #${target.sinkId}`)
+        if (!target.sink) warnings.push(`Flow「${item.rule.name}」引用了不存在的渠道 #${target.sinkId}`)
         else if (!target.sink.enabled) warnings.push(`渠道「${target.sink.name}」已停用`)
         if (target.templateId && !target.template) {
-          warnings.push(`规则「${item.rule.name}」引用了不存在的模板 #${target.templateId}`)
+          warnings.push(`Flow「${item.rule.name}」引用了不存在的模板 #${target.templateId}`)
         }
       }
     }
@@ -152,12 +152,12 @@ export function useForwardingGraph() {
   }
 
   function warningsForRule(
-    rule: Rule,
+    rule: LinearFlow,
     ruleSources: FlowRuleSourceNode[],
     targets: FlowTargetNode[],
   ): string[] {
     const warnings: string[] = []
-    if (!rule.enabled) warnings.push('规则已停用')
+    if (!rule.enabled) warnings.push('Flow 已停用')
     if (ruleSources.length === 0) warnings.push('未指定监听来源')
     for (const source of ruleSources) {
       if (!source.source) warnings.push(`引用了不存在的来源 #${source.sourceId}`)

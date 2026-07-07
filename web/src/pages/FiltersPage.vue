@@ -4,7 +4,7 @@ import { NButton, NSpace, NText, useDialog, useMessage, type DataTableColumns } 
 import FilterEditorModal from '@/components/filters/FilterEditorModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
-import { filtersApi, rulesApi } from '@/api/client'
+import { filtersApi, flowsApi } from '@/api/client'
 import type { Filter, RuleItemDescriptor } from '@/types'
 import { errText } from '@/utils/error'
 
@@ -20,7 +20,7 @@ const editing = shallowRef<Filter | null>(null)
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const [fs, meta] = await Promise.all([filtersApi.list(), rulesApi.meta()])
+    const [fs, meta] = await Promise.all([filtersApi.list(), flowsApi.meta()])
     filters.value = fs
     conditionDescriptors.value = meta.conditions
   } catch (e) {
@@ -43,7 +43,7 @@ function openEdit(row: Filter): void {
 function confirmDelete(row: Filter): void {
   dialog.warning({
     title: '删除过滤器',
-    content: `确定删除过滤器「${row.name}」？被转发规则或 AI 整理引用时无法删除。`,
+    content: `确定删除过滤器「${row.name}」？被 Flow 或 AI 整理引用时无法删除。`,
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -96,7 +96,7 @@ onMounted(load)
   <NSpace vertical size="large">
     <PageHeader
       title="过滤器"
-      desc="可复用的一组匹配条件；匹配后的处理动作在转发规则中配置"
+      desc="可复用的一组匹配条件；匹配后的处理动作在 Flow 中配置"
       icon="shield"
     >
       <template #actions>
@@ -121,7 +121,7 @@ onMounted(load)
     >
       <template #empty>
         <div class="empty">
-          <p>还没有共享过滤器。配好一个后，可在转发规则和 AI 整理中直接引用。</p>
+          <p>还没有共享过滤器。配好一个后，可在 Flow 和 AI 整理中直接引用。</p>
           <NButton type="primary" size="small" @click="openCreate">新建过滤器</NButton>
         </div>
       </template>

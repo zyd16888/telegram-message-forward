@@ -5,8 +5,8 @@ import (
 	"context"
 	"time"
 
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
-	domainrule "telegram-message-forward/internal/domain/rule"
 )
 
 const (
@@ -39,7 +39,7 @@ type Profile struct {
 	SourceIDs []int64
 	// FilterID 引用共享过滤器；为 0 表示使用内联 Conditions。
 	FilterID       int64
-	Conditions     []domainrule.ConditionConfig
+	Conditions     []domainflow.ConditionConfig
 	Schedule       ScheduleConfig
 	Window         WindowConfig
 	Dedupe         DedupeConfig

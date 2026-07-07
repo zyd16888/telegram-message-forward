@@ -1028,7 +1028,7 @@ git diff --check
 
 1. **模板由目标节点继承**：模板是目标节点的属性（可空 = 原文投递），不做独立模板节点。
 2. **priority / stop_on_match 提升为 Flow 级属性**：同源多条 Flow 按 priority 排序，命中即停作用于 Flow 之间；Flow 内部分支并行、无顺序语义。
-3. **RulesPage 转「简单模式」**：读写线性形状的 Flow，与画布双向等价；后续视使用情况考虑砍掉。
+3. **旧规则页面已下线**：Flow 画布同时承载简单线性链路与复杂图链路；旧 RulesPage / Rule API 不再保留。
 4. batch 汇聚（合并转发/AI 摘要节点）**不在本期**：图引擎先做无状态实时链路，节点接口为未来有状态节点（实时去重、batch 汇聚）留扩展位。aidigest 保持独立垂直不动。
 
 ### 18.1 语义模型
@@ -1054,8 +1054,8 @@ git diff --check
 
 - 新增 `internal/domain/flow`（Flow/Node/Edge 领域模型 + Repository 接口）与 `internal/flowengine`（编译 + 求值）。
 - **编译-执行分离**：加载图 → 编译为可执行计划（按 source_id 索引的邻接表 + 拓扑序），按 Flow `updated_at` 版本缓存，图不变不重编译。
-- `ingest.Ingest()` 把 `rules.ListEnabledBySource + engine.Evaluate` 替换为 flow 版本；产出仍是 `[]Match`（快照 + sink + template），`dispatch.Queue` 及以下投递平面零改动。
-- condition/processor 插件注册表、模板渲染、sink 适配器、重试机制全部原样复用。`ruleengine` 包在影子期保留，切换后移除或退化为 flowengine 的内部工具。
+- `ingest.Ingest()` 已替换为 `flows.ListEnabledBySource + flowengine.Evaluate`；产出为 Flow Match（快照 + sink + template + origin_node_id），`dispatch.Queue` 及以下投递平面保持稳定。
+- condition/processor 插件注册表、模板渲染、sink 适配器、重试机制全部原样复用。旧 `ruleengine.Engine` 已移除，`internal/ruleengine/condition` 与 `internal/ruleengine/processor` 作为注册表继续被 Flow、过滤器与 AI Digest 复用。
 - 节点执行接口设计为可扩展（未来 stream 去重节点、batch 汇聚节点以新节点类型接入，不改图模型）。
 
 ### 18.3 数据模型（goose migration）
@@ -1072,9 +1072,9 @@ flow_edges (id, flow_id, from_node_id, to_node_id, UNIQUE(flow_id, from_node_id,
 
 ### 18.4 迁移与影子验证（切换安全带，必须做）
 
-1. **Rule→Flow 编译器**：`cmd/flowmigrate`（Go 命令，读 rules 写 flows）。每条 Rule 编译为一条线性 Flow：源节点们 → filter 节点（filter_ids/内联条件）→ processor 节点 → 各 target 节点（含 template_id）；Flow 的 name/priority/stop_on_match/enabled 原样继承。迁移可重复执行（按 rule id 幂等）。
-2. **影子并跑**：config 增加 `flow_engine.mode: off | shadow | primary`。shadow 模式下 ingest 主链路仍走旧引擎，同时用 flowengine 求值同一消息，diff 两边产出（命中 flow/rule 集合、sink+template+快照文本），不一致记 WARN 日志；跑稳后切 primary。
-3. 切 primary 后旧 Rule 表进入只读期，RulesPage 改造完成后再废弃 Rule API。
+1. **已完成迁移期**：Rule→Flow 编译器与 shadow/primary 切换用于 F5-1 过渡验证；真实运行确认后进入 Flow-only。
+2. **当前运行口径**：ingest 只执行 Flow；旧 `/rules` API、RulesPage、Rule 表仓储、`cmd/flowmigrate` 与旧 `ruleengine.Engine` 已移除。
+3. **数据库清理**：`00021_drop_rules.sql` 删除 `rules`、`rule_sources`、`rule_filters`、`rule_targets`、`flow_rule_migrations`，并将 `delivery_tasks` 的 origin 约束收敛为 `flow` / `ai_digest`。
 
 ### 18.5 阶段任务
 
@@ -1082,23 +1082,22 @@ flow_edges (id, flow_id, from_node_id, to_node_id, UNIQUE(flow_id, from_node_id,
 - [x] `internal/domain/flow` + storage model/repository + goose migration（flows/flow_nodes/flow_edges + delivery_tasks 扩展）
 - [x] `internal/flowengine`：编译（含图校验）+ 求值（扇出克隆、target 去重、Flow 间 priority/stop）+ 单元测试（含菱形、多源、多级 filter、stop_on_match 用例）
 - [x] `/flows` CRUD API（DTO 校验图合法性，返回可读的校验错误）
-- [x] `cmd/flowmigrate` + 影子模式接入 ingest + 引擎切换开关
-- [x] 切换机制就绪（默认 `off`，`shadow`/`primary` 由 `flow_engine.mode` 显式切换）
-- [ ] 【运维步骤，代码已就绪】对真实库执行 `00020` 迁移 + `cmd/flowmigrate`，`shadow` 模式跑足量真实消息，日志确认「Flow 影子求值 diff」为零后切 `primary`
+- [x] `cmd/flowmigrate` + 影子模式接入 ingest + 引擎切换开关（过渡期已完成）
+- [x] 切换机制完成，当前代码进入 Flow-only：ingest 不再执行旧规则引擎
+- [x] 新增 `00021_drop_rules.sql` 清理旧 Rule 表、迁移映射表与 `/rules` 后端依赖
 
 **F5-2 画布自由编辑**
 - [x] 画布进入「编辑模式」：节点可拖动、布局写回 pos_x/pos_y；节点面板（来源/过滤器/渠道资源添加建节点，processor 节点从注册表选型）
 - [x] 连线建边/删边直接读写 flow_edges；保存时后端校验错误在画布侧展示
 - [x] Route Inspector 适配 Flow（编辑侧展示节点配置摘要，概览侧保留路径与匹配顺序）
 - [x] 现有三栏自动布局保留为「概览模式」（只读投影）
-- [x] 节点配置编辑补齐：processor 节点的处理器参数、filter 节点的内联条件在编辑面板可编辑（复用 RuleEditorModal 的条件/处理器构建器）；未保存草稿离开/切换 Flow 时提示
+- [x] 节点配置编辑补齐：processor 节点的处理器参数、filter 节点的内联条件在编辑面板可编辑（复用既有条件/处理器构建器）；未保存草稿离开/切换 Flow 时提示
 
-**F5-3 RulesPage 转简单模式**
-- [x] RuleEditorModal 管道表单改为读写线性 Flow（表单壳 + 线性图的双向转换）
-- [x] Rule API 标记 deprecated，前端全部改走 `/flows`
-- [x] roadmap 记录 Rule 表/`ruleengine` 的移除计划
-
-Rule 表与旧 `ruleengine` 移除计划：`primary` 模式稳定后，先保留 `/rules` 只读兼容一个小版本并持续返回 `Deprecation: true`；确认投递记录、过滤器引用计数、AI Digest 条件元数据不再依赖 rules 表后，新增 migration 归档/删除 `rules`、`rule_sources`、`rule_filters`、`rule_targets` 与 `flow_rule_migrations`，最后把 `internal/ruleengine` 缩为 flowengine 内部复用工具或直接内联到 flowengine。
+**F5-3 旧规则体系下线**
+- [x] 前端移除 RulesPage 与 RuleEditorModal；侧栏不再展示“转发规则”，旧 `/rules` 路由重定向到 `/flow`
+- [x] 前端页面引用全部改走 `/flows` 或 `/flows/meta`；概览模式使用线性 Flow 投影，不再调用 `/rules`
+- [x] 后端移除 `/rules` API、Rule app service、Rule repository、`domain/rule` 与旧 `ruleengine.Engine`
+- [x] 投递记录展示 Flow 引擎与 Flow 名称；过滤器引用计数、AI Digest 条件元数据不再依赖 rules 表
 
 **F5-4 有状态节点（按需，另行确认后再做）**
 - [ ] stream 去重节点（逐条实时判定 + 键值状态）
@@ -1106,9 +1105,9 @@ Rule 表与旧 `ruleengine` 移除计划：`primary` 模式稳定后，先保留
 
 ### 18.6 验证与提交要求
 
-- 每个 Go 阶段：`go build ./...`、`go vet ./...`、`go test ./...`；flowengine 与旧 engine 的**对照测试**（同一批样例消息在两个引擎产出一致）作为 F5-1 的硬性验收。
+- 每个 Go 阶段：`go build ./...`、`go vet ./...`、`go test ./...`；Flow-only 阶段继续保留 flowengine 的图校验、扇出、target 去重、priority/stop_on_match、线性 Flow 多目标等单元测试。
 - 改 web 后：`cd web && npm run build`；画布编辑用本地后端 + 浏览器端到端自测（建图、连线、保存、校验错误展示、消息实际流经新链路产生投递任务）。
-- 迁移验证：对至少覆盖「多源、多目标、共享过滤器、内联条件、处理器、stop_on_match」的规则集合执行 flowmigrate，影子模式 diff 为零。
+- 迁移验证：Flow-only 切换后，重点验证至少覆盖「多源、多目标、共享过滤器、内联条件、处理器、stop_on_match」的 Flow 集合可实际生成投递任务。
 - 按功能边界拆中文 commit，每个 commit 可 build；提交前 `git status`，不 stage 无关文件（尤其用户的 docker-compose.yml 改动）。
 
 ### 18.7 目标模式提示词

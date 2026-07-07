@@ -148,21 +148,6 @@ type Template struct {
 
 func (Template) TableName() string { return "templates" }
 
-// Rule 对应 rules 表。
-type Rule struct {
-	ID          int64 `gorm:"primaryKey"`
-	Name        string
-	Enabled     bool
-	Priority    int
-	Conditions  datatypes.JSON
-	Processors  datatypes.JSON
-	StopOnMatch bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-}
-
-func (Rule) TableName() string { return "rules" }
-
 // Filter 对应 filters 表：可复用的一组匹配条件。
 type Filter struct {
 	ID          int64 `gorm:"primaryKey"`
@@ -174,33 +159,6 @@ type Filter struct {
 }
 
 func (Filter) TableName() string { return "filters" }
-
-// RuleSource 对应 rule_sources 表。
-type RuleSource struct {
-	RuleID   int64 `gorm:"primaryKey"`
-	SourceID int64 `gorm:"primaryKey"`
-}
-
-func (RuleSource) TableName() string { return "rule_sources" }
-
-// RuleFilter 对应 rule_filters 表。
-type RuleFilter struct {
-	RuleID    int64 `gorm:"primaryKey"`
-	FilterID  int64 `gorm:"primaryKey"`
-	SortOrder int
-}
-
-func (RuleFilter) TableName() string { return "rule_filters" }
-
-// RuleTarget 对应 rule_targets 表。
-type RuleTarget struct {
-	ID         int64 `gorm:"primaryKey"`
-	RuleID     int64
-	SinkID     int64
-	TemplateID *int64
-}
-
-func (RuleTarget) TableName() string { return "rule_targets" }
 
 // Flow 对应 flows 表。
 type Flow struct {

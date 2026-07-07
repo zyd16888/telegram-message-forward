@@ -5,8 +5,8 @@ import { NButton, NSpace, NText, useDialog, useMessage, type DataTableColumns } 
 import TemplateEditorModal from '@/components/templates/TemplateEditorModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
-import { rulesApi, templatesApi } from '@/api/client'
-import type { Rule, Template } from '@/types'
+import { flowToLinearFlow, flowsApi, templatesApi } from '@/api/client'
+import type { LinearFlow, Template } from '@/types'
 import { errText } from '@/utils/error'
 
 const message = useMessage()
@@ -14,7 +14,7 @@ const dialog = useDialog()
 const router = useRouter()
 
 const templates = shallowRef<Template[]>([])
-const rules = shallowRef<Rule[]>([])
+const rules = shallowRef<LinearFlow[]>([])
 const loading = shallowRef(false)
 const showModal = shallowRef(false)
 const editingTemplate = shallowRef<Template | null>(null)
@@ -33,7 +33,10 @@ const ruleCountByTemplateId = computed(() => {
 async function load() {
   loading.value = true
   try {
-    ;[templates.value, rules.value] = await Promise.all([templatesApi.list(), rulesApi.list()])
+    ;[templates.value, rules.value] = await Promise.all([
+      templatesApi.list(),
+      flowsApi.list().then((items) => items.map(flowToLinearFlow)),
+    ])
   } catch (e) {
     message.error('加载失败：' + errText(e))
   } finally {
@@ -78,7 +81,7 @@ const columns: DataTableColumns<Template> = [
   { title: '名称', key: 'name', ellipsis: { tooltip: true } },
   { title: '格式', key: 'format', width: 110 },
   {
-    title: '关联规则',
+    title: '关联 Flow',
     key: 'rules',
     width: 110,
     render: (row) => {
@@ -87,7 +90,7 @@ const columns: DataTableColumns<Template> = [
       return h(
         NButton,
         { text: true, type: 'primary', onClick: () => goToFlow(row.id) },
-        { default: () => `${count} 条规则` },
+        { default: () => `${count} 个 Flow` },
       )
     },
   },
@@ -112,7 +115,7 @@ onMounted(load)
 
 <template>
   <NSpace vertical size="large">
-    <PageHeader title="渲染模板" desc="定义消息渲染模板，供规则复用" icon="templates">
+    <PageHeader title="渲染模板" desc="定义消息渲染模板，供 Flow 目标节点复用" icon="templates">
       <template #actions>
         <NButton type="primary" @click="openCreate">
           <template #icon><ClayIcon name="plus" :size="16" /></template>

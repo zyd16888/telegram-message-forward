@@ -15,7 +15,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/telegram-config', name: 'telegram-config', component: () => import('@/pages/TelegramConfigPage.vue'), meta: { title: 'Telegram 配置' } },
   { path: '/sources', name: 'sources', component: () => import('@/pages/SourcesPage.vue'), meta: { title: '监听源' } },
   { path: '/sinks', name: 'sinks', component: () => import('@/pages/SinksPage.vue'), meta: { title: '目标渠道' } },
-  { path: '/rules', name: 'rules', component: () => import('@/pages/RulesPage.vue'), meta: { title: '转发规则' } },
+  { path: '/rules', redirect: '/flow' },
   { path: '/filters', name: 'filters', component: () => import('@/pages/FiltersPage.vue'), meta: { title: '过滤器' } },
   { path: '/templates', name: 'templates', component: () => import('@/pages/TemplatesPage.vue'), meta: { title: '渲染模板' } },
   { path: '/deliveries', name: 'deliveries', component: () => import('@/pages/DeliveriesPage.vue'), meta: { title: '投递记录' } },

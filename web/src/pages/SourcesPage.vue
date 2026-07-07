@@ -5,8 +5,8 @@ import { NButton, NSwitch, NTag, NText, NTooltip, useDialog, useMessage, type Da
 import PeerSyncPanel from '@/components/sources/PeerSyncPanel.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
-import { accountsApi, rulesApi, sourcesApi } from '@/api/client'
-import type { Account, Rule, Source } from '@/types'
+import { accountsApi, flowToLinearFlow, flowsApi, sourcesApi } from '@/api/client'
+import type { Account, LinearFlow, Source } from '@/types'
 import { errText } from '@/utils/error'
 
 type SourceKind = 'telegram' | 'rss' | 'webhook'
@@ -18,7 +18,7 @@ const router = useRouter()
 
 const sources = shallowRef<Source[]>([])
 const accounts = shallowRef<Account[]>([])
-const rules = shallowRef<Rule[]>([])
+const rules = shallowRef<LinearFlow[]>([])
 const loading = shallowRef(false)
 const activeTab = shallowRef<SourceKind>('telegram')
 const sourceSearch = shallowRef('')
@@ -79,7 +79,7 @@ async function load() {
     ;[sources.value, accounts.value, rules.value] = await Promise.all([
       sourcesApi.list(),
       accountsApi.list(),
-      rulesApi.list(),
+      flowsApi.list().then((items) => items.map(flowToLinearFlow)),
     ])
   } catch (e) {
     message.error('加载失败：' + errText(e))
@@ -218,8 +218,8 @@ function webhookPath(source: Source): string {
   return `/api/v1/sources/${source.id}/webhook`
 }
 
-function goToRules(sourceId: number) {
-  router.push({ name: 'rules', query: { source_id: String(sourceId) } })
+function goToFlows(sourceId: number) {
+  router.push({ name: 'flow', query: { source_id: String(sourceId) } })
 }
 
 function goToFlow(sourceId: number) {
@@ -227,7 +227,7 @@ function goToFlow(sourceId: number) {
 }
 
 function createRuleForSource(sourceId: number) {
-  router.push({ name: 'rules', query: { create: '1', source_id: String(sourceId) } })
+  router.push({ name: 'flow', query: { create: '1', source_id: String(sourceId) } })
 }
 
 function confirmDelete(row: Source) {
@@ -264,7 +264,7 @@ function actionButton(label: string, icon: string, onClick: () => void, type?: '
   )
 }
 
-// 各类型表格共用的尾部列：运行状态、关联规则、启用、操作。
+// 各类型表格共用的尾部列：运行状态、关联 Flow、启用、操作。
 function commonTailColumns(): DataTableColumns<Source> {
   return [
     {
@@ -290,7 +290,7 @@ function commonTailColumns(): DataTableColumns<Source> {
         ]),
     },
     {
-      title: '关联规则',
+      title: '关联 Flow',
       key: 'rules',
       width: 100,
       render: (row) => {
@@ -298,8 +298,8 @@ function commonTailColumns(): DataTableColumns<Source> {
         if (!count) return h(NText, { depth: 3 }, { default: () => '无' })
         return h(
           NButton,
-          { text: true, type: 'primary', onClick: () => goToRules(row.id) },
-          { default: () => `${count} 条规则` },
+          { text: true, type: 'primary', onClick: () => goToFlows(row.id) },
+          { default: () => `${count} 个 Flow` },
         )
       },
     },
@@ -316,7 +316,7 @@ function commonTailColumns(): DataTableColumns<Source> {
       render: (row) =>
         h('div', { class: 'action-row' }, [
           actionButton('查看编排', 'flow', () => goToFlow(row.id)),
-          actionButton('创建规则', 'plus', () => createRuleForSource(row.id)),
+          actionButton('创建 Flow', 'plus', () => createRuleForSource(row.id)),
           actionButton('删除', 'trash', () => confirmDelete(row), 'error'),
         ]),
     },

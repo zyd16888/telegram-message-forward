@@ -5,8 +5,8 @@ import { NButton, NSpace, NSwitch, NTag, NText, NTooltip, useDialog, useMessage,
 import SinkFormModal from '@/components/sinks/SinkFormModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
-import { rulesApi, sinksApi } from '@/api/client'
-import type { Capabilities, Rule, Sink, SinkDescriptor } from '@/types'
+import { flowToLinearFlow, flowsApi, sinksApi } from '@/api/client'
+import type { Capabilities, LinearFlow, Sink, SinkDescriptor } from '@/types'
 import { errText } from '@/utils/error'
 
 const message = useMessage()
@@ -15,7 +15,7 @@ const router = useRouter()
 
 const sinks = shallowRef<Sink[]>([])
 const descriptors = shallowRef<SinkDescriptor[]>([])
-const rules = shallowRef<Rule[]>([])
+const rules = shallowRef<LinearFlow[]>([])
 const loading = shallowRef(false)
 const showForm = shallowRef(false)
 const editingSink = shallowRef<Sink | null>(null)
@@ -38,7 +38,7 @@ async function load() {
     ;[sinks.value, descriptors.value, rules.value] = await Promise.all([
       sinksApi.list(),
       sinksApi.meta(),
-      rulesApi.list(),
+      flowsApi.list().then((items) => items.map(flowToLinearFlow)),
     ])
   } catch (e) {
     message.error('加载失败：' + errText(e))
@@ -123,8 +123,8 @@ async function toggle(row: Sink, value: boolean) {
   }
 }
 
-function goToRules(sinkId: number) {
-  router.push({ name: 'rules', query: { sink_id: String(sinkId) } })
+function goToFlows(sinkId: number) {
+  router.push({ name: 'flow', query: { sink_id: String(sinkId) } })
 }
 
 function goToFlow(sinkId: number) {
@@ -132,7 +132,7 @@ function goToFlow(sinkId: number) {
 }
 
 function createRuleForSink(sinkId: number) {
-  router.push({ name: 'rules', query: { create: '1', sink_id: String(sinkId) } })
+  router.push({ name: 'flow', query: { create: '1', sink_id: String(sinkId) } })
 }
 
 function confirmDelete(row: Sink) {
@@ -221,7 +221,7 @@ const columns: DataTableColumns<Sink> = [
   },
   { title: '含密钥', key: 'has_secret', width: 90, render: (row) => (row.has_secret ? '是' : '否') },
   {
-    title: '关联规则',
+    title: '关联 Flow',
     key: 'rules',
     width: 110,
     render: (row) => {
@@ -229,8 +229,8 @@ const columns: DataTableColumns<Sink> = [
       if (!count) return h(NText, { depth: 3 }, { default: () => '无' })
       return h(
         NButton,
-        { text: true, type: 'primary', onClick: () => goToRules(row.id) },
-        { default: () => `${count} 条规则` },
+        { text: true, type: 'primary', onClick: () => goToFlows(row.id) },
+        { default: () => `${count} 个 Flow` },
       )
     },
   },
@@ -247,7 +247,7 @@ const columns: DataTableColumns<Sink> = [
     render: (row) =>
       h('div', { class: 'action-row' }, [
         actionButton('查看编排', 'flow', () => goToFlow(row.id)),
-        actionButton('创建规则', 'plus', () => createRuleForSink(row.id)),
+        actionButton('创建 Flow', 'plus', () => createRuleForSink(row.id)),
         actionButton('编辑', 'edit', () => openEdit(row)),
         actionButton('删除', 'trash', () => confirmDelete(row), 'error'),
       ]),

@@ -8,7 +8,6 @@ import (
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
 	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
-	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domainsource "telegram-message-forward/internal/domain/source"
 	domaintemplate "telegram-message-forward/internal/domain/template"
@@ -20,7 +19,6 @@ type Service struct {
 	messages  domainmessage.Repository
 	sources   domainsource.Repository
 	sinks     domainsink.Repository
-	rules     domainrule.Repository
 	flows     domainflow.Repository
 	templates domaintemplate.Repository
 }
@@ -30,7 +28,6 @@ type DisplayDeps struct {
 	Messages  domainmessage.Repository
 	Sources   domainsource.Repository
 	Sinks     domainsink.Repository
-	Rules     domainrule.Repository
 	Flows     domainflow.Repository
 	Templates domaintemplate.Repository
 }
@@ -42,7 +39,6 @@ type View struct {
 	Message  *domainmessage.NormalizedMessage
 	Source   *domainsource.Source
 	Sink     *domainsink.Sink
-	Rule     *domainrule.Rule
 	Flow     *domainflow.Flow
 	Template *domaintemplate.Template
 }
@@ -67,7 +63,6 @@ func NewService(tasks domaindelivery.Repository, deps ...DisplayDeps) *Service {
 		s.messages = deps[0].Messages
 		s.sources = deps[0].Sources
 		s.sinks = deps[0].Sinks
-		s.rules = deps[0].Rules
 		s.flows = deps[0].Flows
 		s.templates = deps[0].Templates
 	}
@@ -170,14 +165,6 @@ func (s *Service) enrich(ctx context.Context, task *domaindelivery.Task) (*View,
 			return nil, fmt.Errorf("查询投递目标渠道失败 sink_id=%d: %w", task.SinkID, err)
 		}
 		view.Sink = sink
-	}
-
-	if task.RuleID > 0 && s.rules != nil {
-		rule, err := s.rules.GetByID(ctx, task.RuleID)
-		if err != nil {
-			return nil, fmt.Errorf("查询投递规则失败 rule_id=%d: %w", task.RuleID, err)
-		}
-		view.Rule = rule
 	}
 
 	if task.OriginType == "flow" && task.OriginID > 0 && s.flows != nil {

@@ -8,7 +8,6 @@ import (
 
 	domainfilter "telegram-message-forward/internal/domain/filter"
 	domainflow "telegram-message-forward/internal/domain/flow"
-	domainrule "telegram-message-forward/internal/domain/rule"
 	"telegram-message-forward/internal/storage/model"
 )
 
@@ -86,10 +85,6 @@ func (r *FilterRepository) Delete(ctx context.Context, id int64) error {
 }
 
 func (r *FilterRepository) CountReferences(ctx context.Context, id int64) (int64, error) {
-	var ruleCount int64
-	if err := r.db.WithContext(ctx).Model(&model.RuleFilter{}).Where("filter_id = ?", id).Count(&ruleCount).Error; err != nil {
-		return 0, err
-	}
 	var flowCount int64
 	if err := r.db.WithContext(ctx).
 		Model(&model.FlowNode{}).
@@ -102,7 +97,7 @@ func (r *FilterRepository) CountReferences(ctx context.Context, id int64) (int64
 	if err := r.db.WithContext(ctx).Model(&model.AIDigestProfile{}).Where("filter_id = ?", id).Count(&profileCount).Error; err != nil {
 		return 0, err
 	}
-	return ruleCount + flowCount + profileCount, nil
+	return flowCount + profileCount, nil
 }
 
 func toFilterModel(f *domainfilter.Filter) (*model.Filter, error) {
@@ -121,7 +116,7 @@ func toFilterModel(f *domainfilter.Filter) (*model.Filter, error) {
 }
 
 func toFilterDomain(m *model.Filter) (*domainfilter.Filter, error) {
-	var conds []domainrule.ConditionConfig
+	var conds []domainflow.ConditionConfig
 	if err := unmarshalJSON(m.Conditions, &conds); err != nil {
 		return nil, err
 	}
@@ -135,9 +130,9 @@ func toFilterDomain(m *model.Filter) (*domainfilter.Filter, error) {
 	}, nil
 }
 
-// loadFilterConditions 一次查询取回多个过滤器的条件，供规则加载时按 filter_ids 覆盖内联条件。
-func loadFilterConditions(ctx context.Context, db *gorm.DB, ids []int64) (map[int64][]domainrule.ConditionConfig, error) {
-	out := map[int64][]domainrule.ConditionConfig{}
+// loadFilterConditions 一次查询取回多个过滤器的条件。
+func loadFilterConditions(ctx context.Context, db *gorm.DB, ids []int64) (map[int64][]domainflow.ConditionConfig, error) {
+	out := map[int64][]domainflow.ConditionConfig{}
 	if len(ids) == 0 {
 		return out, nil
 	}
@@ -146,7 +141,7 @@ func loadFilterConditions(ctx context.Context, db *gorm.DB, ids []int64) (map[in
 		return nil, err
 	}
 	for i := range ms {
-		var conds []domainrule.ConditionConfig
+		var conds []domainflow.ConditionConfig
 		if err := unmarshalJSON(ms[i].Conditions, &conds); err != nil {
 			return nil, err
 		}

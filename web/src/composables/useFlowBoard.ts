@@ -159,7 +159,7 @@ export function useFlowBoard({ sources, sinks, templates, ruleNodes, sinkTypeLab
   )
 
   const canvasEmptyHint = computed(() => {
-    if (keyword.value.trim()) return `没有匹配「${keyword.value.trim()}」的来源、规则或渠道`
+    if (keyword.value.trim()) return `没有匹配「${keyword.value.trim()}」的来源、Flow 或渠道`
     if (boardFilterActive.value) return '当前筛选条件下没有匹配的编排链路'
     return '当前没有已接入的编排链路'
   })

@@ -5,7 +5,7 @@ import (
 
 	appfilter "telegram-message-forward/internal/app/filter"
 	domainfilter "telegram-message-forward/internal/domain/filter"
-	domainrule "telegram-message-forward/internal/domain/rule"
+	domainflow "telegram-message-forward/internal/domain/flow"
 )
 
 // FilterDTO 是过滤器响应。
@@ -13,7 +13,7 @@ type FilterDTO struct {
 	ID          int64                        `json:"id"`
 	Name        string                       `json:"name"`
 	Description string                       `json:"description"`
-	Conditions  []domainrule.ConditionConfig `json:"conditions"`
+	Conditions  []domainflow.ConditionConfig `json:"conditions"`
 	CreatedAt   time.Time                    `json:"created_at"`
 	UpdatedAt   time.Time                    `json:"updated_at"`
 }
@@ -21,7 +21,7 @@ type FilterDTO struct {
 func NewFilterDTO(f *domainfilter.Filter) FilterDTO {
 	conds := f.Conditions
 	if conds == nil {
-		conds = []domainrule.ConditionConfig{}
+		conds = []domainflow.ConditionConfig{}
 	}
 	return FilterDTO{
 		ID:          f.ID,
@@ -37,7 +37,7 @@ func NewFilterDTO(f *domainfilter.Filter) FilterDTO {
 type FilterRequest struct {
 	Name        string                       `json:"name" binding:"required"`
 	Description string                       `json:"description"`
-	Conditions  []domainrule.ConditionConfig `json:"conditions"`
+	Conditions  []domainflow.ConditionConfig `json:"conditions"`
 }
 
 func (r FilterRequest) ToInput() appfilter.Input {

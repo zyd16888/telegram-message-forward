@@ -4,7 +4,6 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
-import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
 import ConfigFormRenderer from '@/components/ConfigFormRenderer.vue'
 import FlowCanvas from '@/components/flow/FlowCanvas.vue'
 import FlowToolbar from '@/components/flow/FlowToolbar.vue'
@@ -20,7 +19,7 @@ import type {
   SinkNodeData,
   SourceNodeData,
 } from '@/components/flow/types'
-import { filtersApi, flowsApi, rulesApi, sinksApi } from '@/api/client'
+import { filtersApi, flowsApi, linearFlowToFlowRequest, sinksApi } from '@/api/client'
 import { useFlowBoard } from '@/composables/useFlowBoard'
 import { useForwardingGraph } from '@/composables/useForwardingGraph'
 import type {
@@ -30,9 +29,8 @@ import type {
   FlowEdge,
   FlowNode,
   FlowNodeType,
+  LinearFlow,
   ProcessorConfig,
-  Rule,
-  RuleInitialDraft,
   RuleItemDescriptor,
   RuleMeta,
   Sink,
@@ -62,10 +60,6 @@ const selectedSourceToAdd = shallowRef<number | null>(null)
 const selectedFilterToAdd = shallowRef<number | null>(null)
 const selectedSinkToAdd = shallowRef<number | null>(null)
 const selectedProcessorToAdd = shallowRef<string>('append_source')
-
-const showRuleModal = shallowRef(false)
-const editingRule = shallowRef<Rule | null>(null)
-const initialDraft = shallowRef<RuleInitialDraft | null>(null)
 
 const conditionLabelByType = computed(() => new Map(ruleMeta.value.conditions.map((d) => [d.type, d.label])))
 const processorLabelByType = computed(() => new Map(ruleMeta.value.processors.map((d) => [d.type, d.label])))
@@ -131,8 +125,8 @@ const setupChecklist = computed(() => [
   { label: '配置 Telegram 账号', done: accounts.value.length > 0, route: 'accounts' },
   { label: '同步监听源', done: stats.value.totalSources > 0, route: 'sources' },
   { label: '创建目标渠道', done: stats.value.totalSinks > 0, route: 'sinks' },
-  { label: '启用转发规则', done: stats.value.enabledRules > 0, route: 'rules' },
-  { label: '规则关联来源', done: stats.value.linkedSources > 0, route: 'rules' },
+  { label: '启用 Flow', done: stats.value.enabledRules > 0, route: 'flow' },
+  { label: 'Flow 关联来源', done: stats.value.linkedSources > 0, route: 'flow' },
 ])
 const setupIssues = computed(() => setupChecklist.value.filter((item) => !item.done))
 const setupIncomplete = computed(() => setupIssues.value.length > 0)
@@ -146,22 +140,22 @@ const overviewCards = computed(() => [
     label: '链路状态',
     value: flowReady.value ? '可运行' : `${setupIssues.value.length} 项待配置`,
     tone: flowReady.value ? 'good' : 'warn',
-    hint: flowReady.value ? '来源、规则、渠道已形成闭环' : setupIssues.value.map((item) => item.label).join(' / '),
-    route: flowReady.value ? 'deliveries' : setupIssues.value[0]?.route ?? 'rules',
+    hint: flowReady.value ? '来源、Flow、渠道已形成闭环' : setupIssues.value.map((item) => item.label).join(' / '),
+    route: flowReady.value ? 'deliveries' : setupIssues.value[0]?.route ?? 'flow',
   },
   {
     label: '监听来源',
     value: `${stats.value.linkedSources}/${stats.value.totalSources}`,
     tone: stats.value.linkedSources > 0 ? 'good' : 'warn',
-    hint: '已关联规则 / 全部来源',
+    hint: '已关联 Flow / 全部来源',
     route: 'sources',
   },
   {
-    label: '转发规则',
+    label: 'Flow',
     value: `${stats.value.enabledRules}/${stats.value.totalRules}`,
     tone: stats.value.enabledRules > 0 ? 'good' : 'warn',
-    hint: '启用 / 全部规则',
-    route: 'rules',
+    hint: '启用 / 全部 Flow',
+    route: 'flow',
   },
   {
     label: '目标渠道',
@@ -174,8 +168,8 @@ const overviewCards = computed(() => [
     label: '异常项',
     value: String(stats.value.warningRules + stats.value.warningSources),
     tone: stats.value.warningRules + stats.value.warningSources > 0 ? 'danger' : 'good',
-    hint: '来源与规则诊断',
-    route: stats.value.warningRules > 0 ? 'rules' : 'sources',
+    hint: '来源与 Flow 诊断',
+    route: stats.value.warningRules > 0 ? 'flow' : 'sources',
   },
   {
     label: '模板模式',
@@ -326,7 +320,7 @@ const visibleFilterIds = computed(() => {
   return ids
 })
 
-// 匹配序号只对启用规则编号：引擎按 ListEnabledBySource 只评估启用规则，停用规则不占位。
+// 匹配序号只对启用 Flow 编号：引擎按 ListEnabledBySource 只评估启用 Flow，停用 Flow 不占位。
 const ruleOrderBySource = computed(() => {
   const orderMap = new Map<number, Map<number, number>>()
   for (const source of sources.value) {
@@ -338,7 +332,7 @@ const ruleOrderBySource = computed(() => {
   return orderMap
 })
 
-function ruleOrderLabel(rule: Rule): string {
+function ruleOrderLabel(rule: LinearFlow): string {
   if (!rule.enabled) return `P${rule.priority}`
   const selectedSourceId = selection.value?.kind === 'source' ? selection.value.id : null
   if (selectedSourceId && rule.source_ids.includes(selectedSourceId)) {
@@ -572,7 +566,7 @@ async function refresh() {
 
 async function loadMeta() {
   try {
-    ;[ruleMeta.value, sinkDescriptors.value, filters.value] = await Promise.all([rulesApi.meta(), sinksApi.meta(), filtersApi.list()])
+    ;[ruleMeta.value, sinkDescriptors.value, filters.value] = await Promise.all([flowsApi.meta(), sinksApi.meta(), filtersApi.list()])
   } catch {
     // 元信息加载失败时退回展示原始类型标识，不阻塞页面。
   }
@@ -884,8 +878,8 @@ async function deleteFlow() {
   }
 }
 
-// 规则更新是全量 PUT：必须回传含 filter_ids 在内的完整规则体，只覆盖 patch 字段。
-function ruleBodyOf(rule: Rule) {
+// 线性 Flow 更新是全量 PUT：必须回传含 filter_ids 在内的完整投影，只覆盖 patch 字段。
+function ruleBodyOf(rule: LinearFlow) {
   return {
     name: rule.name,
     enabled: rule.enabled,
@@ -900,23 +894,23 @@ function ruleBodyOf(rule: Rule) {
 }
 
 async function saveRule(
-  rule: Rule,
+  rule: LinearFlow,
   patch: Partial<{ enabled: boolean; filter_ids: number[]; source_ids: number[]; targets: RuleTarget[] }>,
   okMessage: string,
 ) {
   try {
-    await rulesApi.update(rule.id, { ...ruleBodyOf(rule), ...patch })
+    await flowsApi.update(rule.id, linearFlowToFlowRequest({ ...ruleBodyOf(rule), ...patch }))
     message.success(okMessage)
     await refresh()
   } catch (e) {
-    message.error('更新规则失败：' + errText(e))
+    message.error('更新 Flow 失败：' + errText(e))
   }
 }
 
 async function toggleRule(ruleId: number, value: boolean) {
   const rule = rules.value.find((r) => r.id === ruleId)
   if (!rule) return
-  await saveRule(rule, { enabled: value }, value ? '已启用规则' : '已停用规则')
+  await saveRule(rule, { enabled: value }, value ? '已启用 Flow' : '已停用 Flow')
 }
 
 async function onCanvasConnect({ from, to }: CanvasConnection) {
@@ -928,7 +922,7 @@ async function onCanvasConnect({ from, to }: CanvasConnection) {
     const rule = rules.value.find((r) => r.id === to.id)
     if (!rule) return
     if (rule.source_ids.includes(from.id)) {
-      message.info('该来源已接入此规则')
+      message.info('该来源已接入此 Flow')
       return
     }
     await saveRule(rule, { source_ids: [...rule.source_ids, from.id] }, `已接入来源「${sourceName(from.id)}」`)
@@ -938,7 +932,7 @@ async function onCanvasConnect({ from, to }: CanvasConnection) {
     const rule = rules.value.find((r) => r.id === to.id)
     if (!rule) return
     if (rule.filter_ids.includes(from.id)) {
-      message.info('该过滤器已接入此规则')
+      message.info('该过滤器已接入此 Flow')
       return
     }
     const attach = () => saveRule(rule, { filter_ids: [...rule.filter_ids, from.id] }, `已接入过滤器「${filterName(from.id)}」`)
@@ -946,7 +940,7 @@ async function onCanvasConnect({ from, to }: CanvasConnection) {
     if (rule.conditions.length && !rule.filter_ids.length) {
       dialog.warning({
         title: '接入共享过滤器',
-        content: `规则「${rule.name}」当前使用 ${rule.conditions.length} 个专用条件。接入共享过滤器后将以过滤器为准，专用条件不再生效。`,
+        content: `Flow「${rule.name}」当前使用 ${rule.conditions.length} 个专用条件。接入共享过滤器后将以过滤器为准，专用条件不再生效。`,
         positiveText: '接入并覆盖',
         negativeText: '取消',
         onPositiveClick: () => attach(),
@@ -960,23 +954,17 @@ async function onCanvasConnect({ from, to }: CanvasConnection) {
     const rule = rules.value.find((r) => r.id === from.id)
     if (!rule) return
     if (rule.targets.some((t) => t.sink_id === to.id)) {
-      message.info('该规则已投递到此渠道')
+      message.info('该 Flow 已投递到此渠道')
       return
     }
     await saveRule(rule, { targets: [...rule.targets, { sink_id: to.id, template_id: undefined }] }, `已添加目标「${sinkName(to.id)}」`)
     return
   }
   if (from.kind === 'source' && to.kind === 'sink') {
-    editingRule.value = null
-    initialDraft.value = {
-      name: `转发：${sourceName(from.id)} -> ${sinkName(to.id)}`,
-      source_ids: [from.id],
-      targets: [{ sink_id: to.id, template_id: undefined }],
-    }
-    showRuleModal.value = true
+    await newFlowFromSourceToSink(from.id, to.id)
     return
   }
-  message.warning('只支持 来源→规则、过滤器→规则、规则→渠道、来源→渠道 四种连线')
+  message.warning('只支持 来源→Flow、过滤器→Flow、Flow→渠道、来源→渠道 四种连线')
 }
 
 async function detachSelectedEdge() {
@@ -994,30 +982,31 @@ async function detachSelectedEdge() {
   clearSelectedEdge()
 }
 
-function openCreateRule() {
-  editingRule.value = null
-  initialDraft.value = buildDraftFromSelection()
-  showRuleModal.value = true
-}
-
-function openEditRule(ruleId: number) {
-  const rule = rules.value.find((r) => r.id === ruleId)
-  if (!rule) return
-  editingRule.value = rule
-  initialDraft.value = null
-  showRuleModal.value = true
-}
-
-function buildDraftFromSelection(): RuleInitialDraft | null {
+async function openCreateRule() {
+  await newFlow()
   const sel = selection.value
-  if (!sel) return null
-  if (sel.kind === 'source') {
-    return { name: `转发：${sourceName(sel.id)}`, source_ids: [sel.id], targets: [] }
-  }
-  if (sel.kind === 'sink') {
-    return { name: `转发 -> ${sinkName(sel.id)}`, source_ids: [], targets: [{ sink_id: sel.id, template_id: undefined }] }
-  }
-  return null
+  if (sel?.kind === 'source') selectedSourceToAdd.value = sel.id
+  if (sel?.kind === 'sink') selectedSinkToAdd.value = sel.id
+}
+
+async function openEditRule(ruleId: number) {
+  await selectFlow(ruleId)
+}
+
+async function newFlowFromSourceToSink(sourceID: number, sinkID: number) {
+  if (!(await confirmDiscardDraft())) return
+  activeFlowId.value = null
+  flowDraft.value = emptyFlowDraft()
+  flowDraft.value.name = `转发：${sourceName(sourceID)} -> ${sinkName(sinkID)}`
+  flowDraft.value.nodes = [
+    { id: -1, type: 'source', ref_id: sourceID, config: {}, pos_x: 0, pos_y: 0 },
+    { id: -2, type: 'target', ref_id: sinkID, config: {}, pos_x: 420, pos_y: 0 },
+  ]
+  flowDraft.value.edges = [{ id: 0, from_node_id: -1, to_node_id: -2 }]
+  flowError.value = ''
+  canvasMode.value = 'edit'
+  clearPaneSelection()
+  rememberFlowDraftBaseline()
 }
 
 function goToDeliveries() {
@@ -1025,7 +1014,6 @@ function goToDeliveries() {
   if (!sel || sel.kind === 'filter') return
   const query: Record<string, string> = {}
   if (sel.kind === 'source') query.source_id = String(sel.id)
-  if (sel.kind === 'rule') query.rule_id = String(sel.id)
   if (sel.kind === 'sink') query.sink_id = String(sel.id)
   router.push({ name: 'deliveries', query })
 }
@@ -1035,7 +1023,7 @@ function goToSelectedConfig() {
   if (!sel) return
   if (sel.kind === 'source') router.push({ name: 'sources', query: { source_id: String(sel.id) } })
   if (sel.kind === 'filter') router.push({ name: 'filters', query: { filter_id: String(sel.id) } })
-  if (sel.kind === 'rule') router.push({ name: 'rules', query: { rule_id: String(sel.id) } })
+  if (sel.kind === 'rule') void openEditRule(sel.id)
   if (sel.kind === 'sink') router.push({ name: 'sinks', query: { sink_id: String(sel.id) } })
 }
 
@@ -1066,10 +1054,10 @@ onMounted(async () => {
   // 其它页面「查看编排」跳转过来时，直接选中对应节点进入联动高亮。
   const sourceId = queryId('source_id')
   const filterId = queryId('filter_id')
-  const ruleId = queryId('rule_id')
+  const flowId = queryId('flow_id')
   const sinkId = queryId('sink_id')
   const templateId = queryId('template_id')
-  if (ruleId) selection.value = { kind: 'rule', id: ruleId }
+  if (flowId) selection.value = { kind: 'rule', id: flowId }
   else if (sourceId) selection.value = { kind: 'source', id: sourceId }
   else if (filterId) {
     selection.value = { kind: 'filter', id: filterId }
@@ -1077,6 +1065,10 @@ onMounted(async () => {
   }
   else if (sinkId) selection.value = { kind: 'sink', id: sinkId }
   if (templateId) templateFilterId.value = templateId
+
+  if (route.query.create === '1' && (sourceId || sinkId)) {
+    await openCreateRule()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -1087,14 +1079,14 @@ onBeforeUnmount(() => {
 <template>
   <NSpace vertical size="large">
     <PageHeader
-      title="转发编排"
-      desc="画布上直接拖线：来源→规则、规则→渠道建立关联，来源→渠道快速新建规则；点连线可解除关联"
+    title="转发编排"
+    desc="画布上直接拖线：来源→Flow、Flow→渠道建立关联，来源→渠道快速新建 Flow；点连线可解除关联"
       icon="flow"
     >
       <template #actions>
         <NButton type="primary" @click="openCreateRule">
           <template #icon><ClayIcon name="plus" :size="16" /></template>
-          {{ selection && selection.kind !== 'rule' ? '沿选中项建规则' : '新建规则' }}
+          {{ selection && selection.kind !== 'rule' ? '沿选中项建 Flow' : '新建 Flow' }}
         </NButton>
         <NButton secondary :loading="loading" @click="refresh">
           <template #icon><ClayIcon name="refresh" :size="16" /></template>
@@ -1233,12 +1225,12 @@ onBeforeUnmount(() => {
             <NSpace>
               <NButton v-if="boardFilterActive" secondary @click="clearBoardFilters">清除筛选</NButton>
               <NButton v-else secondary @click="showUnusedNodes = true">显示未接入资源</NButton>
-              <NButton type="primary" @click="openCreateRule">新建规则</NButton>
+              <NButton type="primary" @click="openCreateRule">新建 Flow</NButton>
             </NSpace>
           </template>
         </NEmpty>
 
-        <NEmpty v-else-if="canvasMode === 'overview'" description="还没有可编排的来源、规则或渠道">
+        <NEmpty v-else-if="canvasMode === 'overview'" description="还没有可编排的来源、Flow 或渠道">
           <template #extra>
             <NSpace>
               <NButton @click="go('accounts')">去配置账号</NButton>
@@ -1396,19 +1388,6 @@ onBeforeUnmount(() => {
         </section>
       </aside>
     </div>
-
-    <RuleEditorModal
-      v-model:show="showRuleModal"
-      :rule="editingRule"
-      :sources="sources"
-      :sinks="sinks"
-      :templates="templates"
-      :filters="filters"
-      :condition-descriptors="ruleMeta.conditions"
-      :processor-descriptors="ruleMeta.processors"
-      :initial-draft="initialDraft"
-      @saved="refresh"
-    />
   </NSpace>
 </template>
 

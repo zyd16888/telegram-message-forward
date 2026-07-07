@@ -203,20 +203,7 @@ export interface RuleTarget {
   template_id?: number
 }
 
-export interface RulePreviewResult {
-  matched: boolean
-  processed_text: string
-  media?: Array<{
-    type: string
-    file_name?: string
-    mime_type?: string
-    size?: number
-    caption?: string
-  }>
-  targets: RuleTarget[]
-}
-
-export interface Rule {
+export interface LinearFlow {
   id: number
   name: string
   enabled: boolean
@@ -280,16 +267,9 @@ export interface Filter {
 
 export type FilterRequest = Pick<Filter, 'name' | 'description' | 'conditions'>
 
-export interface RuleInitialDraft {
-  name?: string
-  source_ids?: number[]
-  targets?: RuleTarget[]
-}
-
 export interface Delivery {
   id: number
   message_id: number
-  rule_id: number
   origin_type?: string
   origin_id?: number
   origin_node_id?: number
@@ -309,7 +289,6 @@ export interface Delivery {
   source_peer_type?: string
   sink_name?: string
   sink_type?: string
-  rule_name?: string
   flow_name?: string
   template_name?: string
   attempts?: DeliveryAttempt[]

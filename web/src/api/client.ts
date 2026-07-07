@@ -11,15 +11,14 @@ import type {
   FilterRequest,
   LoginFlow,
   Me,
-  Rule,
   ConditionConfig,
   ProcessorConfig,
   Flow,
   FlowNode,
   FlowRequest,
+  LinearFlow,
   RuleTarget,
   RuleMeta,
-  RulePreviewResult,
   SharedProxy,
   Sink,
   SinkDescriptor,
@@ -282,7 +281,7 @@ export const templatesApi = {
   remove: (id: number) => http.delete(`/templates/${id}`),
 }
 
-type RuleWriteBody = {
+export type LinearFlowWriteBody = {
   name?: string
   enabled?: boolean
   priority?: number
@@ -294,7 +293,7 @@ type RuleWriteBody = {
   targets?: RuleTarget[]
 }
 
-function flowToLinearRule(flow: Flow): Rule {
+export function flowToLinearFlow(flow: Flow): LinearFlow {
   const byType = (type: FlowNode['type']) =>
     flow.nodes
       .filter((node) => node.type === type)
@@ -321,7 +320,7 @@ function flowToLinearRule(flow: Flow): Rule {
   }
 }
 
-function linearRuleToFlowRequest(body: RuleWriteBody): FlowRequest {
+export function linearFlowToFlowRequest(body: LinearFlowWriteBody): FlowRequest {
   const nodes: FlowNode[] = []
   const edges: FlowRequest['edges'] = []
   let nextID = -1
@@ -376,25 +375,6 @@ function linearRuleToFlowRequest(body: RuleWriteBody): FlowRequest {
     nodes,
     edges,
   }
-}
-
-// --- Rules ---
-export const rulesApi = {
-  list: () => http.get<ApiList<Flow>>('/flows').then((r) => r.data.data.map(flowToLinearRule)),
-  meta: () => http.get<ApiItem<RuleMeta>>('/flows/meta').then((r) => r.data.data),
-  get: (id: number) => http.get<ApiItem<Flow>>(`/flows/${id}`).then((r) => flowToLinearRule(r.data.data)),
-  create: (body: Record<string, unknown>) =>
-    http.post<ApiItem<Flow>>('/flows', linearRuleToFlowRequest(body as RuleWriteBody)).then((r) => flowToLinearRule(r.data.data)),
-  update: (id: number, body: Record<string, unknown>) =>
-    http.put<ApiItem<Flow>>(`/flows/${id}`, linearRuleToFlowRequest(body as RuleWriteBody)).then((r) => flowToLinearRule(r.data.data)),
-  preview: (body: Record<string, unknown>) =>
-    http
-      .post<ApiItem<RulePreviewResult>>('/flows/preview', {
-        flow: linearRuleToFlowRequest((body as { rule?: RuleWriteBody }).rule ?? {}),
-        message: (body as { message?: Record<string, unknown> }).message ?? {},
-      })
-      .then((r) => r.data.data),
-  remove: (id: number) => http.delete(`/flows/${id}`),
 }
 
 // --- Flows ---

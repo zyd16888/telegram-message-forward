@@ -11,8 +11,6 @@ import (
 	domainfilter "telegram-message-forward/internal/domain/filter"
 	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
-	domainrule "telegram-message-forward/internal/domain/rule"
-	"telegram-message-forward/internal/ruleengine"
 	"telegram-message-forward/internal/ruleengine/condition"
 	"telegram-message-forward/internal/ruleengine/processor"
 )
@@ -67,7 +65,7 @@ type Plan struct {
 	sourceIDs map[int64][]int64
 }
 
-func (e *Engine) Evaluate(ctx context.Context, msg *domainmessage.NormalizedMessage, flows []*domainflow.Flow) ([]ruleengine.Match, error) {
+func (e *Engine) Evaluate(ctx context.Context, msg *domainmessage.NormalizedMessage, flows []*domainflow.Flow) ([]domainflow.Match, error) {
 	if msg == nil {
 		return nil, nil
 	}
@@ -79,7 +77,7 @@ func (e *Engine) Evaluate(ctx context.Context, msg *domainmessage.NormalizedMess
 		return ordered[i].Priority > ordered[j].Priority
 	})
 
-	var matches []ruleengine.Match
+	var matches []domainflow.Match
 	for _, f := range ordered {
 		if f == nil || !f.Enabled {
 			continue
@@ -303,7 +301,7 @@ type evalState struct {
 	msg    *domainmessage.NormalizedMessage
 }
 
-func (e *Engine) evaluatePlan(ctx context.Context, msg *domainmessage.NormalizedMessage, p *Plan) ([]ruleengine.Match, error) {
+func (e *Engine) evaluatePlan(ctx context.Context, msg *domainmessage.NormalizedMessage, p *Plan) ([]domainflow.Match, error) {
 	starts := p.sourceIDs[msg.SourceID]
 	if len(starts) == 0 {
 		return nil, nil
@@ -313,7 +311,7 @@ func (e *Engine) evaluatePlan(ctx context.Context, msg *domainmessage.Normalized
 		queue = append(queue, evalState{nodeID: id, msg: cloneMessage(msg)})
 	}
 	seenTargets := map[int64]bool{}
-	var matches []ruleengine.Match
+	var matches []domainflow.Match
 	for len(queue) > 0 {
 		state := queue[0]
 		queue = queue[1:]
@@ -337,7 +335,7 @@ func (e *Engine) evaluatePlan(ctx context.Context, msg *domainmessage.Normalized
 	return matches, nil
 }
 
-func (e *Engine) evalNode(ctx context.Context, f *domainflow.Flow, n domainflow.Node, msg *domainmessage.NormalizedMessage, seenTargets map[int64]bool) (*domainmessage.NormalizedMessage, *ruleengine.Match, error) {
+func (e *Engine) evalNode(ctx context.Context, f *domainflow.Flow, n domainflow.Node, msg *domainmessage.NormalizedMessage, seenTargets map[int64]bool) (*domainmessage.NormalizedMessage, *domainflow.Match, error) {
 	switch n.Type {
 	case domainflow.NodeTypeSource:
 		return msg, nil, nil
@@ -360,15 +358,10 @@ func (e *Engine) evalNode(ctx context.Context, f *domainflow.Flow, n domainflow.
 		if n.RefID == nil {
 			return nil, nil, fmt.Errorf("target 节点缺少 ref_id: node=%d", n.ID)
 		}
-		match := ruleengine.Match{
-			Rule: &domainrule.Rule{
-				ID:          f.ID,
-				Name:        f.Name,
-				Enabled:     f.Enabled,
-				Priority:    f.Priority,
-				StopOnMatch: f.StopOnMatch,
-			},
-			Targets:      []domainrule.Target{{SinkID: *n.RefID, TemplateID: n.TemplateID}},
+		match := domainflow.Match{
+			FlowID:       f.ID,
+			FlowName:     f.Name,
+			Targets:      []domainflow.Target{{SinkID: *n.RefID, TemplateID: n.TemplateID}},
 			Message:      cloneMessage(msg),
 			OriginType:   "flow",
 			OriginID:     f.ID,
@@ -381,7 +374,7 @@ func (e *Engine) evalNode(ctx context.Context, f *domainflow.Flow, n domainflow.
 }
 
 func (e *Engine) evalFilter(ctx context.Context, msg *domainmessage.NormalizedMessage, n domainflow.Node) (bool, error) {
-	conds := append([]domainrule.ConditionConfig(nil), n.Config.Conditions...)
+	conds := append([]domainflow.ConditionConfig(nil), n.Config.Conditions...)
 	for _, filterID := range n.Config.FilterIDs {
 		if e.filters == nil {
 			return false, fmt.Errorf("filter 节点引用共享过滤器但未配置 resolver: node=%d", n.ID)
@@ -405,7 +398,7 @@ func (e *Engine) evalFilter(ctx context.Context, msg *domainmessage.NormalizedMe
 	return true, nil
 }
 
-func runProcessors(ctx context.Context, msg *domainmessage.NormalizedMessage, configs []domainrule.ProcessorConfig) error {
+func runProcessors(ctx context.Context, msg *domainmessage.NormalizedMessage, configs []domainflow.ProcessorConfig) error {
 	for _, cfg := range configs {
 		p, err := processor.Get(cfg.Type)
 		if err != nil {

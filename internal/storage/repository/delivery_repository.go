@@ -31,37 +31,13 @@ var _ domaindelivery.Repository = (*DeliveryRepository)(nil)
 // Create 插入投递任务，按来源类型的唯一键幂等。
 func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task) error {
 	if t.OriginType == "" {
-		t.OriginType = "rule"
+		t.OriginType = "flow"
 	}
 	m, err := toDeliveryModel(t)
 	if err != nil {
 		return err
 	}
 	switch t.OriginType {
-	case "rule":
-		res := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "message_id"}, {Name: "rule_id"}, {Name: "sink_id"}},
-			TargetWhere: clause.Where{Exprs: []clause.Expression{
-				clause.Expr{SQL: "origin_type = 'rule'"},
-			}},
-			DoNothing: true,
-		}).Create(m)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected > 0 {
-			t.ID = m.ID
-			return nil
-		}
-		var existing model.DeliveryTask
-		if qerr := r.db.WithContext(ctx).
-			Select("id").
-			Where("message_id = ? AND rule_id = ? AND sink_id = ? AND origin_type = ?", t.MessageID, t.RuleID, t.SinkID, "rule").
-			First(&existing).Error; qerr != nil {
-			return qerr
-		}
-		t.ID = existing.ID
-		return nil
 	case "flow":
 		res := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "message_id"}, {Name: "origin_type"}, {Name: "origin_id"}, {Name: "origin_node_id"}},
@@ -354,9 +330,6 @@ func (r *DeliveryRepository) deliveryStatusQuery(ctx context.Context, status dom
 
 func (r *DeliveryRepository) deliveryQuery(ctx context.Context, q domaindelivery.Query) *gorm.DB {
 	db := r.deliveryStatusQuery(ctx, q.Status)
-	if q.RuleID > 0 {
-		db = db.Where("delivery_tasks.rule_id = ?", q.RuleID)
-	}
 	if q.SinkID > 0 {
 		db = db.Where("delivery_tasks.sink_id = ?", q.SinkID)
 	}
@@ -379,7 +352,7 @@ func toDeliveryModel(t *domaindelivery.Task) (*model.DeliveryTask, error) {
 	ruleID := nullablePositive(t.RuleID)
 	originType := t.OriginType
 	if originType == "" {
-		originType = "rule"
+		originType = "flow"
 	}
 	originID := nullablePositive(t.OriginID)
 	originNodeID := nullablePositive(t.OriginNodeID)

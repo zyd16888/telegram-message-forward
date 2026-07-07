@@ -46,7 +46,7 @@ type Task struct {
 	LockedAt     *time.Time
 	LockedBy     string
 	LastError    string
-	// MessageSnapshot 是规则处理器执行后的消息快照；为空时按 MessageID 读取原始消息。
+	// MessageSnapshot 是 Flow/AI 产出的消息快照；为空时按 MessageID 读取原始消息。
 	MessageSnapshot *domainmessage.NormalizedMessage
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -69,7 +69,6 @@ type Attempt struct {
 // Query 是投递列表过滤条件。0 值表示不过滤。
 type Query struct {
 	Status   Status
-	RuleID   int64
 	SourceID int64
 	SinkID   int64
 	Since    *time.Time
@@ -79,7 +78,7 @@ type Query struct {
 
 // Repository 是投递任务仓储接口。
 type Repository interface {
-	// Create 需按 (message_id, rule_id, sink_id) 幂等。
+	// Create 需按来源类型幂等。
 	Create(ctx context.Context, t *Task) error
 	// Claim 使用 FOR UPDATE SKIP LOCKED 领取一批可执行任务，置为 processing。
 	Claim(ctx context.Context, workerID string, limit int) ([]*Task, error)

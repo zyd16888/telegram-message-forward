@@ -6,8 +6,8 @@ import (
 
 	appaidigest "telegram-message-forward/internal/app/aidigest"
 	domainaidigest "telegram-message-forward/internal/domain/aidigest"
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
-	domainrule "telegram-message-forward/internal/domain/rule"
 )
 
 type AIProviderDTO struct {
@@ -120,7 +120,7 @@ type AIDigestProfileDTO struct {
 	Enabled          bool                          `json:"enabled"`
 	SourceIDs        []int64                       `json:"source_ids"`
 	FilterID         int64                         `json:"filter_id"`
-	Conditions       []domainrule.ConditionConfig  `json:"conditions"`
+	Conditions       []domainflow.ConditionConfig  `json:"conditions"`
 	Schedule         domainaidigest.ScheduleConfig `json:"schedule"`
 	Window           domainaidigest.WindowConfig   `json:"window"`
 	Dedupe           domainaidigest.DedupeConfig   `json:"dedupe"`
@@ -141,7 +141,7 @@ type AIDigestProfileRequest struct {
 	Enabled          bool                          `json:"enabled"`
 	SourceIDs        []int64                       `json:"source_ids"`
 	FilterID         int64                         `json:"filter_id"`
-	Conditions       []domainrule.ConditionConfig  `json:"conditions"`
+	Conditions       []domainflow.ConditionConfig  `json:"conditions"`
 	Schedule         domainaidigest.ScheduleConfig `json:"schedule"`
 	Window           domainaidigest.WindowConfig   `json:"window"`
 	Dedupe           domainaidigest.DedupeConfig   `json:"dedupe"`

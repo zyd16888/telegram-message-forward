@@ -2,11 +2,11 @@
 import { computed } from 'vue'
 import type { FlowBoardEdgeRef, FlowBoardSelection } from '@/composables/useFlowBoard'
 import type { FlowRuleGraphNode } from '@/composables/useForwardingGraph'
-import type { Filter, Rule, Sink, Source } from '@/types'
+import type { Filter, LinearFlow, Sink, Source } from '@/types'
 
 interface MatchingRule {
   order: number
-  rule: Rule
+  rule: LinearFlow
   active: boolean
 }
 
@@ -129,16 +129,16 @@ function filterName(id: number): string {
   return props.filters.find((filter) => filter.id === id)?.name ?? `过滤器 #${id}`
 }
 
-function conditionNames(rule: Rule): string[] {
+function conditionNames(rule: LinearFlow): string[] {
   if (rule.filter_ids.length) return rule.filter_ids.map((id) => filterName(id))
   return rule.conditions.map((condition) => props.conditionLabel(condition.type))
 }
 
-function processorNames(rule: Rule): string[] {
+function processorNames(rule: LinearFlow): string[] {
   return rule.processors.map((processor) => props.processorLabel(processor.type))
 }
 
-// 匹配序号只对启用规则编号：引擎只评估启用规则，停用规则列出但不占位（order 为 0）。
+// 匹配序号只对启用 Flow 编号：引擎只评估启用 Flow，停用 Flow 列出但不占位（order 为 0）。
 function matchingRulesForSource(sourceId: number, activeRuleId?: number): MatchingRule[] {
   let order = 0
   return props.ruleNodes
@@ -165,7 +165,7 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
               : selection.kind === 'filter'
                 ? '过滤器'
                 : selection.kind === 'rule'
-                  ? '转发规则'
+                  ? 'Flow'
                   : '目标渠道'
           }}
         </span>
@@ -232,7 +232,7 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
       </section>
 
       <section v-if="selectedSource" class="section">
-        <div class="section-title">经过它的规则路径</div>
+        <div class="section-title">经过它的 Flow 路径</div>
         <div v-if="selectedSourceRules.length" class="path-list">
           <div v-for="item in selectedSourceRules" :key="item.rule.id" class="path-card">
             <div class="path-title">
@@ -249,11 +249,11 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
             </div>
           </div>
         </div>
-        <p v-else class="empty-text">这个来源还没有接入任何规则。</p>
+        <p v-else class="empty-text">这个来源还没有接入任何 Flow。</p>
       </section>
 
       <section v-if="selectedSink" class="section">
-        <div class="section-title">经过它的规则路径</div>
+        <div class="section-title">经过它的 Flow 路径</div>
         <div v-if="selectedSinkRules.length" class="path-list">
           <div v-for="rule in selectedSinkRules" :key="rule.id" class="path-card">
             <div class="path-title">
@@ -268,11 +268,11 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
             </div>
           </div>
         </div>
-        <p v-else class="empty-text">这个渠道还没有被任何规则使用。</p>
+        <p v-else class="empty-text">这个渠道还没有被任何 Flow 使用。</p>
       </section>
 
       <section v-if="selectedFilter" class="section">
-        <div class="section-title">引用它的规则路径</div>
+        <div class="section-title">引用它的 Flow 路径</div>
         <div v-if="selectedFilterRules.length" class="path-list">
           <div v-for="rule in selectedFilterRules" :key="rule.id" class="path-card">
             <div class="path-title">
@@ -287,7 +287,7 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
             </div>
           </div>
         </div>
-        <p v-else class="empty-text">这个过滤器还没有被任何规则引用。</p>
+        <p v-else class="empty-text">这个过滤器还没有被任何 Flow 引用。</p>
       </section>
 
       <section v-if="selectedSource" class="section compact">
@@ -299,7 +299,7 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
       <section v-if="selectedFilter" class="section compact">
         <div class="section-title">状态</div>
         <div class="kv"><span>条件数</span><strong>{{ selectedFilter.conditions.length }}</strong></div>
-        <div class="kv"><span>引用规则</span><strong>{{ selectedFilterRules.length }}</strong></div>
+        <div class="kv"><span>引用 Flow</span><strong>{{ selectedFilterRules.length }}</strong></div>
       </section>
 
       <section v-if="selectedSink" class="section compact">
@@ -309,8 +309,8 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
       </section>
 
       <div class="actions">
-        <NButton v-if="selection.kind === 'source' || selection.kind === 'sink'" size="small" @click="emit('create-rule')">沿此建规则</NButton>
-        <NButton v-if="selection.kind === 'rule'" size="small" type="primary" @click="emit('edit-rule', selection.id)">编辑规则</NButton>
+        <NButton v-if="selection.kind === 'source' || selection.kind === 'sink'" size="small" @click="emit('create-rule')">沿此建 Flow</NButton>
+        <NButton v-if="selection.kind === 'rule'" size="small" type="primary" @click="emit('edit-rule', selection.id)">编辑 Flow</NButton>
         <NButton size="small" @click="emit('manage-config')">管理配置</NButton>
         <NButton v-if="selection.kind !== 'filter'" size="small" @click="emit('view-deliveries')">投递记录</NButton>
         <NButton size="small" text type="primary" @click="emit('clear-selection')">清除选中</NButton>
@@ -351,7 +351,7 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
         <div class="section-title">过滤器绑定</div>
         <div class="kv"><span>过滤器</span><strong>{{ selectedEdgeFilter.name }}</strong></div>
         <div class="kv"><span>条件数</span><strong>{{ selectedEdgeFilter.conditions.length }}</strong></div>
-        <div class="kv"><span>规则</span><strong>{{ selectedEdgeRuleNode.rule.name }}</strong></div>
+        <div class="kv"><span>Flow</span><strong>{{ selectedEdgeRuleNode.rule.name }}</strong></div>
       </section>
 
       <section v-if="selectedEdge.kind === 'rule-sink' && selectedEdgeSink && selectedEdgeRuleNode" class="section">
@@ -378,7 +378,7 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
         <span class="eyebrow">路径检查器</span>
         <strong class="title">选择节点或连线</strong>
       </header>
-      <p class="empty-text">点选来源、规则、渠道或连线后，这里会显示完整路径、匹配顺序和可执行操作。</p>
+      <p class="empty-text">点选来源、Flow、渠道或连线后，这里会显示完整路径、匹配顺序和可执行操作。</p>
     </template>
   </aside>
 </template>

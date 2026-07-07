@@ -6,10 +6,9 @@ import (
 	"time"
 
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
-	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
-	"telegram-message-forward/internal/ruleengine"
 )
 
 type notifyTaskRepo struct {
@@ -47,10 +46,12 @@ func TestQueueNotifiesAfterEnqueue(t *testing.T) {
 	queue := NewQueue(repo, 3, notifier)
 
 	msg := &domainmessage.NormalizedMessage{ID: 10}
-	matches := []ruleengine.Match{{
-		Rule:    &domainrule.Rule{ID: 20},
-		Targets: []domainrule.Target{{SinkID: 30}},
-		Message: msg,
+	matches := []domainflow.Match{{
+		FlowID:       20,
+		Targets:      []domainflow.Target{{SinkID: 30}},
+		Message:      msg,
+		OriginID:     20,
+		OriginNodeID: 40,
 	}}
 	if err := queue.Enqueue(context.Background(), msg, matches); err != nil {
 		t.Fatal(err)
@@ -71,9 +72,9 @@ func TestQueueFlowMatchLeavesRuleIDEmpty(t *testing.T) {
 	queue := NewQueue(repo, 3)
 
 	msg := &domainmessage.NormalizedMessage{ID: 10}
-	matches := []ruleengine.Match{{
-		Rule:         &domainrule.Rule{ID: 7}, // flowengine 伪造的 Rule，ID 实为 flow.ID
-		Targets:      []domainrule.Target{{SinkID: 30}},
+	matches := []domainflow.Match{{
+		FlowID:       7,
+		Targets:      []domainflow.Target{{SinkID: 30}},
 		Message:      msg,
 		OriginType:   "flow",
 		OriginID:     7,
@@ -100,10 +101,12 @@ func TestQueueSkipsDisabledSink(t *testing.T) {
 	queue := NewQueue(repo, 3, notifier).UseSinks(fakeSinkRepo{sink: &domainsink.Sink{ID: 30, Enabled: false}})
 
 	msg := &domainmessage.NormalizedMessage{ID: 10}
-	matches := []ruleengine.Match{{
-		Rule:    &domainrule.Rule{ID: 20},
-		Targets: []domainrule.Target{{SinkID: 30}},
-		Message: msg,
+	matches := []domainflow.Match{{
+		FlowID:       20,
+		Targets:      []domainflow.Target{{SinkID: 30}},
+		Message:      msg,
+		OriginID:     20,
+		OriginNodeID: 40,
 	}}
 	if err := queue.Enqueue(context.Background(), msg, matches); err != nil {
 		t.Fatal(err)

@@ -14,7 +14,6 @@ import (
 	domainflow "telegram-message-forward/internal/domain/flow"
 	domainloginflow "telegram-message-forward/internal/domain/loginflow"
 	domainmessage "telegram-message-forward/internal/domain/message"
-	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domainsource "telegram-message-forward/internal/domain/source"
 	domainconfig "telegram-message-forward/internal/domain/telegramconfig"
@@ -411,81 +410,6 @@ type TemplatePreviewDTO struct {
 	Text   string `json:"text"`
 }
 
-// --- Rule ---
-
-// RuleTargetDTO 是规则目标。
-type RuleTargetDTO struct {
-	SinkID     int64  `json:"sink_id"`
-	TemplateID *int64 `json:"template_id,omitempty"`
-}
-
-// RuleDTO 是规则响应。
-type RuleDTO struct {
-	ID          int64                        `json:"id"`
-	Name        string                       `json:"name"`
-	Enabled     bool                         `json:"enabled"`
-	Priority    int                          `json:"priority"`
-	FilterIDs   []int64                      `json:"filter_ids"`
-	Conditions  []domainrule.ConditionConfig `json:"conditions"`
-	Processors  []domainrule.ProcessorConfig `json:"processors"`
-	StopOnMatch bool                         `json:"stop_on_match"`
-	SourceIDs   []int64                      `json:"source_ids"`
-	Targets     []RuleTargetDTO              `json:"targets"`
-	CreatedAt   time.Time                    `json:"created_at"`
-	UpdatedAt   time.Time                    `json:"updated_at"`
-}
-
-// NewRuleDTO 从 domain 规则构造 DTO。
-func NewRuleDTO(r *domainrule.Rule) RuleDTO {
-	targets := make([]RuleTargetDTO, 0, len(r.Targets))
-	for _, t := range r.Targets {
-		targets = append(targets, RuleTargetDTO{SinkID: t.SinkID, TemplateID: t.TemplateID})
-	}
-	conds := r.Conditions
-	if conds == nil {
-		conds = []domainrule.ConditionConfig{}
-	}
-	procs := r.Processors
-	if procs == nil {
-		procs = []domainrule.ProcessorConfig{}
-	}
-	srcIDs := r.SourceIDs
-	if srcIDs == nil {
-		srcIDs = []int64{}
-	}
-	filterIDs := r.FilterIDs
-	if filterIDs == nil {
-		filterIDs = []int64{}
-	}
-	return RuleDTO{
-		ID:          r.ID,
-		Name:        r.Name,
-		Enabled:     r.Enabled,
-		Priority:    r.Priority,
-		FilterIDs:   filterIDs,
-		Conditions:  conds,
-		Processors:  procs,
-		StopOnMatch: r.StopOnMatch,
-		SourceIDs:   srcIDs,
-		Targets:     targets,
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
-	}
-}
-
-// RuleRequest 是规则创建/更新请求。
-type RuleRequest struct {
-	Name        string                       `json:"name" binding:"required"`
-	Enabled     bool                         `json:"enabled"`
-	Priority    int                          `json:"priority"`
-	FilterIDs   []int64                      `json:"filter_ids"`
-	Conditions  []domainrule.ConditionConfig `json:"conditions"`
-	Processors  []domainrule.ProcessorConfig `json:"processors"`
-	StopOnMatch bool                         `json:"stop_on_match"`
-	SourceIDs   []int64                      `json:"source_ids"`
-	Targets     []RuleTargetDTO              `json:"targets"`
-}
-
 type RulePreviewMessageRequest struct {
 	SourceID       int64                 `json:"source_id"`
 	MessageType    string                `json:"message_type"`
@@ -495,11 +419,6 @@ type RulePreviewMessageRequest struct {
 	Text           string                `json:"text"`
 	Media          []domainmessage.Media `json:"media,omitempty"`
 	OriginalURL    string                `json:"original_url,omitempty"`
-}
-
-type RulePreviewRequest struct {
-	Rule    RuleRequest               `json:"rule" binding:"required"`
-	Message RulePreviewMessageRequest `json:"message" binding:"required"`
 }
 
 type RulePreviewTargetDTO struct {
@@ -512,15 +431,6 @@ type RulePreviewDTO struct {
 	ProcessedText string                 `json:"processed_text"`
 	Media         []domainmessage.Media  `json:"media,omitempty"`
 	Targets       []RulePreviewTargetDTO `json:"targets"`
-}
-
-// TargetsToDomain 转换目标列表。
-func (r *RuleRequest) TargetsToDomain() []domainrule.Target {
-	out := make([]domainrule.Target, 0, len(r.Targets))
-	for _, t := range r.Targets {
-		out = append(out, domainrule.Target{SinkID: t.SinkID, TemplateID: t.TemplateID})
-	}
-	return out
 }
 
 // --- Flow ---
@@ -627,7 +537,6 @@ func (r *FlowRequest) EdgesToDomain() []domainflow.Edge {
 type DeliveryDTO struct {
 	ID             int64                `json:"id"`
 	MessageID      int64                `json:"message_id"`
-	RuleID         int64                `json:"rule_id"`
 	OriginType     string               `json:"origin_type,omitempty"`
 	OriginID       int64                `json:"origin_id,omitempty"`
 	OriginNodeID   int64                `json:"origin_node_id,omitempty"`
@@ -647,7 +556,6 @@ type DeliveryDTO struct {
 	SourcePeerType string               `json:"source_peer_type,omitempty"`
 	SinkName       string               `json:"sink_name,omitempty"`
 	SinkType       string               `json:"sink_type,omitempty"`
-	RuleName       string               `json:"rule_name,omitempty"`
 	FlowName       string               `json:"flow_name,omitempty"`
 	TemplateName   string               `json:"template_name,omitempty"`
 	Attempts       []DeliveryAttemptDTO `json:"attempts,omitempty"`
@@ -673,7 +581,6 @@ func NewDeliveryDTO(t *domaindelivery.Task) DeliveryDTO {
 	return DeliveryDTO{
 		ID:           t.ID,
 		MessageID:    t.MessageID,
-		RuleID:       t.RuleID,
 		OriginType:   deliveryOriginType(t),
 		OriginID:     t.OriginID,
 		OriginNodeID: t.OriginNodeID,
@@ -697,7 +604,6 @@ func NewDeliveryViewDTO(
 	msg *domainmessage.NormalizedMessage,
 	src *domainsource.Source,
 	sink *domainsink.Sink,
-	rule *domainrule.Rule,
 	flow *domainflow.Flow,
 	tpl *domaintemplate.Template,
 ) DeliveryDTO {
@@ -722,9 +628,6 @@ func NewDeliveryViewDTO(
 		out.SinkName = sink.Name
 		out.SinkType = sink.Type
 	}
-	if rule != nil {
-		out.RuleName = rule.Name
-	}
 	if flow != nil {
 		out.FlowName = flow.Name
 	}
@@ -738,7 +641,7 @@ func deliveryOriginType(t *domaindelivery.Task) string {
 	if t.OriginType != "" {
 		return t.OriginType
 	}
-	return "rule"
+	return "flow"
 }
 
 func deliveryEngineName(t *domaindelivery.Task) string {
@@ -748,7 +651,7 @@ func deliveryEngineName(t *domaindelivery.Task) string {
 	case "ai_digest":
 		return "AI 整理"
 	default:
-		return "规则引擎"
+		return "Flow 引擎"
 	}
 }
 

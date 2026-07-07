@@ -238,9 +238,9 @@ function ruleIdOf(nodeId: string): number {
       <span class="legend-item"><span class="legend-swatch source" />来源</span>
       <span v-if="filters.length" class="legend-item"><span class="legend-swatch filter" />过滤器</span>
       <span v-if="(processors?.length ?? 0) > 0" class="legend-item"><span class="legend-swatch processor" />处理</span>
-      <span class="legend-item"><span class="legend-swatch rule" />规则</span>
+      <span class="legend-item"><span class="legend-swatch rule" />Flow</span>
       <span class="legend-item"><span class="legend-swatch sink" />渠道</span>
-      <span class="legend-hint">{{ editable ? '拖动节点调整位置，拖动圆点建立连线' : '拖动节点右侧圆点到下一层即可连线；来源直连渠道会创建新规则' }}</span>
+      <span class="legend-hint">{{ editable ? '拖动节点调整位置，拖动圆点建立连线' : '拖动节点右侧圆点到下一层即可连线；来源直连渠道会创建新 Flow' }}</span>
     </div>
   </div>
 </template>

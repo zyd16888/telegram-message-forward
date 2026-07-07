@@ -100,6 +100,6 @@ type DispatchConfig struct {
 
 // FlowEngineConfig 控制 Flow 图引擎切换模式。
 type FlowEngineConfig struct {
-	// Mode: off 使用旧 Rule 引擎；shadow 旧链路主跑并旁路比对 Flow；primary 使用 Flow 引擎。
+	// Mode 已在 Flow-only 阶段保留为兼容字段，运行时始终走 Flow 引擎。
 	Mode string `mapstructure:"mode"`
 }
