@@ -450,6 +450,22 @@ const canvasEdges = computed<CanvasEdgeInput[]>(() => {
 
 const canvasHasNodes = computed(() => canvasSources.value.length > 0 || canvasRules.value.length > 0 || canvasSinks.value.length > 0)
 
+const boardFilterActive = computed(
+  () => Boolean(keyword.value.trim()) || onlyWarnings.value || Boolean(templateFilterId.value),
+)
+
+const canvasEmptyHint = computed(() => {
+  if (keyword.value.trim()) return `没有匹配「${keyword.value.trim()}」的来源、规则或渠道`
+  if (boardFilterActive.value) return '当前筛选条件下没有匹配的编排链路'
+  return '当前没有已接入的编排链路'
+})
+
+function clearBoardFilters() {
+  keyword.value = ''
+  onlyWarnings.value = false
+  templateFilterId.value = null
+}
+
 function parseEdgeKey(key: string): EdgeRef | null {
   let match = /^s(\d+):r(\d+)$/.exec(key)
   if (match) return { kind: 'source-rule', sourceId: Number(match[1]), ruleId: Number(match[2]) }
@@ -567,12 +583,6 @@ function openCreateRule() {
   editingRule.value = null
   initialDraft.value = buildDraftFromSelection()
   showRuleModal.value = true
-}
-
-function openCreateRuleFromResource(kind: Exclude<NodeKind, 'rule'>, id: number) {
-  selectedEdge.value = null
-  selection.value = { kind, id }
-  openCreateRule()
 }
 
 function openEditRule(ruleId: number) {
@@ -740,16 +750,9 @@ onMounted(async () => {
             <span>{{ source.name }}</span>
             <small>{{ sourceTypeLabel(source) }}</small>
           </button>
-          <NButton
-            v-for="source in unusedSources.slice(0, 3)"
-            :key="`src-rule-${source.id}`"
-            size="tiny"
-            text
-            type="primary"
-            @click="openCreateRuleFromResource('source', source.id)"
-          >
-            沿「{{ source.name }}」建规则
-          </NButton>
+          <button v-if="unusedSources.length > 8" type="button" class="resource-pill more" @click="showUnusedNodes = true">
+            <span>还有 {{ unusedSources.length - 8 }} 个…</span>
+          </button>
         </div>
         <div v-if="unusedSinks.length" class="resource-column">
           <span class="resource-title">渠道</span>
@@ -763,16 +766,9 @@ onMounted(async () => {
             <span>{{ sink.name }}</span>
             <small>{{ sinkTypeLabel(sink) }}</small>
           </button>
-          <NButton
-            v-for="sink in unusedSinks.slice(0, 3)"
-            :key="`sink-rule-${sink.id}`"
-            size="tiny"
-            text
-            type="primary"
-            @click="openCreateRuleFromResource('sink', sink.id)"
-          >
-            沿「{{ sink.name }}」建规则
-          </NButton>
+          <button v-if="unusedSinks.length > 8" type="button" class="resource-pill more" @click="showUnusedNodes = true">
+            <span>还有 {{ unusedSinks.length - 8 }} 个…</span>
+          </button>
         </div>
       </div>
     </section>
@@ -815,10 +811,11 @@ onMounted(async () => {
         @toggle-rule="toggleRule"
       />
 
-      <NEmpty v-else-if="sources.length || rules.length || sinks.length" description="当前没有已接入的编排链路">
+      <NEmpty v-else-if="sources.length || rules.length || sinks.length" :description="canvasEmptyHint">
         <template #extra>
           <NSpace>
-            <NButton secondary @click="showUnusedNodes = true">显示未接入资源</NButton>
+            <NButton v-if="boardFilterActive" secondary @click="clearBoardFilters">清除筛选</NButton>
+            <NButton v-else secondary @click="showUnusedNodes = true">显示未接入资源</NButton>
             <NButton type="primary" @click="openCreateRule">新建规则</NButton>
           </NSpace>
         </template>
@@ -1157,6 +1154,11 @@ onMounted(async () => {
 
 .resource-pill.sink {
   border-right: 3px solid #f59e0b;
+}
+
+.resource-pill.more {
+  border-style: dashed;
+  color: var(--clay-text-3);
 }
 
 .context-bar {
