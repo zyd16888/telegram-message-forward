@@ -58,7 +58,7 @@ const sourceById = computed(() => new Map(sources.value.map((s) => [s.id, s])))
 const sinkById = computed(() => new Map(sinks.value.map((s) => [s.id, s])))
 const templateById = computed(() => new Map(templates.value.map((t) => [t.id, t])))
 const flowOptions = computed(() => flows.value.map((f) => ({ label: f.name, value: f.id })))
-const sourceOptions = computed(() => sources.value.map((s) => ({ label: s.name, value: s.id })))
+const sourceOptions = computed(() => sources.value.map((s) => ({ label: sourceOptionLabel(s), value: s.id })))
 const filterOptions = computed(() => filters.value.map((f) => ({ label: f.name, value: f.id })))
 const sinkOptions = computed(() => sinks.value.map((s) => ({ label: s.name, value: s.id })))
 const processorOptions = computed(() => ruleMeta.value.processors.map((p) => ({ label: p.label, value: p.type })))
@@ -203,7 +203,12 @@ function sourceTypeLabel(source: Source): string {
 function sourceAccountLabel(source: Source): string {
   if (source.type === 'rss') return 'RSS'
   if (source.type === 'webhook') return 'Webhook'
-  return accountNameById.value.get(source.account_id) ?? `账号 #${source.account_id}`
+  const name = accountNameById.value.get(source.account_id)
+  return name ? `${name} (#${source.account_id})` : `账号 #${source.account_id}`
+}
+
+function sourceOptionLabel(source: Source): string {
+  return `${source.name} · ${sourceTypeLabel(source)} · ${sourceAccountLabel(source)} · ${source.peer_type}/${source.peer_id}`
 }
 
 function formatRuntimeTime(value?: string): string {
@@ -1009,6 +1014,7 @@ onMounted(async () => {
       :unused-sources="unusedSources"
       :unused-sinks="unusedSinks"
       :source-type-label="sourceTypeLabel"
+      :source-account-label="sourceAccountLabel"
       :sink-type-label="sinkTypeLabel"
       @reveal-resource="revealResource"
       @show-unused-nodes="showUnusedNodes = true"

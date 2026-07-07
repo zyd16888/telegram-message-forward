@@ -6,6 +6,7 @@ defineProps<{
   unusedSources: Source[]
   unusedSinks: Sink[]
   sourceTypeLabel: (source: Source) => string
+  sourceAccountLabel: (source: Source) => string
   sinkTypeLabel: (sink: Sink) => string
 }>()
 
@@ -35,7 +36,7 @@ const emit = defineEmits<{
           @click="emit('reveal-resource', 'source', source.id)"
         >
           <span>{{ source.name }}</span>
-          <small>{{ sourceTypeLabel(source) }}</small>
+          <small>{{ sourceTypeLabel(source) }} · {{ sourceAccountLabel(source) }}</small>
         </button>
         <button v-if="unusedSources.length > 8" type="button" class="resource-pill more" @click="emit('show-unused-nodes')">
           <span>还有 {{ unusedSources.length - 8 }} 个…</span>

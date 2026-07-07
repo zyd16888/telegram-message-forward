@@ -720,6 +720,9 @@ func (p *Plugin) forwardToSubscriptions(runCtx context.Context, accountID int64,
 
 	if len(subs) == 0 {
 		peerType, peerID := messagePeer(msg.PeerID)
+		if peerType != "user" {
+			return
+		}
 		senderType, senderID := messageSender(msg)
 		p.deps.Log.Debug("Telegram 消息未匹配任何 source",
 			"account", accountID,
