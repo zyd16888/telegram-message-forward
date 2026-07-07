@@ -68,6 +68,7 @@ func (s *Service) Create(ctx context.Context, in Input) (*domainflow.Flow, error
 	if err := s.repo.Create(ctx, f); err != nil {
 		return nil, err
 	}
+	s.engine.Invalidate(f.ID)
 	return f, nil
 }
 
@@ -84,11 +85,16 @@ func (s *Service) Update(ctx context.Context, id int64, in Input) (*domainflow.F
 	if err := s.repo.Update(ctx, f); err != nil {
 		return nil, err
 	}
+	s.engine.Invalidate(f.ID)
 	return f, nil
 }
 
 func (s *Service) Delete(ctx context.Context, id int64) error {
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.engine.Invalidate(id)
+	return nil
 }
 
 func (s *Service) ConditionDescriptors() []condition.Descriptor {

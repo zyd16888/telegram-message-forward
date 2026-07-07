@@ -46,6 +46,15 @@ func NewEngine(opts ...Option) *Engine {
 	return e
 }
 
+func (e *Engine) Invalidate(flowID int64) {
+	if e == nil || flowID <= 0 {
+		return
+	}
+	e.mu.Lock()
+	delete(e.cache, flowID)
+	e.mu.Unlock()
+}
+
 type cachedPlan struct {
 	updatedAt time.Time
 	plan      *Plan
