@@ -1091,7 +1091,7 @@ flow_edges (id, flow_id, from_node_id, to_node_id, UNIQUE(flow_id, from_node_id,
 - [x] 连线建边/删边直接读写 flow_edges；保存时后端校验错误在画布侧展示
 - [x] Route Inspector 适配 Flow（编辑侧展示节点配置摘要，概览侧保留路径与匹配顺序）
 - [x] 现有三栏自动布局保留为「概览模式」（只读投影）
-- [ ] 节点配置编辑补齐：processor 节点的处理器参数、filter 节点的内联条件在编辑面板可编辑（复用 RuleEditorModal 的条件/处理器构建器）；未保存草稿离开/切换 Flow 时提示
+- [x] 节点配置编辑补齐：processor 节点的处理器参数、filter 节点的内联条件在编辑面板可编辑（复用 RuleEditorModal 的条件/处理器构建器）；未保存草稿离开/切换 Flow 时提示
 
 **F5-3 RulesPage 转简单模式**
 - [ ] RuleEditorModal 管道表单改为读写线性 Flow（表单壳 + 线性图的双向转换）

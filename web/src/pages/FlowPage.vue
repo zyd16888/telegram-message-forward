@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
+import ConfigFormRenderer from '@/components/ConfigFormRenderer.vue'
 import FlowCanvas from '@/components/flow/FlowCanvas.vue'
 import FlowToolbar from '@/components/flow/FlowToolbar.vue'
 import RouteInspector from '@/components/flow/RouteInspector.vue'
@@ -22,7 +23,23 @@ import type {
 import { filtersApi, flowsApi, rulesApi, sinksApi } from '@/api/client'
 import { useFlowBoard } from '@/composables/useFlowBoard'
 import { useForwardingGraph } from '@/composables/useForwardingGraph'
-import type { Filter, Flow, FlowEdge, FlowNode, FlowNodeType, Rule, RuleInitialDraft, RuleMeta, Sink, SinkDescriptor, Source, RuleTarget } from '@/types'
+import type {
+  ConditionConfig,
+  Filter,
+  Flow,
+  FlowEdge,
+  FlowNode,
+  FlowNodeType,
+  ProcessorConfig,
+  Rule,
+  RuleInitialDraft,
+  RuleItemDescriptor,
+  RuleMeta,
+  Sink,
+  SinkDescriptor,
+  Source,
+  RuleTarget,
+} from '@/types'
 import { errText } from '@/utils/error'
 
 const router = useRouter()
@@ -38,6 +55,7 @@ const filters = shallowRef<Filter[]>([])
 const flows = shallowRef<Flow[]>([])
 const flowDraft = ref<Flow | null>(null)
 const flowError = shallowRef('')
+const flowDraftBaseline = shallowRef('null')
 const canvasMode = shallowRef<'overview' | 'edit'>('overview')
 const activeFlowId = shallowRef<number | null>(null)
 const selectedSourceToAdd = shallowRef<number | null>(null)
@@ -61,6 +79,7 @@ const flowOptions = computed(() => flows.value.map((f) => ({ label: f.name, valu
 const sourceOptions = computed(() => sources.value.map((s) => ({ label: sourceOptionLabel(s), value: s.id })))
 const filterOptions = computed(() => filters.value.map((f) => ({ label: f.name, value: f.id })))
 const sinkOptions = computed(() => sinks.value.map((s) => ({ label: s.name, value: s.id })))
+const conditionOptions = computed(() => ruleMeta.value.conditions.map((item) => ({ label: item.label, value: item.type })))
 const processorOptions = computed(() => ruleMeta.value.processors.map((p) => ({ label: p.label, value: p.type })))
 const templateOptions = computed(() => [
   { label: '原文投递', value: 0 },
@@ -70,6 +89,10 @@ const selectedDraftNode = computed(() => {
   if (canvasMode.value !== 'edit' || !selection.value || !flowDraft.value) return null
   return flowDraft.value.nodes.find((node) => node.id === selection.value?.id) ?? null
 })
+const selectedDraftNodeUsesSharedFilters = computed(() =>
+  selectedDraftNode.value?.type === 'filter' && Boolean(selectedDraftNode.value.config.filter_ids?.length),
+)
+const flowDraftDirty = computed(() => draftSnapshot() !== flowDraftBaseline.value)
 
 function draftStateClass(id: number): string {
   if (canvasMode.value !== 'edit' || !selection.value) return ''
@@ -255,6 +278,22 @@ function conditionLabel(type: string): string {
 
 function processorLabel(type: string): string {
   return processorLabelByType.value.get(type) ?? type
+}
+
+function defaultsFor(desc?: RuleItemDescriptor): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const field of desc?.fields ?? []) {
+    if (field.default !== undefined) out[field.key] = field.default
+  }
+  return out
+}
+
+function conditionDescriptor(type: string): RuleItemDescriptor | undefined {
+  return ruleMeta.value.conditions.find((item) => item.type === type)
+}
+
+function processorDescriptor(type: string): RuleItemDescriptor | undefined {
+  return ruleMeta.value.processors.find((item) => item.type === type)
 }
 
 const filterRuleCountById = computed(() => {
@@ -522,6 +561,7 @@ const canvasHasNodes = computed(
 // --- 数据与操作 ---
 
 async function refresh() {
+  if (!(await confirmDiscardDraft())) return
   try {
     await Promise.all([load(), loadFlows()])
     ensureEditorSelections()
@@ -557,6 +597,7 @@ async function loadFlows() {
   if (!flowDraft.value) {
     flowDraft.value = emptyFlowDraft()
   }
+  rememberFlowDraftBaseline()
 }
 
 function draftNodes(type: FlowNodeType): FlowNode[] {
@@ -570,6 +611,53 @@ function canvasKindOf(type: FlowNodeType) {
 
 function cloneFlow(flow: Flow): Flow {
   return JSON.parse(JSON.stringify(flow)) as Flow
+}
+
+function flowBodyOf(draft: Flow | null) {
+  if (!draft) return null
+  return {
+    name: draft.name,
+    enabled: draft.enabled,
+    priority: draft.priority,
+    stop_on_match: draft.stop_on_match,
+    nodes: draft.nodes,
+    edges: draft.edges,
+  }
+}
+
+function draftSnapshot(): string {
+  return JSON.stringify(flowBodyOf(flowDraft.value))
+}
+
+function rememberFlowDraftBaseline() {
+  flowDraftBaseline.value = draftSnapshot()
+}
+
+function resetDraftToSavedState() {
+  if (activeFlowId.value) {
+    const flow = flows.value.find((item) => item.id === activeFlowId.value)
+    flowDraft.value = flow ? cloneFlow(flow) : emptyFlowDraft()
+  } else {
+    flowDraft.value = emptyFlowDraft()
+  }
+  flowError.value = ''
+  clearPaneSelection()
+  rememberFlowDraftBaseline()
+}
+
+function confirmDiscardDraft(): Promise<boolean> {
+  if (!flowDraftDirty.value) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: '放弃未保存的 Flow 草稿？',
+      content: '当前 Flow 有未保存修改。继续操作会丢弃这些草稿内容。',
+      positiveText: '放弃草稿',
+      negativeText: '继续编辑',
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
 }
 
 function emptyFlowDraft(): Flow {
@@ -609,10 +697,9 @@ function addSourceNode() {
 }
 
 function addFilterNode() {
-  if (!selectedFilterToAdd.value) return
   addNode({
     type: 'filter',
-    config: { filter_ids: [selectedFilterToAdd.value] },
+    config: selectedFilterToAdd.value ? { filter_ids: [selectedFilterToAdd.value] } : { conditions: [] },
     pos_x: 280,
     pos_y: flowDraft.value?.nodes.length ? flowDraft.value.nodes.length * 90 : 0,
   })
@@ -623,7 +710,7 @@ function addProcessorNode() {
   if (!processorType) return
   addNode({
     type: 'processor',
-    config: { processors: [{ type: processorType, config: {} }] },
+    config: { processors: [{ type: processorType, config: defaultsFor(processorDescriptor(processorType)) }] },
     pos_x: 560,
     pos_y: flowDraft.value?.nodes.length ? flowDraft.value.nodes.length * 90 : 0,
   })
@@ -684,31 +771,94 @@ function updateSelectedTargetTemplate(value: number | null) {
   node.template_id = value && value > 0 ? value : undefined
 }
 
-function newFlow() {
+function updateSelectedFilterIds(value: number[] | null) {
+  const node = selectedDraftNode.value
+  if (!node || node.type !== 'filter') return
+  node.config.filter_ids = value ?? []
+  if (node.config.filter_ids.length) node.config.conditions = []
+}
+
+function addSelectedCondition() {
+  const node = selectedDraftNode.value
+  const desc = ruleMeta.value.conditions[0]
+  if (!node || node.type !== 'filter' || !desc) return
+  node.config.filter_ids = []
+  node.config.conditions = [...(node.config.conditions ?? []), { type: desc.type, config: defaultsFor(desc) }]
+}
+
+function removeSelectedCondition(index: number) {
+  const node = selectedDraftNode.value
+  if (!node || node.type !== 'filter') return
+  node.config.conditions = (node.config.conditions ?? []).filter((_, itemIndex) => itemIndex !== index)
+}
+
+function updateSelectedConditionType(item: ConditionConfig, type: string) {
+  item.type = type
+  item.config = defaultsFor(conditionDescriptor(type))
+}
+
+function addSelectedProcessor() {
+  const node = selectedDraftNode.value
+  const desc = ruleMeta.value.processors[0]
+  if (!node || node.type !== 'processor' || !desc) return
+  node.config.processors = [...(node.config.processors ?? []), { type: desc.type, config: defaultsFor(desc) }]
+}
+
+function removeSelectedProcessor(index: number) {
+  const node = selectedDraftNode.value
+  if (!node || node.type !== 'processor') return
+  node.config.processors = (node.config.processors ?? []).filter((_, itemIndex) => itemIndex !== index)
+}
+
+function updateSelectedProcessorType(item: ProcessorConfig, type: string) {
+  item.type = type
+  item.config = defaultsFor(processorDescriptor(type))
+}
+
+async function setCanvasMode(mode: 'overview' | 'edit') {
+  if (canvasMode.value === mode) return
+  if (mode === 'overview' && flowDraftDirty.value) {
+    if (!(await confirmDiscardDraft())) return
+    resetDraftToSavedState()
+  }
+  canvasMode.value = mode
+}
+
+async function newFlow() {
+  if (!(await confirmDiscardDraft())) return
   activeFlowId.value = null
   flowDraft.value = emptyFlowDraft()
   flowError.value = ''
   canvasMode.value = 'edit'
+  clearPaneSelection()
+  rememberFlowDraftBaseline()
 }
 
-function selectFlow(id: number) {
+async function selectFlow(id: number) {
+  if (id === activeFlowId.value) return
+  if (!(await confirmDiscardDraft())) return
   activeFlowId.value = id
   const flow = flows.value.find((item) => item.id === id)
   flowDraft.value = flow ? cloneFlow(flow) : emptyFlowDraft()
   flowError.value = ''
+  canvasMode.value = 'edit'
+  clearPaneSelection()
+  rememberFlowDraftBaseline()
+}
+
+async function onFlowSelect(value: number | null) {
+  if (value) {
+    await selectFlow(value)
+  } else {
+    await newFlow()
+  }
 }
 
 async function saveFlow() {
   if (!flowDraft.value) return
   try {
-    const body = {
-      name: flowDraft.value.name,
-      enabled: flowDraft.value.enabled,
-      priority: flowDraft.value.priority,
-      stop_on_match: flowDraft.value.stop_on_match,
-      nodes: flowDraft.value.nodes,
-      edges: flowDraft.value.edges,
-    }
+    const body = flowBodyOf(flowDraft.value)
+    if (!body) return
     const saved = flowDraft.value.id ? await flowsApi.update(flowDraft.value.id, body) : await flowsApi.create(body)
     message.success('Flow 已保存')
     activeFlowId.value = saved.id
@@ -722,6 +872,7 @@ async function saveFlow() {
 
 async function deleteFlow() {
   if (!flowDraft.value?.id) return
+  if (!(await confirmDiscardDraft())) return
   try {
     await flowsApi.remove(flowDraft.value.id)
     message.success('Flow 已删除')
@@ -898,7 +1049,18 @@ function queryId(key: string): number | null {
   return Number.isFinite(id) && id > 0 ? id : null
 }
 
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (!flowDraftDirty.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onBeforeRouteLeave(async () => {
+  return confirmDiscardDraft()
+})
+
 onMounted(async () => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
   await loadMeta()
   await refresh()
   // 其它页面「查看编排」跳转过来时，直接选中对应节点进入联动高亮。
@@ -915,6 +1077,10 @@ onMounted(async () => {
   }
   else if (sinkId) selection.value = { kind: 'sink', id: sinkId }
   if (templateId) templateFilterId.value = templateId
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 </script>
 
@@ -992,8 +1158,8 @@ onMounted(async () => {
 
     <section class="mode-panel">
       <div class="mode-tabs">
-        <NButton :type="canvasMode === 'overview' ? 'primary' : 'default'" secondary @click="canvasMode = 'overview'">概览模式</NButton>
-        <NButton :type="canvasMode === 'edit' ? 'primary' : 'default'" secondary @click="canvasMode = 'edit'">编辑模式</NButton>
+        <NButton :type="canvasMode === 'overview' ? 'primary' : 'default'" secondary @click="setCanvasMode('overview')">概览模式</NButton>
+        <NButton :type="canvasMode === 'edit' ? 'primary' : 'default'" secondary @click="setCanvasMode('edit')">编辑模式</NButton>
       </div>
       <div v-if="canvasMode === 'edit'" class="flow-select-row">
         <NSelect
@@ -1001,10 +1167,10 @@ onMounted(async () => {
           :options="flowOptions"
           clearable
           placeholder="选择已有 Flow"
-          @update:value="(value: number | null) => value ? selectFlow(value) : newFlow()"
+          @update:value="onFlowSelect"
         />
         <NButton secondary @click="newFlow">新建 Flow</NButton>
-        <NButton type="primary" @click="saveFlow">保存 Flow</NButton>
+        <NButton type="primary" :disabled="!flowDraftDirty" @click="saveFlow">保存 Flow</NButton>
         <NButton v-if="flowDraft?.id" type="error" secondary @click="deleteFlow">删除</NButton>
       </div>
     </section>
@@ -1152,6 +1318,66 @@ onMounted(async () => {
             <span>类型</span>
             <strong>{{ selectedDraftNode.type }}</strong>
           </div>
+          <template v-if="selectedDraftNode.type === 'filter'">
+            <NFormItem label="共享过滤器" :show-feedback="false">
+              <NSelect
+                :value="selectedDraftNode.config.filter_ids ?? []"
+                multiple
+                clearable
+                filterable
+                :options="filterOptions"
+                placeholder="不选则使用内联条件"
+                @update:value="updateSelectedFilterIds"
+              />
+            </NFormItem>
+            <NAlert v-if="selectedDraftNodeUsesSharedFilters" type="info" :show-icon="false" class="editor-alert">
+              当前节点引用共享过滤器；清空后可编辑只属于这个节点的内联条件。
+            </NAlert>
+            <template v-else>
+              <div v-for="(condition, index) in selectedDraftNode.config.conditions ?? []" :key="index" class="node-config-block">
+                <NSpace align="center" justify="space-between">
+                  <NSelect
+                    :value="condition.type"
+                    class="type-select"
+                    :options="conditionOptions"
+                    @update:value="(value: string) => updateSelectedConditionType(condition, value)"
+                  />
+                  <NButton size="small" type="error" secondary @click="removeSelectedCondition(index)">移除</NButton>
+                </NSpace>
+                <ConfigFormRenderer
+                  v-if="conditionDescriptor(condition.type)"
+                  v-model="condition.config"
+                  :fields="conditionDescriptor(condition.type)?.fields ?? []"
+                />
+                <NText v-if="conditionDescriptor(condition.type)?.description" depth="3">
+                  {{ conditionDescriptor(condition.type)?.description }}
+                </NText>
+              </div>
+              <NButton size="small" dashed block @click="addSelectedCondition">添加内联条件</NButton>
+            </template>
+          </template>
+          <template v-else-if="selectedDraftNode.type === 'processor'">
+            <div v-for="(processor, index) in selectedDraftNode.config.processors ?? []" :key="index" class="node-config-block">
+              <NSpace align="center" justify="space-between">
+                <NSelect
+                  :value="processor.type"
+                  class="type-select"
+                  :options="processorOptions"
+                  @update:value="(value: string) => updateSelectedProcessorType(processor, value)"
+                />
+                <NButton size="small" type="error" secondary @click="removeSelectedProcessor(index)">移除</NButton>
+              </NSpace>
+              <ConfigFormRenderer
+                v-if="processorDescriptor(processor.type)"
+                v-model="processor.config"
+                :fields="processorDescriptor(processor.type)?.fields ?? []"
+              />
+              <NText v-if="processorDescriptor(processor.type)?.description" depth="3">
+                {{ processorDescriptor(processor.type)?.description }}
+              </NText>
+            </div>
+            <NButton size="small" dashed block @click="addSelectedProcessor">添加处理器</NButton>
+          </template>
           <div v-if="selectedDraftNode.type === 'target'" class="add-row">
             <NSelect
               :value="selectedDraftNode.template_id ?? 0"
@@ -1426,6 +1652,19 @@ onMounted(async () => {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
+}
+
+.node-config-block {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
+  background: var(--clay-surface-2);
+}
+
+.type-select {
+  width: min(240px, 100%);
 }
 
 .kv {
