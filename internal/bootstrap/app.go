@@ -197,6 +197,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Sources:   sources,
 		Sinks:     sinks,
 		Rules:     rules,
+		Flows:     flows,
 		Templates: templates,
 	})
 	aiDigestSvc := appaidigest.NewService(appaidigest.Deps{

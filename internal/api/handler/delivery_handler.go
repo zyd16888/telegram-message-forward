@@ -46,7 +46,7 @@ func (h *DeliveryHandler) List(c *gin.Context) {
 	}
 	out := make([]dto.DeliveryDTO, 0, len(views))
 	for _, v := range views {
-		out = append(out, dto.NewDeliveryViewDTO(v.Task, v.Attempts, v.Message, v.Source, v.Sink, v.Rule, v.Template))
+		out = append(out, dto.NewDeliveryViewDTO(v.Task, v.Attempts, v.Message, v.Source, v.Sink, v.Rule, v.Flow, v.Template))
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out, "total": total})
 }
@@ -74,7 +74,7 @@ func (h *DeliveryHandler) Get(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": dto.NewDeliveryViewDTO(v.Task, v.Attempts, v.Message, v.Source, v.Sink, v.Rule, v.Template)})
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewDeliveryViewDTO(v.Task, v.Attempts, v.Message, v.Source, v.Sink, v.Rule, v.Flow, v.Template)})
 }
 
 // Retry POST /deliveries/:id/retry — 手动重试终态任务。

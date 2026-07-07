@@ -290,6 +290,10 @@ export interface Delivery {
   id: number
   message_id: number
   rule_id: number
+  origin_type?: string
+  origin_id?: number
+  origin_node_id?: number
+  engine_name?: string
   sink_id: number
   template_id?: number
   status: string
@@ -306,6 +310,7 @@ export interface Delivery {
   sink_name?: string
   sink_type?: string
   rule_name?: string
+  flow_name?: string
   template_name?: string
   attempts?: DeliveryAttempt[]
   created_at: string

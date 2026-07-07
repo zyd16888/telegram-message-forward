@@ -199,10 +199,36 @@ function sinkTypeLabel(row: Delivery): string {
 
 function targetMeta(row: Delivery): string {
   const parts = [
-    row.rule_name ? `规则：${row.rule_name}` : '',
+    deliveryOriginLabel(row),
     row.template_name ? `模板：${row.template_name}` : '',
   ]
   return parts.filter(Boolean).join(' · ') || '默认文本模板'
+}
+
+function engineLabel(row: Delivery): string {
+  if (row.engine_name) return row.engine_name
+  if (row.origin_type === 'flow') return 'Flow 引擎'
+  if (row.origin_type === 'ai_digest') return 'AI 整理'
+  return '规则引擎'
+}
+
+function engineTagType(row: Delivery): 'success' | 'warning' | 'error' | 'info' | 'default' {
+  if (row.origin_type === 'flow') return 'success'
+  if (row.origin_type === 'ai_digest') return 'warning'
+  return 'info'
+}
+
+function deliveryOriginLabel(row: Delivery): string {
+  if (row.origin_type === 'flow') {
+    const name = row.flow_name || (row.origin_id ? `Flow #${row.origin_id}` : '未知 Flow')
+    const node = row.origin_node_id ? ` / 节点 #${row.origin_node_id}` : ''
+    return `Flow：${name}${node}`
+  }
+  if (row.origin_type === 'ai_digest') {
+    return row.origin_id ? `AI整理：#${row.origin_id}` : 'AI整理'
+  }
+  if (row.rule_name) return `规则：${row.rule_name}`
+  return row.rule_id ? `规则：#${row.rule_id}` : ''
 }
 
 function renderTarget(row: Delivery) {
@@ -213,6 +239,7 @@ function renderTarget(row: Delivery) {
       typeLabel
         ? h(NTag, { size: 'tiny', round: true, bordered: false, type: 'info' }, { default: () => typeLabel })
         : null,
+      h(NTag, { size: 'tiny', round: true, bordered: false, type: engineTagType(row) }, { default: () => engineLabel(row) }),
     ]),
     h('div', { class: 'cell-secondary' }, targetMeta(row)),
   ])
@@ -266,7 +293,7 @@ const columns: DataTableColumns<Delivery> = [
   {
     title: '目标',
     key: 'target',
-    width: 210,
+    width: 280,
     render: renderTarget,
   },
   {
@@ -372,7 +399,7 @@ onMounted(() => {
       :data="deliveries"
       :bordered="false"
       :pagination="pagination"
-      :scroll-x="1080"
+      :scroll-x="1160"
     />
     <n-modal v-model:show="detailShow" preset="card" title="投递详情" class="delivery-modal" :style="{ width: 'min(760px, calc(100vw - 32px))' }">
       <n-spin :show="detailLoading">
@@ -383,6 +410,8 @@ onMounted(() => {
             <div><span>任务</span><strong>#{{ detail.id }}</strong></div>
             <div><span>来源</span><strong>{{ detail.source_name || `#${detail.message_id}` }}</strong></div>
             <div><span>目标</span><strong>{{ detail.sink_name || `#${detail.sink_id}` }}</strong></div>
+            <div><span>引擎</span><strong>{{ engineLabel(detail) }}</strong></div>
+            <div><span>触发对象</span><strong>{{ deliveryOriginLabel(detail) || '-' }}</strong></div>
           </div>
           <section>
             <div class="section-title">消息快照</div>

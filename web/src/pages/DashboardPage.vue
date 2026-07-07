@@ -54,9 +54,15 @@ const queueItems = computed(() => [
 
 const topFailures = computed(() => ({
   sink: topBy(deliveries.value, (item) => item.sink_name || item.sink_type || `Sink #${item.sink_id}`),
-  rule: topBy(deliveries.value, (item) => item.rule_name || `Rule #${item.rule_id}`),
+  rule: topBy(deliveries.value, deliveryOriginLabel),
   source: topBy(deliveries.value, (item) => item.source_name || `Source #${item.message_id}`),
 }))
+
+function deliveryOriginLabel(item: Delivery): string {
+  if (item.origin_type === 'flow') return item.flow_name || `Flow #${item.origin_id || 0}`
+  if (item.origin_type === 'ai_digest') return item.origin_id ? `AI整理 #${item.origin_id}` : 'AI整理'
+  return item.rule_name || `Rule #${item.rule_id}`
+}
 
 function topBy(items: Delivery[], keyFn: (item: Delivery) => string) {
   const counts = new Map<string, number>()

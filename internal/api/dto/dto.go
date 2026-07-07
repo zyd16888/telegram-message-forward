@@ -623,6 +623,10 @@ type DeliveryDTO struct {
 	ID             int64                `json:"id"`
 	MessageID      int64                `json:"message_id"`
 	RuleID         int64                `json:"rule_id"`
+	OriginType     string               `json:"origin_type,omitempty"`
+	OriginID       int64                `json:"origin_id,omitempty"`
+	OriginNodeID   int64                `json:"origin_node_id,omitempty"`
+	EngineName     string               `json:"engine_name,omitempty"`
 	SinkID         int64                `json:"sink_id"`
 	TemplateID     *int64               `json:"template_id,omitempty"`
 	Status         string               `json:"status"`
@@ -639,6 +643,7 @@ type DeliveryDTO struct {
 	SinkName       string               `json:"sink_name,omitempty"`
 	SinkType       string               `json:"sink_type,omitempty"`
 	RuleName       string               `json:"rule_name,omitempty"`
+	FlowName       string               `json:"flow_name,omitempty"`
 	TemplateName   string               `json:"template_name,omitempty"`
 	Attempts       []DeliveryAttemptDTO `json:"attempts,omitempty"`
 	CreatedAt      time.Time            `json:"created_at"`
@@ -664,6 +669,10 @@ func NewDeliveryDTO(t *domaindelivery.Task) DeliveryDTO {
 		ID:           t.ID,
 		MessageID:    t.MessageID,
 		RuleID:       t.RuleID,
+		OriginType:   deliveryOriginType(t),
+		OriginID:     t.OriginID,
+		OriginNodeID: t.OriginNodeID,
+		EngineName:   deliveryEngineName(t),
 		SinkID:       t.SinkID,
 		TemplateID:   t.TemplateID,
 		Status:       string(t.Status),
@@ -684,6 +693,7 @@ func NewDeliveryViewDTO(
 	src *domainsource.Source,
 	sink *domainsink.Sink,
 	rule *domainrule.Rule,
+	flow *domainflow.Flow,
 	tpl *domaintemplate.Template,
 ) DeliveryDTO {
 	out := NewDeliveryDTO(t)
@@ -710,10 +720,31 @@ func NewDeliveryViewDTO(
 	if rule != nil {
 		out.RuleName = rule.Name
 	}
+	if flow != nil {
+		out.FlowName = flow.Name
+	}
 	if tpl != nil {
 		out.TemplateName = tpl.Name
 	}
 	return out
+}
+
+func deliveryOriginType(t *domaindelivery.Task) string {
+	if t.OriginType != "" {
+		return t.OriginType
+	}
+	return "rule"
+}
+
+func deliveryEngineName(t *domaindelivery.Task) string {
+	switch deliveryOriginType(t) {
+	case "flow":
+		return "Flow 引擎"
+	case "ai_digest":
+		return "AI 整理"
+	default:
+		return "规则引擎"
+	}
 }
 
 func NewDeliveryAttemptDTO(a *domaindelivery.Attempt) DeliveryAttemptDTO {

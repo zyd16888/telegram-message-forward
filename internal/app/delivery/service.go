@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
+	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainrule "telegram-message-forward/internal/domain/rule"
 	domainsink "telegram-message-forward/internal/domain/sink"
@@ -20,6 +21,7 @@ type Service struct {
 	sources   domainsource.Repository
 	sinks     domainsink.Repository
 	rules     domainrule.Repository
+	flows     domainflow.Repository
 	templates domaintemplate.Repository
 }
 
@@ -29,6 +31,7 @@ type DisplayDeps struct {
 	Sources   domainsource.Repository
 	Sinks     domainsink.Repository
 	Rules     domainrule.Repository
+	Flows     domainflow.Repository
 	Templates domaintemplate.Repository
 }
 
@@ -40,6 +43,7 @@ type View struct {
 	Source   *domainsource.Source
 	Sink     *domainsink.Sink
 	Rule     *domainrule.Rule
+	Flow     *domainflow.Flow
 	Template *domaintemplate.Template
 }
 
@@ -64,6 +68,7 @@ func NewService(tasks domaindelivery.Repository, deps ...DisplayDeps) *Service {
 		s.sources = deps[0].Sources
 		s.sinks = deps[0].Sinks
 		s.rules = deps[0].Rules
+		s.flows = deps[0].Flows
 		s.templates = deps[0].Templates
 	}
 	return s
@@ -173,6 +178,14 @@ func (s *Service) enrich(ctx context.Context, task *domaindelivery.Task) (*View,
 			return nil, fmt.Errorf("查询投递规则失败 rule_id=%d: %w", task.RuleID, err)
 		}
 		view.Rule = rule
+	}
+
+	if task.OriginType == "flow" && task.OriginID > 0 && s.flows != nil {
+		flow, err := s.flows.GetByID(ctx, task.OriginID)
+		if err != nil {
+			return nil, fmt.Errorf("查询投递 Flow 失败 flow_id=%d: %w", task.OriginID, err)
+		}
+		view.Flow = flow
 	}
 
 	if task.TemplateID != nil && s.templates != nil {
