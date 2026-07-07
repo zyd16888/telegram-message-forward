@@ -38,7 +38,8 @@ func (q *Queue) UseSinks(sinks domainsink.Repository) *Queue {
 
 // Enqueue 为每个命中规则的每个目标渠道生成一个 pending 投递任务。
 //
-// 任务创建按 (message_id, rule_id, sink_id) 幂等，重复不产生新任务。
+// 任务创建按来源类型幂等：rule 为 (message_id, rule_id, sink_id)，
+// flow 为 (message_id, origin_id, origin_node_id)，重复不产生新任务。
 func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessage, matches []ruleengine.Match) error {
 	created := false
 	enabledSinks := map[int64]bool{}
@@ -76,7 +77,9 @@ func (q *Queue) Enqueue(ctx context.Context, msg *domainmessage.NormalizedMessag
 }
 
 func ruleID(m ruleengine.Match) int64 {
-	if m.Rule == nil {
+	// flow 来源的任务不写 rule_id：delivery_tasks.rule_id 外键指向 rules 表，
+	// flow.ID 既可能不存在于 rules（插入失败），也可能撞上无关规则（级联误删）。
+	if m.OriginType == "flow" || m.Rule == nil {
 		return 0
 	}
 	return m.Rule.ID

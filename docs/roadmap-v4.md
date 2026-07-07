@@ -71,6 +71,14 @@ v4 的目标是新增一条通用的 **AI 整理旁路**：原始消息继续按
 - **验证**：`npm run build`（vue-tsc + vite）通过。
 - **已知观察项（暂不处理）**：选中带过滤器的规则时 rule/sink 列 x 坐标会位移且不自动 refit；检查器「处理」区块条件与处理器 chip 混排仅靠颜色区分。
 
+**本轮增强（2026-07-07：Flow 图引擎落地 F5-1 + F5-2，见第 18 章）**
+
+- **后端引擎（F5-1）**：`internal/domain/flow` + `internal/flowengine`（编译-执行分离、DAG 校验 64 节点/16 深度、扇出克隆快照、target 节点单次求值去重、Flow 间 priority DESC + id ASC + stop_on_match）；`00020_flows.sql`（flows/flow_nodes/flow_edges + delivery_tasks 加 origin_node_id 与 flow 专用 partial 唯一索引）；`/flows` CRUD API；`cmd/flowmigrate`（经 `flow_rule_migrations` 映射表幂等重跑）；ingest 接 `flow_engine.mode: off|shadow|primary`，shadow 按 sink+template+文本摘要签名比对并记 WARN。单测含菱形去重、扇出快照、多级过滤、stop_on_match 与新旧引擎对照用例。
+- **画布编辑（F5-2）**：FlowPage 增加「概览/编辑」双模式；编辑模式按 Flow 草稿建图（加节点面板、拖拽写回 pos_x/pos_y、拖圆点连线、点连线删边、target 节点面板选模板/原文）、保存走 `/flows` 全量 PUT，后端校验错误在编辑侧展示；概览模式（三栏只读投影 + RouteInspector）完整保留。
+- **review 修复（严重）**：flow 来源的投递任务原样把 `rule_id` 写成 flow.ID，而 `delivery_tasks.rule_id` 仍有指向 rules 表的外键（00001，从未移除）——flow.ID 无对应规则时插入直接失败（primary 模式消息投递中断）；碰巧撞上无关规则时任务挂错规则且删该规则会级联误删 flow 任务。已改为 flow 任务不写 `rule_id`（chk 约束 flow 分支本就不要求），投递详情按 `RuleID>0` 才查规则天然兼容；补 `TestQueueFlowMatchLeavesRuleIDEmpty` 回归。
+- **验证**：`go build/test ./...` 与 `npm run build` 通过。
+- **已知观察项（暂不处理）**：影子签名只哈希消息文本，处理器若只改 media/caption 则 diff 不可见；单条 flow 编译失败会中断该消息全部求值（入库前有 Compile 校验，属数据漂移防御面）；flowmigrate 单条规则失败即 Fatalf 全停（0 来源/0 目标的死规则会卡迁移）；引擎编译缓存不清理已删除 flow；编辑模式点击连线即删（面板有提示、草稿态可撤）；processor 节点只能选类型、config 参数暂无法在画布编辑（带必填参数的处理器会在保存时被校验拦下）——列入 F5-2 补齐项。
+
 **待真实外部联调**
 
 - [ ] 真实 AI provider key 联调：当前仅用本地 mock 验证 OpenAI-compatible 协议路径，未调用真实模型供应商。
@@ -1075,13 +1083,15 @@ flow_edges (id, flow_id, from_node_id, to_node_id, UNIQUE(flow_id, from_node_id,
 - [x] `internal/flowengine`：编译（含图校验）+ 求值（扇出克隆、target 去重、Flow 间 priority/stop）+ 单元测试（含菱形、多源、多级 filter、stop_on_match 用例）
 - [x] `/flows` CRUD API（DTO 校验图合法性，返回可读的校验错误）
 - [x] `cmd/flowmigrate` + 影子模式接入 ingest + 引擎切换开关
-- [x] 影子 diff 清零后切 primary（默认仍为 `off`，`shadow`/`primary` 由 `flow_engine.mode` 显式切换）
+- [x] 切换机制就绪（默认 `off`，`shadow`/`primary` 由 `flow_engine.mode` 显式切换）
+- [ ] 【运维步骤，代码已就绪】对真实库执行 `00020` 迁移 + `cmd/flowmigrate`，`shadow` 模式跑足量真实消息，日志确认「Flow 影子求值 diff」为零后切 `primary`
 
 **F5-2 画布自由编辑**
 - [x] 画布进入「编辑模式」：节点可拖动、布局写回 pos_x/pos_y；节点面板（来源/过滤器/渠道资源添加建节点，processor 节点从注册表选型）
 - [x] 连线建边/删边直接读写 flow_edges；保存时后端校验错误在画布侧展示
 - [x] Route Inspector 适配 Flow（编辑侧展示节点配置摘要，概览侧保留路径与匹配顺序）
 - [x] 现有三栏自动布局保留为「概览模式」（只读投影）
+- [ ] 节点配置编辑补齐：processor 节点的处理器参数、filter 节点的内联条件在编辑面板可编辑（复用 RuleEditorModal 的条件/处理器构建器）；未保存草稿离开/切换 Flow 时提示
 
 **F5-3 RulesPage 转简单模式**
 - [ ] RuleEditorModal 管道表单改为读写线性 Flow（表单壳 + 线性图的双向转换）
