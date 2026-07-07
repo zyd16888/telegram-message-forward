@@ -138,13 +138,15 @@ function processorNames(rule: Rule): string[] {
   return rule.processors.map((processor) => props.processorLabel(processor.type))
 }
 
+// 匹配序号只对启用规则编号：引擎只评估启用规则，停用规则列出但不占位（order 为 0）。
 function matchingRulesForSource(sourceId: number, activeRuleId?: number): MatchingRule[] {
+  let order = 0
   return props.ruleNodes
     .filter((node) => node.rule.source_ids.includes(sourceId))
     .map((node) => node.rule)
     .sort((a, b) => b.priority - a.priority || a.id - b.id)
-    .map((rule, index) => ({
-      order: index + 1,
+    .map((rule) => ({
+      order: rule.enabled ? ++order : 0,
       rule,
       active: activeRuleId === rule.id,
     }))
@@ -208,7 +210,8 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
               class="order-row"
               :class="{ active: item.active }"
             >
-              <span class="order-no">#{{ item.order }}</span>
+              <span v-if="item.rule.enabled" class="order-no">#{{ item.order }}</span>
+              <span v-else class="order-no disabled">停用</span>
               <span class="order-name">{{ item.rule.name }}</span>
               <span class="priority">P{{ item.rule.priority }}</span>
               <span v-if="item.rule.stop_on_match" class="stop">命中即停</span>
@@ -233,7 +236,8 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
         <div v-if="selectedSourceRules.length" class="path-list">
           <div v-for="item in selectedSourceRules" :key="item.rule.id" class="path-card">
             <div class="path-title">
-              <span class="order-no">#{{ item.order }}</span>
+              <span v-if="item.rule.enabled" class="order-no">#{{ item.order }}</span>
+              <span v-else class="order-no disabled">停用</span>
               <strong>{{ item.rule.name }}</strong>
               <span class="priority">P{{ item.rule.priority }}</span>
               <span v-if="item.rule.stop_on_match" class="stop">命中即停</span>
@@ -335,7 +339,8 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
           class="order-row"
           :class="{ active: item.active }"
         >
-          <span class="order-no">#{{ item.order }}</span>
+          <span v-if="item.rule.enabled" class="order-no">#{{ item.order }}</span>
+          <span v-else class="order-no disabled">停用</span>
           <span class="order-name">{{ item.rule.name }}</span>
           <span class="priority">P{{ item.rule.priority }}</span>
           <span v-if="item.rule.stop_on_match" class="stop">命中即停</span>
@@ -529,6 +534,11 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
   padding: 1px 7px;
   color: var(--clay-primary);
   background: var(--clay-primary-soft);
+}
+
+.order-no.disabled {
+  color: var(--clay-text-3);
+  background: var(--clay-surface);
 }
 
 .order-name {

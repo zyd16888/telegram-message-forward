@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useDialog, useMessage } from 'naive-ui'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
@@ -27,6 +27,7 @@ import { errText } from '@/utils/error'
 const router = useRouter()
 const route = useRoute()
 const message = useMessage()
+const dialog = useDialog()
 
 const { accounts, sources, rules, sinks, templates, loading, ruleNodes, stats, load } = useForwardingGraph()
 
@@ -243,14 +244,19 @@ const visibleFilterIds = computed(() => {
   if (selection.value?.kind === 'filter') {
     ids.add(selection.value.id)
   }
+  // 选中过滤器连线时选中态在 selectedEdge 上（selection 已清空），端点节点必须保持可见。
+  if (selectedEdge.value?.kind === 'filter-rule') {
+    ids.add(selectedEdge.value.filterId)
+  }
   return ids
 })
 
+// 匹配序号只对启用规则编号：引擎按 ListEnabledBySource 只评估启用规则，停用规则不占位。
 const ruleOrderBySource = computed(() => {
   const orderMap = new Map<number, Map<number, number>>()
   for (const source of sources.value) {
     const orderedRules = rules.value
-      .filter((rule) => rule.source_ids.includes(source.id))
+      .filter((rule) => rule.enabled && rule.source_ids.includes(source.id))
       .sort((a, b) => b.priority - a.priority || a.id - b.id)
     orderMap.set(source.id, new Map(orderedRules.map((rule, index) => [rule.id, index + 1])))
   }
@@ -258,6 +264,7 @@ const ruleOrderBySource = computed(() => {
 })
 
 function ruleOrderLabel(rule: Rule): string {
+  if (!rule.enabled) return `P${rule.priority}`
   const selectedSourceId = selection.value?.kind === 'source' ? selection.value.id : null
   if (selectedSourceId && rule.source_ids.includes(selectedSourceId)) {
     return `#${ruleOrderBySource.value.get(selectedSourceId)?.get(rule.id) ?? 1}`
@@ -459,7 +466,19 @@ async function onCanvasConnect({ from, to }: CanvasConnection) {
       message.info('该过滤器已接入此规则')
       return
     }
-    await saveRule(rule, { filter_ids: [...rule.filter_ids, from.id] }, `已接入过滤器「${filterName(from.id)}」`)
+    const attach = () => saveRule(rule, { filter_ids: [...rule.filter_ids, from.id] }, `已接入过滤器「${filterName(from.id)}」`)
+    // 后端语义：filter_ids 非空即覆盖内联条件。连线绕过了编辑器的二选一，需要用户确认。
+    if (rule.conditions.length && !rule.filter_ids.length) {
+      dialog.warning({
+        title: '接入共享过滤器',
+        content: `规则「${rule.name}」当前使用 ${rule.conditions.length} 个专用条件。接入共享过滤器后将以过滤器为准，专用条件不再生效。`,
+        positiveText: '接入并覆盖',
+        negativeText: '取消',
+        onPositiveClick: () => attach(),
+      })
+      return
+    }
+    await attach()
     return
   }
   if (from.kind === 'rule' && to.kind === 'sink') {
