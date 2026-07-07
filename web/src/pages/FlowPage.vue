@@ -5,12 +5,25 @@ import { useMessage } from 'naive-ui'
 import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
+import FlowCanvas from '@/components/flow/FlowCanvas.vue'
+import type {
+  CanvasConnection,
+  CanvasEdgeInput,
+  CanvasNodeInput,
+  RuleNodeData,
+  SinkNodeData,
+  SourceNodeData,
+} from '@/components/flow/types'
 import { filtersApi, rulesApi, sinksApi } from '@/api/client'
 import { useForwardingGraph, type FlowRuleGraphNode } from '@/composables/useForwardingGraph'
-import type { Filter, Rule, RuleInitialDraft, RuleMeta, Sink, SinkDescriptor, Source } from '@/types'
+import type { Filter, Rule, RuleInitialDraft, RuleMeta, Sink, SinkDescriptor, Source, RuleTarget } from '@/types'
 import { errText } from '@/utils/error'
 
 type NodeKind = 'source' | 'rule' | 'sink'
+
+type EdgeRef =
+  | { kind: 'source-rule'; sourceId: number; ruleId: number }
+  | { kind: 'rule-sink'; ruleId: number; sinkId: number }
 
 const router = useRouter()
 const route = useRoute()
@@ -23,6 +36,7 @@ const sinkDescriptors = shallowRef<SinkDescriptor[]>([])
 const filters = shallowRef<Filter[]>([])
 
 const selection = shallowRef<{ kind: NodeKind; id: number } | null>(null)
+const selectedEdge = shallowRef<EdgeRef | null>(null)
 const keyword = shallowRef('')
 const onlyWarnings = shallowRef(false)
 const templateFilterId = shallowRef<number | null>(null)
@@ -35,6 +49,7 @@ const conditionLabelByType = computed(() => new Map(ruleMeta.value.conditions.ma
 const processorLabelByType = computed(() => new Map(ruleMeta.value.processors.map((d) => [d.type, d.label])))
 const sinkTypeLabelByType = computed(() => new Map(sinkDescriptors.value.map((d) => [d.type, d.label])))
 const accountNameById = computed(() => new Map(accounts.value.map((a) => [a.id, a.name])))
+const filterNameById = computed(() => new Map(filters.value.map((f) => [f.id, f.name])))
 
 const setupChecklist = computed(() => [
   { label: '配置 Telegram 账号', done: accounts.value.length > 0, route: 'accounts' },
@@ -163,15 +178,16 @@ const related = computed(() => {
   return { sourceIds, ruleIds, sinkIds }
 })
 
-function cardClass(kind: NodeKind, id: number): string {
+function stateClass(kind: NodeKind, id: number): string {
   const sel = selection.value
   if (!sel || !related.value) return ''
-  if (sel.kind === kind && sel.id === id) return 'selected'
+  if (sel.kind === kind && sel.id === id) return 'is-selected'
   const set = kind === 'source' ? related.value.sourceIds : kind === 'rule' ? related.value.ruleIds : related.value.sinkIds
-  return set.has(id) ? 'linked' : 'dimmed'
+  return set.has(id) ? 'is-linked' : 'is-dimmed'
 }
 
 function toggleSelect(kind: NodeKind, id: number) {
+  selectedEdge.value = null
   if (selection.value && selection.value.kind === kind && selection.value.id === id) {
     selection.value = null
   } else {
@@ -181,23 +197,48 @@ function toggleSelect(kind: NodeKind, id: number) {
 
 function clearSelection() {
   selection.value = null
+  selectedEdge.value = null
   templateFilterId.value = null
   if (Object.keys(route.query).length) {
     void router.replace({ name: 'flow', query: {} })
   }
 }
 
+function onPaneClick() {
+  selection.value = null
+  selectedEdge.value = null
+}
+
 const selectionLabel = computed(() => {
   const sel = selection.value
   if (!sel) return ''
-  if (sel.kind === 'source') return `来源「${sources.value.find((s) => s.id === sel.id)?.name ?? `#${sel.id}`}」`
-  if (sel.kind === 'rule') return `规则「${rules.value.find((r) => r.id === sel.id)?.name ?? `#${sel.id}`}」`
-  return `渠道「${sinks.value.find((s) => s.id === sel.id)?.name ?? `#${sel.id}`}」`
+  if (sel.kind === 'source') return `来源「${sourceName(sel.id)}」`
+  if (sel.kind === 'rule') return `规则「${ruleName(sel.id)}」`
+  return `渠道「${sinkName(sel.id)}」`
 })
 
 const selectionRuleCount = computed(() => (related.value ? related.value.ruleIds.size : 0))
 
+const selectedEdgeLabel = computed(() => {
+  const edge = selectedEdge.value
+  if (!edge) return ''
+  if (edge.kind === 'source-rule') return `连线「${sourceName(edge.sourceId)} → ${ruleName(edge.ruleId)}」`
+  return `连线「${ruleName(edge.ruleId)} → ${sinkName(edge.sinkId)}」`
+})
+
 // --- 展示辅助 ---
+
+function sourceName(id: number): string {
+  return sources.value.find((s) => s.id === id)?.name ?? `#${id}`
+}
+
+function ruleName(id: number): string {
+  return rules.value.find((r) => r.id === id)?.name ?? `#${id}`
+}
+
+function sinkName(id: number): string {
+  return sinks.value.find((s) => s.id === id)?.name ?? `#${id}`
+}
 
 function sourceTypeLabel(source: Source): string {
   if (source.type === 'rss') return 'RSS'
@@ -243,12 +284,6 @@ function sinkDeliveryLabel(sink: Sink): string {
   return `24h ${rate}% · ${success}/${total}`
 }
 
-function sinkLastTestLabel(sink: Sink): string {
-  const obs = sink.observability
-  if (!obs?.last_test_at) return '未测试'
-  return `${obs.last_test_success ? '测试成功' : '测试失败'} · ${formatRuntimeTime(obs.last_test_at)}`
-}
-
 function sourceRuleCount(sourceId: number): number {
   return rules.value.filter((r) => r.source_ids.includes(sourceId)).length
 }
@@ -265,20 +300,104 @@ function processorLabel(type: string): string {
   return processorLabelByType.value.get(type) ?? type
 }
 
-function ruleSourceLabel(sourceNode: FlowRuleGraphNode['sources'][number]): string {
-  return sourceNode.source?.name ?? `来源 #${sourceNode.sourceId}`
+// --- 画布数据组装 ---
+
+const canvasSources = computed<CanvasNodeInput<SourceNodeData>[]>(() =>
+  visibleSources.value.map((source) => ({
+    id: source.id,
+    stateClass: stateClass('source', source.id),
+    data: {
+      name: source.name,
+      typeLabel: sourceTypeLabel(source),
+      accountLabel: sourceAccountLabel(source),
+      runtimeLabel: sourceRuntimeLabel(source),
+      enabled: source.enabled,
+      running: source.runner_status === 'running',
+      ruleCount: sourceRuleCount(source.id),
+    },
+  })),
+)
+
+const canvasRules = computed<CanvasNodeInput<RuleNodeData>[]>(() =>
+  visibleRuleNodes.value.map((node) => ({
+    id: node.rule.id,
+    stateClass: stateClass('rule', node.rule.id),
+    data: {
+      name: node.rule.name,
+      enabled: node.rule.enabled,
+      priority: node.rule.priority,
+      stopOnMatch: node.rule.stop_on_match,
+      conditionChips: node.rule.filter_ids.length
+        ? node.rule.filter_ids.map((id) => filterNameById.value.get(id) ?? `过滤器 #${id}`)
+        : node.rule.conditions.map((item) => conditionLabel(item.type)),
+      processorChips: node.rule.processors.map((item) => processorLabel(item.type)),
+      warnings: node.warnings,
+    },
+  })),
+)
+
+const canvasSinks = computed<CanvasNodeInput<SinkNodeData>[]>(() =>
+  visibleSinks.value.map((sink) => ({
+    id: sink.id,
+    stateClass: stateClass('sink', sink.id),
+    data: {
+      name: sink.name,
+      typeLabel: sinkTypeLabel(sink),
+      enabled: sink.enabled,
+      deliveryLabel: sinkDeliveryLabel(sink),
+      ruleCount: sinkRuleCount(sink.id),
+    },
+  })),
+)
+
+const canvasEdges = computed<CanvasEdgeInput[]>(() => {
+  const sourceIds = new Set(visibleSources.value.map((s) => s.id))
+  const sinkIds = new Set(visibleSinks.value.map((s) => s.id))
+  const rel = related.value
+  const out: CanvasEdgeInput[] = []
+  for (const node of visibleRuleNodes.value) {
+    const ruleId = node.rule.id
+    for (const src of node.sources) {
+      if (!sourceIds.has(src.sourceId)) continue
+      const hot = rel ? rel.ruleIds.has(ruleId) && rel.sourceIds.has(src.sourceId) : false
+      out.push({
+        key: `s${src.sourceId}:r${ruleId}`,
+        from: { kind: 'source', id: src.sourceId },
+        to: { kind: 'rule', id: ruleId },
+        warn: Boolean(src.source && !src.source.enabled),
+        hot,
+        stateClass: rel ? (hot ? 'is-hot' : 'is-faded') : '',
+      })
+    }
+    for (const target of node.targets) {
+      if (!sinkIds.has(target.sinkId)) continue
+      const hot = rel ? rel.ruleIds.has(ruleId) && rel.sinkIds.has(target.sinkId) : false
+      const templateMissing = Boolean(target.templateId && !target.template)
+      out.push({
+        key: `r${ruleId}:k${target.sinkId}`,
+        from: { kind: 'rule', id: ruleId },
+        to: { kind: 'sink', id: target.sinkId },
+        label: target.template?.name ?? (templateMissing ? `模板 #${target.templateId} 缺失` : undefined),
+        warn: templateMissing || Boolean(target.sink && !target.sink.enabled),
+        hot,
+        stateClass: rel ? (hot ? 'is-hot' : 'is-faded') : '',
+      })
+    }
+  }
+  return out
+})
+
+function parseEdgeKey(key: string): EdgeRef | null {
+  let match = /^s(\d+):r(\d+)$/.exec(key)
+  if (match) return { kind: 'source-rule', sourceId: Number(match[1]), ruleId: Number(match[2]) }
+  match = /^r(\d+):k(\d+)$/.exec(key)
+  if (match) return { kind: 'rule-sink', ruleId: Number(match[1]), sinkId: Number(match[2]) }
+  return null
 }
 
-function targetTemplateLabel(target: FlowRuleGraphNode['targets'][number]): string {
-  if (target.template) return target.template.name
-  if (target.templateId) return `模板 #${target.templateId}`
-  return '原文'
-}
-
-function targetTemplateClass(target: FlowRuleGraphNode['targets'][number]): string {
-  if (target.template) return 'template'
-  if (target.templateId) return 'missing'
-  return 'plain'
+function onSelectEdge(key: string) {
+  selection.value = null
+  selectedEdge.value = parseEdgeKey(key)
 }
 
 // --- 数据与操作 ---
@@ -299,23 +418,86 @@ async function loadMeta() {
   }
 }
 
-async function toggleRule(rule: Rule, value: boolean) {
+// 规则更新是全量 PUT：必须回传含 filter_ids 在内的完整规则体，只覆盖 patch 字段。
+function ruleBodyOf(rule: Rule) {
+  return {
+    name: rule.name,
+    enabled: rule.enabled,
+    priority: rule.priority,
+    filter_ids: rule.filter_ids,
+    conditions: rule.filter_ids.length ? [] : rule.conditions,
+    processors: rule.processors,
+    stop_on_match: rule.stop_on_match,
+    source_ids: rule.source_ids,
+    targets: rule.targets,
+  }
+}
+
+async function saveRule(
+  rule: Rule,
+  patch: Partial<{ enabled: boolean; source_ids: number[]; targets: RuleTarget[] }>,
+  okMessage: string,
+) {
   try {
-    // 规则更新是全量 PUT，必须回传完整规则体，只改 enabled。
-    await rulesApi.update(rule.id, {
-      name: rule.name,
-      enabled: value,
-      priority: rule.priority,
-      conditions: rule.conditions,
-      processors: rule.processors,
-      stop_on_match: rule.stop_on_match,
-      source_ids: rule.source_ids,
-      targets: rule.targets,
-    })
+    await rulesApi.update(rule.id, { ...ruleBodyOf(rule), ...patch })
+    message.success(okMessage)
     await refresh()
   } catch (e) {
     message.error('更新规则失败：' + errText(e))
   }
+}
+
+async function toggleRule(ruleId: number, value: boolean) {
+  const rule = rules.value.find((r) => r.id === ruleId)
+  if (!rule) return
+  await saveRule(rule, { enabled: value }, value ? '已启用规则' : '已停用规则')
+}
+
+async function onCanvasConnect({ from, to }: CanvasConnection) {
+  if (from.kind === 'source' && to.kind === 'rule') {
+    const rule = rules.value.find((r) => r.id === to.id)
+    if (!rule) return
+    if (rule.source_ids.includes(from.id)) {
+      message.info('该来源已接入此规则')
+      return
+    }
+    await saveRule(rule, { source_ids: [...rule.source_ids, from.id] }, `已接入来源「${sourceName(from.id)}」`)
+    return
+  }
+  if (from.kind === 'rule' && to.kind === 'sink') {
+    const rule = rules.value.find((r) => r.id === from.id)
+    if (!rule) return
+    if (rule.targets.some((t) => t.sink_id === to.id)) {
+      message.info('该规则已投递到此渠道')
+      return
+    }
+    await saveRule(rule, { targets: [...rule.targets, { sink_id: to.id, template_id: undefined }] }, `已添加目标「${sinkName(to.id)}」`)
+    return
+  }
+  if (from.kind === 'source' && to.kind === 'sink') {
+    editingRule.value = null
+    initialDraft.value = {
+      name: `转发：${sourceName(from.id)} -> ${sinkName(to.id)}`,
+      source_ids: [from.id],
+      targets: [{ sink_id: to.id, template_id: undefined }],
+    }
+    showRuleModal.value = true
+    return
+  }
+  message.warning('只支持 来源→规则、规则→渠道、来源→渠道 三种连线')
+}
+
+async function detachSelectedEdge() {
+  const edge = selectedEdge.value
+  if (!edge) return
+  const rule = rules.value.find((r) => r.id === edge.ruleId)
+  if (!rule) return
+  if (edge.kind === 'source-rule') {
+    await saveRule(rule, { source_ids: rule.source_ids.filter((id) => id !== edge.sourceId) }, '已解除来源关联')
+  } else {
+    await saveRule(rule, { targets: rule.targets.filter((t) => t.sink_id !== edge.sinkId) }, '已解除目标关联')
+  }
+  selectedEdge.value = null
 }
 
 function openCreateRule() {
@@ -324,7 +506,9 @@ function openCreateRule() {
   showRuleModal.value = true
 }
 
-function openEditRule(rule: Rule) {
+function openEditRule(ruleId: number) {
+  const rule = rules.value.find((r) => r.id === ruleId)
+  if (!rule) return
   editingRule.value = rule
   initialDraft.value = null
   showRuleModal.value = true
@@ -334,12 +518,10 @@ function buildDraftFromSelection(): RuleInitialDraft | null {
   const sel = selection.value
   if (!sel) return null
   if (sel.kind === 'source') {
-    const source = sources.value.find((s) => s.id === sel.id)
-    return { name: source ? `转发：${source.name}` : '', source_ids: [sel.id], targets: [] }
+    return { name: `转发：${sourceName(sel.id)}`, source_ids: [sel.id], targets: [] }
   }
   if (sel.kind === 'sink') {
-    const sink = sinks.value.find((s) => s.id === sel.id)
-    return { name: sink ? `转发 -> ${sink.name}` : '', source_ids: [], targets: [{ sink_id: sel.id, template_id: undefined }] }
+    return { name: `转发 -> ${sinkName(sel.id)}`, source_ids: [], targets: [{ sink_id: sel.id, template_id: undefined }] }
   }
   return null
 }
@@ -389,7 +571,11 @@ onMounted(async () => {
 
 <template>
   <NSpace vertical size="large">
-    <PageHeader title="转发编排" desc="点击任意来源、规则或渠道，查看它的上下游链路；规则可直接启停和编辑" icon="flow">
+    <PageHeader
+      title="转发编排"
+      desc="画布上直接拖线：来源→规则、规则→渠道建立关联，来源→渠道快速新建规则；点连线可解除关联"
+      icon="flow"
+    >
       <template #actions>
         <NButton type="primary" @click="openCreateRule">
           <template #icon><ClayIcon name="plus" :size="16" /></template>
@@ -467,177 +653,35 @@ onMounted(async () => {
       </span>
       <div class="context-actions">
         <NButton v-if="selection.kind !== 'rule'" size="small" @click="openCreateRule">沿此建规则</NButton>
+        <NButton v-if="selection.kind === 'rule'" size="small" @click="openEditRule(selection.id)">编辑规则</NButton>
         <NButton size="small" @click="goToSelectedConfig">管理配置</NButton>
         <NButton size="small" @click="goToDeliveries">查看投递记录</NButton>
         <NButton size="small" text type="primary" @click="clearSelection">清除选中</NButton>
       </div>
     </div>
 
-    <NSpin :show="loading">
-      <div v-if="sources.length || rules.length || sinks.length" class="board">
-        <!-- 来源列 -->
-        <section class="board-column">
-          <header class="column-head">
-            <span class="column-title">来源</span>
-            <span class="column-count">{{ visibleSources.length }}</span>
-          </header>
-          <div class="card-stack">
-            <button
-              v-for="source in visibleSources"
-              :key="source.id"
-              type="button"
-              class="node-card"
-              :class="cardClass('source', source.id)"
-              @click="toggleSelect('source', source.id)"
-            >
-              <div class="node-head">
-                <span class="status-dot" :class="{ on: source.enabled }" />
-                <span class="node-name">{{ source.name }}</span>
-              </div>
-              <div class="node-meta">
-                <span class="node-tag">{{ sourceTypeLabel(source) }}</span>
-                <span class="node-sub">{{ sourceAccountLabel(source) }}</span>
-                <span class="node-sub">{{ sourceRuleCount(source.id) ? `${sourceRuleCount(source.id)} 条规则` : '未接规则' }}</span>
-              </div>
-              <div class="node-foot">
-                <span class="node-foot-text" :class="{ muted: !source.enabled || source.runner_status !== 'running' }">
-                  {{ sourceRuntimeLabel(source) }}
-                </span>
-              </div>
-            </button>
-            <NEmpty v-if="!visibleSources.length" size="small" description="没有匹配的来源" />
-          </div>
-        </section>
-
-        <!-- 规则列 -->
-        <section class="board-column rules-column">
-          <header class="column-head">
-            <span class="column-title">规则</span>
-            <span class="column-count">{{ visibleRuleNodes.length }}</span>
-          </header>
-          <div class="card-stack">
-            <div
-              v-for="node in visibleRuleNodes"
-              :key="node.rule.id"
-              class="node-card rule-card"
-              :class="cardClass('rule', node.rule.id)"
-              role="button"
-              tabindex="0"
-              @click="toggleSelect('rule', node.rule.id)"
-              @keydown.enter="toggleSelect('rule', node.rule.id)"
-            >
-              <div class="node-head">
-                <span class="node-name rule-name">{{ node.rule.name }}</span>
-                <NTooltip v-if="node.warnings.length" trigger="hover">
-                  <template #trigger>
-                    <span class="warn-badge">{{ node.warnings.length }}</span>
-                  </template>
-                  <ul class="warn-list">
-                    <li v-for="warning in node.warnings" :key="warning">{{ warning }}</li>
-                  </ul>
-                </NTooltip>
-                <span class="rule-actions" @click.stop>
-                  <NTooltip trigger="hover">
-                    <template #trigger>
-                      <NButton size="tiny" quaternary circle @click="openEditRule(node.rule)">
-                        <template #icon><ClayIcon name="edit" :size="14" /></template>
-                      </NButton>
-                    </template>
-                    编辑规则
-                  </NTooltip>
-                  <NSwitch
-                    size="small"
-                    :value="node.rule.enabled"
-                    @update:value="(value: boolean) => toggleRule(node.rule, value)"
-                  />
-                </span>
-              </div>
-              <div class="rule-meta">
-                优先级 {{ node.rule.priority }}
-                <template v-if="node.rule.stop_on_match"> · 命中即停</template>
-                · {{ node.sources.length }} 来源 → {{ node.targets.length }} 目标
-              </div>
-              <div class="path-rows">
-                <div class="path-row">
-                  <span class="path-label">来源</span>
-                  <span class="path-values">
-                    <span v-for="source in node.sources" :key="source.sourceId" class="path-chip">
-                      {{ ruleSourceLabel(source) }}
-                    </span>
-                    <span v-if="!node.sources.length" class="path-chip missing">未指定来源</span>
-                  </span>
-                </div>
-                <div class="path-row">
-                  <span class="path-label">处理</span>
-                  <span class="path-values">
-                    <span
-                      v-for="(condition, index) in node.rule.conditions"
-                      :key="`pc-${condition.type}-${index}`"
-                      class="path-chip condition"
-                    >
-                      {{ conditionLabel(condition.type) }}
-                    </span>
-                    <span
-                      v-for="(processor, index) in node.rule.processors"
-                      :key="`pp-${processor.type}-${index}`"
-                      class="path-chip processor"
-                    >
-                      {{ processorLabel(processor.type) }}
-                    </span>
-                    <span v-if="!node.rule.conditions.length && !node.rule.processors.length" class="path-chip plain">全部消息</span>
-                  </span>
-                </div>
-              </div>
-              <div class="target-rows">
-                <div v-for="target in node.targets" :key="`${target.sinkId}-${target.templateId ?? 0}`" class="target-row">
-                  <span class="target-sink">{{ target.sink?.name ?? `渠道 #${target.sinkId}` }}</span>
-                  <span class="target-template" :class="targetTemplateClass(target)">{{ targetTemplateLabel(target) }}</span>
-                </div>
-                <div v-if="!node.targets.length" class="target-row empty">未配置目标渠道</div>
-              </div>
-            </div>
-            <NEmpty v-if="!visibleRuleNodes.length" size="small" description="没有匹配的规则">
-              <template #extra>
-                <NButton size="small" type="primary" @click="openCreateRule">新建规则</NButton>
-              </template>
-            </NEmpty>
-          </div>
-        </section>
-
-        <!-- 渠道列 -->
-        <section class="board-column">
-          <header class="column-head">
-            <span class="column-title">渠道</span>
-            <span class="column-count">{{ visibleSinks.length }}</span>
-          </header>
-          <div class="card-stack">
-            <button
-              v-for="sink in visibleSinks"
-              :key="sink.id"
-              type="button"
-              class="node-card"
-              :class="cardClass('sink', sink.id)"
-              @click="toggleSelect('sink', sink.id)"
-            >
-              <div class="node-head">
-                <span class="status-dot" :class="{ on: sink.enabled }" />
-                <span class="node-name">{{ sink.name }}</span>
-              </div>
-              <div class="node-meta">
-                <span class="node-tag">{{ sinkTypeLabel(sink) }}</span>
-                <span class="node-sub">{{ sinkRuleCount(sink.id) ? `${sinkRuleCount(sink.id)} 条规则` : '未接规则' }}</span>
-              </div>
-              <div class="node-foot">
-                <span class="node-foot-text">{{ sinkDeliveryLabel(sink) }}</span>
-                <span class="node-foot-text" :class="{ muted: !sink.observability?.last_test_success }">
-                  {{ sinkLastTestLabel(sink) }}
-                </span>
-              </div>
-            </button>
-            <NEmpty v-if="!visibleSinks.length" size="small" description="没有匹配的渠道" />
-          </div>
-        </section>
+    <div v-else-if="selectedEdge" class="context-bar">
+      <span class="context-label">已选中 {{ selectedEdgeLabel }}</span>
+      <div class="context-actions">
+        <NButton size="small" type="error" secondary @click="detachSelectedEdge">解除关联</NButton>
+        <NButton size="small" text type="primary" @click="selectedEdge = null">取消</NButton>
       </div>
+    </div>
+
+    <NSpin :show="loading">
+      <FlowCanvas
+        v-if="sources.length || rules.length || sinks.length"
+        :sources="canvasSources"
+        :rules="canvasRules"
+        :sinks="canvasSinks"
+        :edges="canvasEdges"
+        @select-node="toggleSelect"
+        @select-edge="onSelectEdge"
+        @clear-select="onPaneClick"
+        @connect="onCanvasConnect"
+        @edit-rule="openEditRule"
+        @toggle-rule="toggleRule"
+      />
 
       <NEmpty v-else description="还没有可编排的来源、规则或渠道">
         <template #extra>
@@ -896,358 +940,15 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
-.board {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.6fr) minmax(220px, 0.8fr);
-  gap: 14px;
-  align-items: start;
-}
-
-.board-column {
-  border: 1px solid var(--clay-border);
-  border-radius: 14px;
-  background: var(--clay-surface);
-  box-shadow: var(--clay-out-sm);
-  overflow: hidden;
-}
-
-.column-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--clay-border);
-  background: var(--clay-surface-2);
-  box-shadow: none;
-}
-
-.column-title {
-  color: var(--clay-text);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.column-count {
-  min-width: 22px;
-  padding: 0 6px;
-  border-radius: 999px;
-  color: var(--clay-text-2);
-  background: var(--clay-surface);
-  border: 1px solid var(--clay-border);
-  box-shadow: none;
-  font-size: 12px;
-  font-weight: 700;
-  text-align: center;
-}
-
-.card-stack {
-  display: grid;
-  gap: 8px;
-  max-height: 640px;
-  overflow: auto;
-  padding: 10px;
-}
-
-.node-card {
-  width: 100%;
-  min-width: 0;
-  padding: 11px 12px;
-  border: 1px solid var(--clay-border);
-  border-radius: 12px;
-  color: inherit;
-  background: var(--clay-surface);
-  box-shadow: var(--clay-out-sm);
-  cursor: pointer;
-  text-align: left;
-  transition: opacity 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, background-color 0.16s ease;
-}
-
-.node-card:hover,
-.node-card:focus-visible {
-  border-color: var(--clay-border-strong);
-  box-shadow: var(--clay-hover);
-  transform: translateY(-1px);
-  outline: none;
-}
-
-.node-card.selected {
-  border-color: var(--clay-primary);
-  background: color-mix(in srgb, var(--clay-primary-soft) 55%, var(--clay-surface));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--clay-primary) 18%, transparent);
-  transform: none;
-}
-
-.node-card.linked {
-  border-color: color-mix(in srgb, var(--clay-primary) 40%, var(--clay-border));
-  background: color-mix(in srgb, var(--clay-primary-soft) 25%, var(--clay-surface));
-  box-shadow: var(--clay-out-sm);
-}
-
-.node-card.dimmed {
-  opacity: 0.38;
-}
-
-.node-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: var(--clay-border-strong);
-}
-
-.status-dot.on {
-  background: #10b981;
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.14);
-}
-
-.node-name {
-  color: var(--clay-text);
-  font-size: 13px;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.node-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-
-.node-tag {
-  padding: 1px 8px;
-  border: 1px solid var(--clay-border);
-  border-radius: 999px;
-  color: var(--clay-text-2);
-  background: var(--clay-surface-2);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.node-sub {
-  color: var(--clay-text-3);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.node-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
-
-.node-foot-text {
-  max-width: 100%;
-  color: var(--clay-text-2);
-  font-size: 11px;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.node-foot-text.muted {
-  color: var(--clay-text-3);
-}
-
-/* 规则卡片 */
-
-.rule-card {
-  cursor: pointer;
-}
-
-.rule-name {
-  flex: 1;
-  font-size: 14px;
-}
-
-.rule-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.warn-badge {
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  color: #b45309;
-  background: var(--clay-warning-soft);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.warn-list {
-  margin: 0;
-  padding-left: 16px;
-  max-width: 320px;
-}
-
-.rule-meta {
-  margin-top: 4px;
-  color: var(--clay-text-3);
-  font-size: 12px;
-}
-
-.path-rows {
-  display: grid;
-  gap: 6px;
-  margin-top: 9px;
-}
-
-.path-row {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-}
-
-.path-label {
-  padding-top: 2px;
-  color: var(--clay-text-3);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.path-values {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-
-.path-chip {
-  max-width: 100%;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: var(--clay-text-2);
-  background: var(--clay-surface-2);
-  border: 1px solid var(--clay-border);
-  font-size: 11px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.path-chip.condition {
-  color: #1d6fb8;
-  background: rgba(59, 130, 246, 0.12);
-  border-color: rgba(59, 130, 246, 0.24);
-}
-
-.path-chip.processor {
-  color: #7c3aed;
-  background: rgba(139, 92, 246, 0.12);
-  border-color: rgba(139, 92, 246, 0.24);
-}
-
-.path-chip.missing {
-  color: #b45309;
-  background: var(--clay-warning-soft);
-  border-color: rgba(180, 83, 9, 0.24);
-}
-
-.path-chip.plain {
-  color: var(--clay-text-3);
-}
-
-.target-rows {
-  display: grid;
-  gap: 4px;
-  margin-top: 8px;
-}
-
-.target-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--clay-border);
-  border-radius: 10px;
-  background: var(--clay-surface-2);
-  font-size: 12px;
-}
-
-.target-row.empty {
-  justify-content: flex-start;
-  color: var(--clay-text-3);
-  border-style: dashed;
-}
-
-.target-sink {
-  color: var(--clay-text);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.target-template {
-  flex-shrink: 0;
-  color: var(--clay-text-3);
-}
-
-.target-template.template {
-  color: #1d6fb8;
-  font-weight: 700;
-}
-
-.target-template.missing {
-  color: #b45309;
-  font-weight: 700;
-}
-
-.target-template.plain {
-  color: var(--clay-text-3);
-}
-
 @media (max-width: 1100px) {
   .overview-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .board {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .rules-column {
-    grid-column: 1 / -1;
-    order: -1;
   }
 }
 
 @media (max-width: 680px) {
   .overview-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .board {
-    grid-template-columns: 1fr;
   }
 
   .setup-panel {

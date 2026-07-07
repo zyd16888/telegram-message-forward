@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import ConfigFormRenderer from '@/components/ConfigFormRenderer.vue'
 import { rulesApi } from '@/api/client'
@@ -17,6 +17,8 @@ import type {
   Template,
 } from '@/types'
 import { errText } from '@/utils/error'
+
+type StageKey = 'sources' | 'match' | 'process' | 'targets' | 'preview'
 
 const show = defineModel<boolean>('show', { required: true })
 
@@ -36,6 +38,8 @@ const emit = defineEmits<{
 }>()
 
 const message = useMessage()
+
+const activeStage = ref<StageKey>('sources')
 
 const form = reactive({
   name: '',
@@ -87,6 +91,57 @@ const senderTypeOptions = [
   { label: '频道/超级群', value: 'channel' },
 ]
 
+// --- 管道节点摘要 ---
+
+const sourceChips = computed(() =>
+  form.source_ids.map((id) => props.sources.find((s) => s.id === id)?.name ?? `#${id}`),
+)
+const targetChips = computed(() =>
+  form.targets.map((t) => props.sinks.find((s) => s.id === t.sink_id)?.name ?? `#${t.sink_id}`),
+)
+
+const stages = computed(() => [
+  {
+    key: 'sources' as StageKey,
+    title: '来源',
+    summary: form.source_ids.length ? `${form.source_ids.length} 个监听源` : '未指定来源',
+    warn: form.source_ids.length === 0,
+    chips: sourceChips.value,
+  },
+  {
+    key: 'match' as StageKey,
+    title: '条件',
+    summary: usingFilter.value
+      ? `${form.filter_ids.length} 个共享过滤器`
+      : form.conditions.length
+        ? `${form.conditions.length} 个专用条件`
+        : '全部消息',
+    warn: false,
+    chips: usingFilter.value ? selectedFilters.value.map((f) => f.name) : [],
+  },
+  {
+    key: 'process' as StageKey,
+    title: '处理',
+    summary: form.processors.length ? `${form.processors.length} 个处理器` : '原样转发',
+    warn: false,
+    chips: form.processors.map((p) => processorDescriptor(p.type)?.label ?? p.type),
+  },
+  {
+    key: 'targets' as StageKey,
+    title: '目标',
+    summary: form.targets.length ? `${form.targets.length} 个渠道` : '未配置目标',
+    warn: form.targets.length === 0,
+    chips: targetChips.value,
+  },
+  {
+    key: 'preview' as StageKey,
+    title: '预演',
+    summary: preview.result ? (preview.result.matched ? '上次：命中' : '上次：未命中') : '试跑样例消息',
+    warn: false,
+    chips: [],
+  },
+])
+
 watch(
   () => [show.value, props.rule, props.initialDraft] as const,
   () => {
@@ -97,6 +152,7 @@ watch(
 )
 
 function resetForm() {
+  activeStage.value = 'sources'
   if (props.rule) {
     form.name = props.rule.name
     form.enabled = props.rule.enabled
@@ -120,6 +176,8 @@ function resetForm() {
   form.processors = []
   form.source_ids = [...(draft?.source_ids ?? [])]
   form.targets = (draft?.targets ?? []).map((item) => ({ ...item }))
+  // 沿来源建规则时直接跳到下一步，减少一次点击。
+  if (form.source_ids.length && !form.targets.length) activeStage.value = 'match'
   resetPreview()
 }
 
@@ -212,16 +270,19 @@ function validate(): boolean {
   }
   if (!form.targets.length) {
     message.warning('请至少添加一个目标渠道')
+    activeStage.value = 'targets'
     return false
   }
   const seenSinks = new Set<number>()
   for (const target of form.targets) {
     if (!target.sink_id) {
       message.warning('规则目标中存在未选择渠道的项')
+      activeStage.value = 'targets'
       return false
     }
     if (seenSinks.has(target.sink_id)) {
       message.warning('同一条规则不能重复选择同一个渠道')
+      activeStage.value = 'targets'
       return false
     }
     seenSinks.add(target.sink_id)
@@ -230,6 +291,7 @@ function validate(): boolean {
     const template = props.templates.find((item) => item.id === target.template_id)
     if (sink && template && !sinkSupportsFormat(sink, template.format)) {
       message.warning(`渠道「${sink.name}」不支持 ${template.format} 模板`)
+      activeStage.value = 'targets'
       return false
     }
   }
@@ -270,6 +332,7 @@ async function submit() {
 async function runPreview() {
   if (!form.targets.length) {
     message.warning('请先添加至少一个目标渠道')
+    activeStage.value = 'targets'
     return
   }
   preview.loading = true
@@ -311,195 +374,205 @@ function previewTargetLabel(target: RuleTarget): string {
     preset="card"
     :title="editing ? '编辑规则' : '新建规则'"
     class="rule-modal"
-    :style="{ width: 'min(840px, calc(100vw - 32px))' }"
+    :style="{ width: 'min(920px, calc(100vw - 32px))' }"
   >
     <div class="modal-body">
-      <NForm label-placement="top">
-        <section class="form-section">
-          <div class="section-title">规则入口</div>
-          <div class="base-grid">
-            <NFormItem label="名称" required>
-              <NInput v-model:value="form.name" />
-            </NFormItem>
-            <NFormItem label="优先级">
-              <NInputNumber v-model:value="form.priority" class="full-input" />
-            </NFormItem>
-            <NFormItem label="启用">
-              <NSwitch v-model:value="form.enabled" />
-            </NFormItem>
-            <NFormItem label="命中即停">
-              <NSwitch v-model:value="form.stop_on_match" />
-            </NFormItem>
-          </div>
-          <NFormItem label="来源">
-            <NSelect v-model:value="form.source_ids" multiple :options="sourceOptions" />
-          </NFormItem>
-        </section>
+      <!-- 常驻基本信息 -->
+      <div class="base-bar">
+        <NInput v-model:value="form.name" class="name-input" placeholder="规则名称（必填）" />
+        <div class="base-item">
+          <span class="base-label">优先级</span>
+          <NInputNumber v-model:value="form.priority" size="small" class="priority-input" />
+        </div>
+        <div class="base-item">
+          <span class="base-label">启用</span>
+          <NSwitch v-model:value="form.enabled" size="small" />
+        </div>
+        <div class="base-item">
+          <NTooltip trigger="hover">
+            <template #trigger>
+              <span class="base-label dashed">命中即停</span>
+            </template>
+            命中本规则后，不再继续匹配更低优先级的规则。
+          </NTooltip>
+          <NSwitch v-model:value="form.stop_on_match" size="small" />
+        </div>
+      </div>
 
-        <section class="form-section">
-          <div class="section-head">
-            <div>
-              <div class="section-title">匹配条件</div>
-              <div class="section-desc">为空时表示来源消息直接进入这条规则。可多选共享过滤器，或写本规则专用条件。</div>
-            </div>
-            <NButton v-if="!usingFilter" size="small" dashed @click="addCondition">添加条件</NButton>
-          </div>
-          <NFormItem label="共享过滤器">
-            <NSelect
-              v-model:value="form.filter_ids"
-              multiple
-              clearable
-              :options="filterOptions"
-              placeholder="不选则使用本规则专用条件"
-            />
-          </NFormItem>
+      <!-- 管道节点条：点节点配置对应环节 -->
+      <div class="pipeline">
+        <template v-for="(stage, index) in stages" :key="stage.key">
+          <button
+            type="button"
+            class="pipe-node"
+            :class="{ active: activeStage === stage.key, warn: stage.warn, preview: stage.key === 'preview' }"
+            @click="activeStage = stage.key"
+          >
+            <span class="pipe-title">
+              {{ stage.title }}
+              <span v-if="stage.warn" class="pipe-warn-dot" />
+            </span>
+            <span class="pipe-summary">{{ stage.summary }}</span>
+            <span v-if="stage.chips.length" class="pipe-chips">
+              <span v-for="chip in stage.chips.slice(0, 2)" :key="chip" class="pipe-chip">{{ chip }}</span>
+              <span v-if="stage.chips.length > 2" class="pipe-chip more">+{{ stage.chips.length - 2 }}</span>
+            </span>
+          </button>
+          <span v-if="index < stages.length - 1" class="pipe-arrow" :class="{ dashed: stages[index + 1].key === 'preview' }">→</span>
+        </template>
+      </div>
 
-          <template v-if="usingFilter">
-            <NAlert type="info" :show-icon="false" class="filter-note">
-              当前规则会按顺序合并 {{ selectedFilters.length }} 个共享过滤器的条件，全部通过后才会命中。
-              修改共享过滤器会联动所有引用它的规则与 AI 整理；如需单独调整，请清空选择后使用本规则专用条件。
-            </NAlert>
-            <div class="filter-list">
-              <div v-for="filter in selectedFilters" :key="filter.id" class="filter-item">
-                <div class="filter-name">{{ filter.name }}</div>
-                <div v-if="filter.conditions.length" class="filter-cond-list">
-                  <NTag
-                    v-for="(c, i) in filter.conditions"
-                    :key="`${filter.id}-${i}`"
-                    size="small"
-                    :bordered="false"
-                    type="info"
-                  >
-                    {{ conditionDescriptor(c.type)?.label ?? c.type }}
-                  </NTag>
+      <!-- 当前环节配置面板 -->
+      <div class="stage-panel">
+        <NForm label-placement="top">
+          <template v-if="activeStage === 'sources'">
+            <div class="panel-desc">选择哪些监听源的消息进入这条规则；也可以稍后在编排画布上直接连线。</div>
+            <NFormItem label="监听来源" :show-feedback="false">
+              <NSelect v-model:value="form.source_ids" multiple filterable :options="sourceOptions" placeholder="选择一个或多个来源" />
+            </NFormItem>
+          </template>
+
+          <template v-else-if="activeStage === 'match'">
+            <div class="panel-desc">为空表示来源消息全部进入。可多选共享过滤器（按顺序合并、全部通过才命中），或写本规则专用条件。</div>
+            <NFormItem label="共享过滤器" :show-feedback="false">
+              <NSelect
+                v-model:value="form.filter_ids"
+                multiple
+                clearable
+                :options="filterOptions"
+                placeholder="不选则使用本规则专用条件"
+              />
+            </NFormItem>
+
+            <template v-if="usingFilter">
+              <NAlert type="info" :show-icon="false" class="filter-note">
+                修改共享过滤器会联动所有引用它的规则与 AI 整理；如需单独调整，请清空选择后使用本规则专用条件。
+              </NAlert>
+              <div class="filter-list">
+                <div v-for="filter in selectedFilters" :key="filter.id" class="filter-item">
+                  <div class="filter-name">{{ filter.name }}</div>
+                  <div v-if="filter.conditions.length" class="filter-cond-list">
+                    <NTag
+                      v-for="(c, i) in filter.conditions"
+                      :key="`${filter.id}-${i}`"
+                      size="small"
+                      :bordered="false"
+                      type="info"
+                    >
+                      {{ conditionDescriptor(c.type)?.label ?? c.type }}
+                    </NTag>
+                  </div>
+                  <NText v-else depth="3">未配置条件</NText>
                 </div>
-                <NText v-else depth="3">未配置条件</NText>
               </div>
+            </template>
+
+            <template v-else>
+              <div v-for="(condition, index) in form.conditions" :key="index" class="rule-block">
+                <NSpace align="center" justify="space-between">
+                  <NSelect
+                    :value="condition.type"
+                    class="type-select"
+                    :options="conditionOptions"
+                    @update:value="(value: string) => updateConditionType(condition, value)"
+                  />
+                  <NButton size="small" type="error" secondary @click="removeCondition(index)">移除</NButton>
+                </NSpace>
+                <ConfigFormRenderer
+                  v-if="conditionDescriptor(condition.type)"
+                  v-model="condition.config"
+                  :fields="conditionDescriptor(condition.type)?.fields ?? []"
+                />
+                <NText v-if="conditionDescriptor(condition.type)?.description" depth="3">
+                  {{ conditionDescriptor(condition.type)?.description }}
+                </NText>
+              </div>
+              <NButton size="small" dashed block @click="addCondition">添加条件</NButton>
+            </template>
+          </template>
+
+          <template v-else-if="activeStage === 'process'">
+            <div class="panel-desc">在投递前按顺序改写或过滤消息内容；不添加则原样转发。</div>
+            <div v-for="(processor, index) in form.processors" :key="index" class="rule-block">
+              <NSpace align="center" justify="space-between">
+                <NSelect
+                  :value="processor.type"
+                  class="type-select"
+                  :options="processorOptions"
+                  @update:value="(value: string) => updateProcessorType(processor, value)"
+                />
+                <NButton size="small" type="error" secondary @click="removeProcessor(index)">移除</NButton>
+              </NSpace>
+              <ConfigFormRenderer
+                v-if="processorDescriptor(processor.type)"
+                v-model="processor.config"
+                :fields="processorDescriptor(processor.type)?.fields ?? []"
+              />
+              <NText v-if="processorDescriptor(processor.type)?.description" depth="3">
+                {{ processorDescriptor(processor.type)?.description }}
+              </NText>
             </div>
+            <NButton size="small" dashed block @click="addProcessor">添加处理器</NButton>
+          </template>
+
+          <template v-else-if="activeStage === 'targets'">
+            <div class="panel-desc">一条规则可以投递到多个渠道，每个渠道可单独选择渲染模板；不选模板则按纯文本投递。</div>
+            <div v-for="(target, index) in form.targets" :key="index" class="target-row">
+              <NSelect v-model:value="target.sink_id" class="target-select" placeholder="渠道" :options="sinkOptions" />
+              <NSelect
+                v-model:value="target.template_id"
+                class="target-select"
+                clearable
+                placeholder="模板（可空=纯文本）"
+                :options="templateOptionsFor(target.sink_id)"
+              />
+              <NButton size="small" type="error" secondary @click="removeTarget(index)">移除</NButton>
+            </div>
+            <NButton size="small" dashed block @click="addTarget">添加目标</NButton>
           </template>
 
           <template v-else>
-            <div v-for="(condition, index) in form.conditions" :key="index" class="rule-block">
-              <NSpace align="center" justify="space-between">
-                <NSelect
-                  :value="condition.type"
-                  class="type-select"
-                  :options="conditionOptions"
-                  @update:value="(value: string) => updateConditionType(condition, value)"
-                />
-                <NButton size="small" type="error" secondary @click="removeCondition(index)">移除</NButton>
+            <div class="panel-desc">用一条样例消息试跑整条管道，检查条件、处理器与目标渠道，无需先保存。</div>
+            <div class="preview-grid">
+              <NFormItem label="Source ID">
+                <NInputNumber v-model:value="preview.source_id" class="full-input" clearable />
+              </NFormItem>
+              <NFormItem label="消息类型">
+                <NSelect v-model:value="preview.message_type" :options="messageTypeOptions" />
+              </NFormItem>
+              <NFormItem label="发送者类型">
+                <NSelect v-model:value="preview.sender_peer_type" :options="senderTypeOptions" />
+              </NFormItem>
+              <NFormItem label="发送者 ID">
+                <NInputNumber v-model:value="preview.sender_id" class="full-input" clearable />
+              </NFormItem>
+            </div>
+            <NFormItem label="发送者名称">
+              <NInput v-model:value="preview.sender_name" />
+            </NFormItem>
+            <NFormItem label="样例文本">
+              <NInput v-model:value="preview.text" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+            </NFormItem>
+            <NButton type="primary" secondary :loading="preview.loading" @click="runPreview">运行预演</NButton>
+            <NAlert v-if="preview.error" type="error" title="预演失败" class="preview-result">
+              {{ preview.error }}
+            </NAlert>
+            <NAlert
+              v-else-if="preview.result"
+              :type="preview.result.matched ? 'success' : 'warning'"
+              :title="preview.result.matched ? '规则命中' : '规则未命中'"
+              class="preview-result"
+            >
+              <NSpace vertical size="small">
+                <NText>{{ preview.result.processed_text || '无文本内容' }}</NText>
+                <NText v-if="preview.result.targets.length" depth="3">
+                  目标：{{ preview.result.targets.map(previewTargetLabel).join('，') }}
+                </NText>
               </NSpace>
-              <ConfigFormRenderer
-                v-if="conditionDescriptor(condition.type)"
-                v-model="condition.config"
-                :fields="conditionDescriptor(condition.type)?.fields ?? []"
-              />
-              <NText v-if="conditionDescriptor(condition.type)?.description" depth="3">
-                {{ conditionDescriptor(condition.type)?.description }}
-              </NText>
-            </div>
-            <NEmpty v-if="!form.conditions.length" size="small" description="未添加条件" />
+            </NAlert>
           </template>
-        </section>
-
-        <section class="form-section">
-          <div class="section-head">
-            <div>
-              <div class="section-title">处理器</div>
-              <div class="section-desc">在投递前改写或过滤消息内容。</div>
-            </div>
-            <NButton size="small" dashed @click="addProcessor">添加处理器</NButton>
-          </div>
-          <div v-for="(processor, index) in form.processors" :key="index" class="rule-block">
-            <NSpace align="center" justify="space-between">
-              <NSelect
-                :value="processor.type"
-                class="type-select"
-                :options="processorOptions"
-                @update:value="(value: string) => updateProcessorType(processor, value)"
-              />
-              <NButton size="small" type="error" secondary @click="removeProcessor(index)">移除</NButton>
-            </NSpace>
-            <ConfigFormRenderer
-              v-if="processorDescriptor(processor.type)"
-              v-model="processor.config"
-              :fields="processorDescriptor(processor.type)?.fields ?? []"
-            />
-            <NText v-if="processorDescriptor(processor.type)?.description" depth="3">
-              {{ processorDescriptor(processor.type)?.description }}
-            </NText>
-          </div>
-          <NEmpty v-if="!form.processors.length" size="small" description="未添加处理器" />
-        </section>
-
-        <section class="form-section">
-          <div class="section-head">
-            <div>
-              <div class="section-title">目标渠道</div>
-              <div class="section-desc">一条规则可以投递到多个渠道，每个渠道可选择模板。</div>
-            </div>
-            <NButton size="small" dashed @click="addTarget">添加目标</NButton>
-          </div>
-          <div v-for="(target, index) in form.targets" :key="index" class="target-row">
-            <NSelect v-model:value="target.sink_id" class="target-select" placeholder="渠道" :options="sinkOptions" />
-            <NSelect
-              v-model:value="target.template_id"
-              class="target-select"
-              clearable
-              placeholder="模板（可空=纯文本）"
-              :options="templateOptionsFor(target.sink_id)"
-            />
-            <NButton size="small" type="error" secondary @click="removeTarget(index)">移除</NButton>
-          </div>
-          <NEmpty v-if="!form.targets.length" size="small" description="未添加目标渠道" />
-        </section>
-
-        <section class="form-section">
-          <div class="section-head">
-            <div>
-              <div class="section-title">规则预演</div>
-              <div class="section-desc">用样例消息检查条件、处理器和目标渠道。</div>
-            </div>
-            <NButton size="small" :loading="preview.loading" @click="runPreview">运行预演</NButton>
-          </div>
-          <div class="preview-grid">
-            <NFormItem label="Source ID">
-              <NInputNumber v-model:value="preview.source_id" class="full-input" clearable />
-            </NFormItem>
-            <NFormItem label="消息类型">
-              <NSelect v-model:value="preview.message_type" :options="messageTypeOptions" />
-            </NFormItem>
-            <NFormItem label="发送者类型">
-              <NSelect v-model:value="preview.sender_peer_type" :options="senderTypeOptions" />
-            </NFormItem>
-            <NFormItem label="发送者 ID">
-              <NInputNumber v-model:value="preview.sender_id" class="full-input" clearable />
-            </NFormItem>
-          </div>
-          <NFormItem label="发送者名称">
-            <NInput v-model:value="preview.sender_name" />
-          </NFormItem>
-          <NFormItem label="样例文本">
-            <NInput v-model:value="preview.text" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
-          </NFormItem>
-          <NAlert v-if="preview.error" type="error" title="预演失败" class="preview-result">
-            {{ preview.error }}
-          </NAlert>
-          <NAlert
-            v-else-if="preview.result"
-            :type="preview.result.matched ? 'success' : 'warning'"
-            :title="preview.result.matched ? '规则命中' : '规则未命中'"
-            class="preview-result"
-          >
-            <NSpace vertical size="small">
-              <NText>{{ preview.result.processed_text || '无文本内容' }}</NText>
-              <NText v-if="preview.result.targets.length" depth="3">
-                目标：{{ preview.result.targets.map(previewTargetLabel).join('，') }}
-              </NText>
-            </NSpace>
-          </NAlert>
-        </section>
-      </NForm>
+        </NForm>
+      </div>
     </div>
     <template #footer>
       <NSpace justify="end">
@@ -512,51 +585,180 @@ function previewTargetLabel(target: RuleTarget): string {
 
 <style scoped>
 .modal-body {
-  max-height: min(70vh, 720px);
-  overflow: auto;
-  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.form-section {
+/* 基本信息条 */
+
+.base-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
   border: 1px solid var(--clay-border);
-  border-radius: 8px;
-  padding: 14px;
+  border-radius: 10px;
   background: var(--clay-surface-2);
 }
 
-.form-section + .form-section {
-  margin-top: 12px;
+.name-input {
+  flex: 1;
+  min-width: 200px;
 }
 
-.section-head {
+.base-item {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
-.section-title {
+.base-label {
+  color: var(--clay-text-2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.base-label.dashed {
+  border-bottom: 1px dashed var(--clay-border-strong);
+  cursor: help;
+}
+
+.priority-input {
+  width: 96px;
+}
+
+/* 管道节点条 */
+
+.pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px;
+}
+
+.pipe-node {
+  flex: 1;
+  min-width: 118px;
+  padding: 9px 10px;
+  border: 1px solid var(--clay-border);
+  border-radius: 11px;
+  background: var(--clay-surface);
+  box-shadow: var(--clay-out-sm);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, background-color 0.16s ease;
+}
+
+.pipe-node:hover,
+.pipe-node:focus-visible {
+  border-color: var(--clay-border-strong);
+  box-shadow: var(--clay-hover);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.pipe-node.active {
+  border-color: var(--clay-primary);
+  background: color-mix(in srgb, var(--clay-primary-soft) 55%, var(--clay-surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--clay-primary) 18%, transparent);
+  transform: none;
+}
+
+.pipe-node.preview {
+  border-style: dashed;
+}
+
+.pipe-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--clay-text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 800;
 }
 
-.section-desc {
+.pipe-warn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #d97706;
+}
+
+.pipe-summary {
+  display: block;
   margin-top: 3px;
   color: var(--clay-text-3);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipe-node.warn .pipe-summary {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.pipe-chips {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+  min-width: 0;
+}
+
+.pipe-chip {
+  max-width: 90px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--clay-border);
+  background: var(--clay-surface-2);
+  color: var(--clay-text-2);
+  font-size: 10px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pipe-chip.more {
+  flex-shrink: 0;
+}
+
+.pipe-arrow {
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--clay-text-3);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pipe-arrow.dashed {
+  opacity: 0.55;
+}
+
+/* 环节面板 */
+
+.stage-panel {
+  min-height: 260px;
+  max-height: min(52vh, 520px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--clay-border);
+  border-radius: 10px;
+  background: var(--clay-surface-2);
+}
+
+.panel-desc {
+  margin-bottom: 12px;
+  color: var(--clay-text-3);
   font-size: 12px;
-}
-
-.base-grid {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) 140px 100px 120px;
-  gap: 12px;
-  align-items: start;
-}
-
-.full-input {
-  width: 100%;
+  line-height: 1.5;
 }
 
 .rule-block {
@@ -612,6 +814,10 @@ function previewTargetLabel(target: RuleTarget): string {
   width: 100%;
 }
 
+.full-input {
+  width: 100%;
+}
+
 .preview-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(120px, 1fr));
@@ -620,18 +826,25 @@ function previewTargetLabel(target: RuleTarget): string {
 }
 
 .preview-result {
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 @media (max-width: 760px) {
-  .base-grid,
+  .pipeline {
+    flex-wrap: wrap;
+  }
+
+  .pipe-arrow {
+    display: none;
+  }
+
+  .pipe-node {
+    flex: 1 1 45%;
+  }
+
   .target-row,
   .preview-grid {
     grid-template-columns: 1fr;
-  }
-
-  .section-head {
-    flex-direction: column;
   }
 }
 </style>

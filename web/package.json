@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",
+    "@vue-flow/core": "^1.48.2",
     "axios": "^1.7.9",
     "dompurify": "^3.4.11",
     "marked": "^18.0.5",
