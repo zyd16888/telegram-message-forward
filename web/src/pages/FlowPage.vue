@@ -6,6 +6,9 @@ import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 import RuleEditorModal from '@/components/rules/RuleEditorModal.vue'
 import FlowCanvas from '@/components/flow/FlowCanvas.vue'
+import FlowContextBar from '@/components/flow/FlowContextBar.vue'
+import FlowToolbar from '@/components/flow/FlowToolbar.vue'
+import ResourceShelf from '@/components/flow/ResourceShelf.vue'
 import type {
   CanvasConnection,
   CanvasEdgeInput,
@@ -15,15 +18,10 @@ import type {
   SourceNodeData,
 } from '@/components/flow/types'
 import { filtersApi, rulesApi, sinksApi } from '@/api/client'
-import { useForwardingGraph, type FlowRuleGraphNode } from '@/composables/useForwardingGraph'
+import { useFlowBoard } from '@/composables/useFlowBoard'
+import { useForwardingGraph } from '@/composables/useForwardingGraph'
 import type { Filter, Rule, RuleInitialDraft, RuleMeta, Sink, SinkDescriptor, Source, RuleTarget } from '@/types'
 import { errText } from '@/utils/error'
-
-type NodeKind = 'source' | 'rule' | 'sink'
-
-type EdgeRef =
-  | { kind: 'source-rule'; sourceId: number; ruleId: number }
-  | { kind: 'rule-sink'; ruleId: number; sinkId: number }
 
 const router = useRouter()
 const route = useRoute()
@@ -35,13 +33,6 @@ const ruleMeta = shallowRef<RuleMeta>({ conditions: [], processors: [] })
 const sinkDescriptors = shallowRef<SinkDescriptor[]>([])
 const filters = shallowRef<Filter[]>([])
 
-const selection = shallowRef<{ kind: NodeKind; id: number } | null>(null)
-const selectedEdge = shallowRef<EdgeRef | null>(null)
-const keyword = shallowRef('')
-const onlyWarnings = shallowRef(false)
-const showUnusedNodes = shallowRef(false)
-const templateFilterId = shallowRef<number | null>(null)
-
 const showRuleModal = shallowRef(false)
 const editingRule = shallowRef<Rule | null>(null)
 const initialDraft = shallowRef<RuleInitialDraft | null>(null)
@@ -51,6 +42,34 @@ const processorLabelByType = computed(() => new Map(ruleMeta.value.processors.ma
 const sinkTypeLabelByType = computed(() => new Map(sinkDescriptors.value.map((d) => [d.type, d.label])))
 const accountNameById = computed(() => new Map(accounts.value.map((a) => [a.id, a.name])))
 const filterNameById = computed(() => new Map(filters.value.map((f) => [f.id, f.name])))
+
+const {
+  selection,
+  selectedEdge,
+  keyword,
+  onlyWarnings,
+  showUnusedNodes,
+  templateFilterId,
+  templateFilterName,
+  visibleRuleNodes,
+  visibleSources,
+  visibleSinks,
+  unusedSources,
+  unusedSinks,
+  hiddenResourceCount,
+  related,
+  selectionRuleCount,
+  boardFilterActive,
+  canvasEmptyHint,
+  stateClass,
+  toggleSelect,
+  clearBoardSelection,
+  clearPaneSelection,
+  revealResource,
+  selectEdge,
+  clearSelectedEdge,
+  clearBoardFilters,
+} = useFlowBoard({ sources, sinks, templates, ruleNodes, sinkTypeLabel })
 
 const setupChecklist = computed(() => [
   { label: '配置 Telegram 账号', done: accounts.value.length > 0, route: 'accounts' },
@@ -111,163 +130,15 @@ const overviewCards = computed(() => [
   },
 ])
 
-const templateFilterName = computed(() => {
-  if (!templateFilterId.value) return ''
-  return templates.value.find((t) => t.id === templateFilterId.value)?.name ?? `#${templateFilterId.value}`
-})
-
-// --- 过滤 ---
-
-const visibleRuleNodes = computed(() => {
-  const q = keyword.value.trim().toLowerCase()
-  return ruleNodes.value.filter((node) => {
-    if (templateFilterId.value && !node.targets.some((t) => t.templateId === templateFilterId.value)) return false
-    if (onlyWarnings.value && node.warnings.length === 0) return false
-    if (!q) return true
-    return [
-      node.rule.name,
-      ...node.sources.map((item) => item.source?.name ?? ''),
-      ...node.rule.conditions.map((item) => item.type),
-      ...node.rule.processors.map((item) => item.type),
-      ...node.targets.map((target) => target.sink?.name ?? ''),
-      ...node.targets.map((target) => target.template?.name ?? ''),
-    ]
-      .filter(Boolean)
-      .some((item) => String(item).toLowerCase().includes(q))
-  })
-})
-
-const searchedSources = computed(() => {
-  const q = keyword.value.trim().toLowerCase()
-  if (!q) return sources.value
-  return sources.value.filter((s) =>
-    [s.name, s.username ?? '', String(s.id)].some((item) => item.toLowerCase().includes(q)),
-  )
-})
-
-const searchedSinks = computed(() => {
-  const q = keyword.value.trim().toLowerCase()
-  if (!q) return sinks.value
-  return sinks.value.filter((s) =>
-    [s.name, s.type, sinkTypeLabel(s)].some((item) => item.toLowerCase().includes(q)),
-  )
-})
-
-const linkedSourceIds = computed(() => {
-  const ids = new Set<number>()
-  for (const node of ruleNodes.value) {
-    node.rule.source_ids.forEach((id) => ids.add(id))
-  }
-  return ids
-})
-
-const linkedSinkIds = computed(() => {
-  const ids = new Set<number>()
-  for (const node of ruleNodes.value) {
-    node.targets.forEach((target) => ids.add(target.sinkId))
-  }
-  return ids
-})
-
-const visibleRuleSourceIds = computed(() => {
-  const ids = new Set<number>()
-  for (const node of visibleRuleNodes.value) {
-    node.sources.forEach((source) => ids.add(source.sourceId))
-  }
-  return ids
-})
-
-const visibleRuleSinkIds = computed(() => {
-  const ids = new Set<number>()
-  for (const node of visibleRuleNodes.value) {
-    node.targets.forEach((target) => ids.add(target.sinkId))
-  }
-  return ids
-})
-
-const visibleSources = computed(() =>
-  searchedSources.value.filter(
-    (source) =>
-      showUnusedNodes.value ||
-      visibleRuleSourceIds.value.has(source.id) ||
-      (selection.value?.kind === 'source' && selection.value.id === source.id),
-  ),
-)
-
-const visibleSinks = computed(() =>
-  searchedSinks.value.filter(
-    (sink) =>
-      showUnusedNodes.value ||
-      visibleRuleSinkIds.value.has(sink.id) ||
-      (selection.value?.kind === 'sink' && selection.value.id === sink.id),
-  ),
-)
-
-const unusedSources = computed(() => searchedSources.value.filter((source) => !linkedSourceIds.value.has(source.id)))
-const unusedSinks = computed(() => searchedSinks.value.filter((sink) => !linkedSinkIds.value.has(sink.id)))
-const hiddenResourceCount = computed(() => (!showUnusedNodes.value ? unusedSources.value.length + unusedSinks.value.length : 0))
-
-// --- 选中与联动高亮 ---
-
-const related = computed(() => {
-  const sel = selection.value
-  if (!sel) return null
-  const sourceIds = new Set<number>()
-  const ruleIds = new Set<number>()
-  const sinkIds = new Set<number>()
-  const collect = (node: FlowRuleGraphNode) => {
-    ruleIds.add(node.rule.id)
-    node.rule.source_ids.forEach((id) => sourceIds.add(id))
-    node.targets.forEach((t) => sinkIds.add(t.sinkId))
-  }
-  if (sel.kind === 'source') {
-    sourceIds.add(sel.id)
-    ruleNodes.value.filter((n) => n.rule.source_ids.includes(sel.id)).forEach(collect)
-  } else if (sel.kind === 'rule') {
-    const node = ruleNodes.value.find((n) => n.rule.id === sel.id)
-    if (node) collect(node)
-  } else {
-    sinkIds.add(sel.id)
-    ruleNodes.value.filter((n) => n.targets.some((t) => t.sinkId === sel.id)).forEach(collect)
-  }
-  return { sourceIds, ruleIds, sinkIds }
-})
-
-function stateClass(kind: NodeKind, id: number): string {
-  const sel = selection.value
-  if (!sel || !related.value) return ''
-  if (sel.kind === kind && sel.id === id) return 'is-selected'
-  const set = kind === 'source' ? related.value.sourceIds : kind === 'rule' ? related.value.ruleIds : related.value.sinkIds
-  return set.has(id) ? 'is-linked' : 'is-dimmed'
-}
-
-function toggleSelect(kind: NodeKind, id: number) {
-  selectedEdge.value = null
-  if (selection.value && selection.value.kind === kind && selection.value.id === id) {
-    selection.value = null
-  } else {
-    selection.value = { kind, id }
-  }
-}
-
 function clearSelection() {
-  selection.value = null
-  selectedEdge.value = null
-  templateFilterId.value = null
+  clearBoardSelection()
   if (Object.keys(route.query).length) {
     void router.replace({ name: 'flow', query: {} })
   }
 }
 
-function revealResource(kind: Exclude<NodeKind, 'rule'>, id: number) {
-  showUnusedNodes.value = true
-  selectedEdge.value = null
-  selection.value = { kind, id }
-}
-
 function onPaneClick() {
-  selection.value = null
-  selectedEdge.value = null
+  clearPaneSelection()
 }
 
 const selectionLabel = computed(() => {
@@ -277,8 +148,6 @@ const selectionLabel = computed(() => {
   if (sel.kind === 'rule') return `规则「${ruleName(sel.id)}」`
   return `渠道「${sinkName(sel.id)}」`
 })
-
-const selectionRuleCount = computed(() => (related.value ? related.value.ruleIds.size : 0))
 
 const selectedEdgeLabel = computed(() => {
   const edge = selectedEdge.value
@@ -450,35 +319,6 @@ const canvasEdges = computed<CanvasEdgeInput[]>(() => {
 
 const canvasHasNodes = computed(() => canvasSources.value.length > 0 || canvasRules.value.length > 0 || canvasSinks.value.length > 0)
 
-const boardFilterActive = computed(
-  () => Boolean(keyword.value.trim()) || onlyWarnings.value || Boolean(templateFilterId.value),
-)
-
-const canvasEmptyHint = computed(() => {
-  if (keyword.value.trim()) return `没有匹配「${keyword.value.trim()}」的来源、规则或渠道`
-  if (boardFilterActive.value) return '当前筛选条件下没有匹配的编排链路'
-  return '当前没有已接入的编排链路'
-})
-
-function clearBoardFilters() {
-  keyword.value = ''
-  onlyWarnings.value = false
-  templateFilterId.value = null
-}
-
-function parseEdgeKey(key: string): EdgeRef | null {
-  let match = /^s(\d+):r(\d+)$/.exec(key)
-  if (match) return { kind: 'source-rule', sourceId: Number(match[1]), ruleId: Number(match[2]) }
-  match = /^r(\d+):k(\d+)$/.exec(key)
-  if (match) return { kind: 'rule-sink', ruleId: Number(match[1]), sinkId: Number(match[2]) }
-  return null
-}
-
-function onSelectEdge(key: string) {
-  selection.value = null
-  selectedEdge.value = parseEdgeKey(key)
-}
-
 // --- 数据与操作 ---
 
 async function refresh() {
@@ -576,7 +416,7 @@ async function detachSelectedEdge() {
   } else {
     await saveRule(rule, { targets: rule.targets.filter((t) => t.sink_id !== edge.sinkId) }, '已解除目标关联')
   }
-  selectedEdge.value = null
+  clearSelectedEdge()
 }
 
 function openCreateRule() {
@@ -709,91 +549,40 @@ onMounted(async () => {
       <NButton size="small" secondary @click="go('templates')">管理模板</NButton>
     </section>
 
-    <div class="board-toolbar">
-      <div class="toolbar-filters">
-        <NInput v-model:value="keyword" clearable class="search-input" placeholder="搜索来源、规则、渠道" />
-        <NCheckbox v-model:checked="onlyWarnings">只看异常规则</NCheckbox>
-        <NCheckbox v-model:checked="showUnusedNodes">
-          显示未接入资源
-          <template v-if="hiddenResourceCount">（{{ hiddenResourceCount }}）</template>
-        </NCheckbox>
-        <NTag v-if="templateFilterId" closable size="small" type="info" @close="templateFilterId = null">
-          模板：{{ templateFilterName }}
-        </NTag>
-      </div>
-      <div class="toolbar-stats">
-        <span>来源 {{ stats.linkedSources }}/{{ stats.totalSources }} 已接入</span>
-        <span>规则 {{ stats.enabledRules }}/{{ stats.totalRules }} 启用</span>
-        <span>渠道 {{ stats.enabledSinks }}/{{ stats.totalSinks }} 启用</span>
-        <span :class="{ 'stat-warn': stats.warningRules > 0 }">异常 {{ stats.warningRules }}</span>
-      </div>
-    </div>
+    <FlowToolbar
+      v-model:keyword="keyword"
+      v-model:only-warnings="onlyWarnings"
+      v-model:show-unused-nodes="showUnusedNodes"
+      v-model:template-filter-id="templateFilterId"
+      :hidden-resource-count="hiddenResourceCount"
+      :template-filter-name="templateFilterName"
+      :stats="stats"
+    />
 
-    <section v-if="!showUnusedNodes && hiddenResourceCount" class="resource-shelf">
-      <div class="resource-head">
-        <div>
-          <strong>未接入资源</strong>
-          <span>来源 {{ unusedSources.length }} 个 / 渠道 {{ unusedSinks.length }} 个</span>
-        </div>
-        <NButton size="small" secondary @click="showUnusedNodes = true">全部显示到画布</NButton>
-      </div>
-      <div class="resource-grid">
-        <div v-if="unusedSources.length" class="resource-column">
-          <span class="resource-title">来源</span>
-          <button
-            v-for="source in unusedSources.slice(0, 8)"
-            :key="source.id"
-            type="button"
-            class="resource-pill source"
-            @click="revealResource('source', source.id)"
-          >
-            <span>{{ source.name }}</span>
-            <small>{{ sourceTypeLabel(source) }}</small>
-          </button>
-          <button v-if="unusedSources.length > 8" type="button" class="resource-pill more" @click="showUnusedNodes = true">
-            <span>还有 {{ unusedSources.length - 8 }} 个…</span>
-          </button>
-        </div>
-        <div v-if="unusedSinks.length" class="resource-column">
-          <span class="resource-title">渠道</span>
-          <button
-            v-for="sink in unusedSinks.slice(0, 8)"
-            :key="sink.id"
-            type="button"
-            class="resource-pill sink"
-            @click="revealResource('sink', sink.id)"
-          >
-            <span>{{ sink.name }}</span>
-            <small>{{ sinkTypeLabel(sink) }}</small>
-          </button>
-          <button v-if="unusedSinks.length > 8" type="button" class="resource-pill more" @click="showUnusedNodes = true">
-            <span>还有 {{ unusedSinks.length - 8 }} 个…</span>
-          </button>
-        </div>
-      </div>
-    </section>
+    <ResourceShelf
+      v-if="!showUnusedNodes && hiddenResourceCount"
+      :unused-sources="unusedSources"
+      :unused-sinks="unusedSinks"
+      :source-type-label="sourceTypeLabel"
+      :sink-type-label="sinkTypeLabel"
+      @reveal-resource="revealResource"
+      @show-unused-nodes="showUnusedNodes = true"
+    />
 
-    <div v-if="selection" class="context-bar">
-      <span class="context-label">
-        已选中 {{ selectionLabel }}
-        <template v-if="selection.kind !== 'rule'">，关联 {{ selectionRuleCount }} 条规则</template>
-      </span>
-      <div class="context-actions">
-        <NButton v-if="selection.kind !== 'rule'" size="small" @click="openCreateRule">沿此建规则</NButton>
-        <NButton v-if="selection.kind === 'rule'" size="small" @click="openEditRule(selection.id)">编辑规则</NButton>
-        <NButton size="small" @click="goToSelectedConfig">管理配置</NButton>
-        <NButton size="small" @click="goToDeliveries">查看投递记录</NButton>
-        <NButton size="small" text type="primary" @click="clearSelection">清除选中</NButton>
-      </div>
-    </div>
-
-    <div v-else-if="selectedEdge" class="context-bar">
-      <span class="context-label">已选中 {{ selectedEdgeLabel }}</span>
-      <div class="context-actions">
-        <NButton size="small" type="error" secondary @click="detachSelectedEdge">解除关联</NButton>
-        <NButton size="small" text type="primary" @click="selectedEdge = null">取消</NButton>
-      </div>
-    </div>
+    <FlowContextBar
+      :selection="selection"
+      :selected-edge="selectedEdge"
+      :selection-label="selectionLabel"
+      :selection-rule-count="selectionRuleCount"
+      :selected-edge-label="selectedEdgeLabel"
+      @create-rule="openCreateRule"
+      @edit-rule="openEditRule"
+      @manage-config="goToSelectedConfig"
+      @view-deliveries="goToDeliveries"
+      @clear-selection="clearSelection"
+      @detach-edge="detachSelectedEdge"
+      @clear-edge="clearSelectedEdge"
+    />
 
     <NSpin :show="loading">
       <FlowCanvas
@@ -804,7 +593,7 @@ onMounted(async () => {
         :sinks="canvasSinks"
         :edges="canvasEdges"
         @select-node="toggleSelect"
-        @select-edge="onSelectEdge"
+        @select-edge="selectEdge"
         @clear-select="onPaneClick"
         @connect="onCanvasConnect"
         @edit-rule="openEditRule"
@@ -1008,185 +797,6 @@ onMounted(async () => {
   font-size: 12px;
 }
 
-.board-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: var(--clay-surface);
-  box-shadow: var(--clay-out-sm);
-}
-
-.toolbar-filters {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.search-input {
-  width: 260px;
-}
-
-.toolbar-stats {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  color: var(--clay-text-2);
-  font-size: 13px;
-  flex-wrap: wrap;
-}
-
-.toolbar-stats span {
-  padding: 4px 9px;
-  border: 1px solid var(--clay-border);
-  border-radius: 999px;
-  background: var(--clay-surface-2);
-}
-
-.stat-warn {
-  color: #b45309;
-  font-weight: 700;
-}
-
-.resource-shelf {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--clay-border);
-  border-radius: 14px;
-  background: var(--clay-surface);
-  box-shadow: var(--clay-out-sm);
-}
-
-.resource-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.resource-head strong {
-  display: block;
-  color: var(--clay-text);
-  font-size: 13px;
-}
-
-.resource-head span {
-  display: block;
-  margin-top: 2px;
-  color: var(--clay-text-3);
-  font-size: 12px;
-}
-
-.resource-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.resource-column {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
-  min-width: 0;
-  padding: 10px;
-  border-radius: 10px;
-  background: var(--clay-surface-2);
-}
-
-.resource-title {
-  width: 100%;
-  color: var(--clay-text-3);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.resource-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 220px;
-  padding: 5px 9px;
-  border: 1px solid var(--clay-border);
-  border-radius: 999px;
-  background: var(--clay-surface);
-  color: var(--clay-text-2);
-  cursor: pointer;
-  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
-}
-
-.resource-pill:hover,
-.resource-pill:focus-visible {
-  border-color: var(--clay-border-strong);
-  box-shadow: var(--clay-hover);
-  transform: translateY(-1px);
-  outline: none;
-}
-
-.resource-pill span,
-.resource-pill small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-pill span {
-  min-width: 0;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.resource-pill small {
-  flex-shrink: 0;
-  color: var(--clay-text-3);
-  font-size: 11px;
-}
-
-.resource-pill.source {
-  border-left: 3px solid #10b981;
-}
-
-.resource-pill.sink {
-  border-right: 3px solid #f59e0b;
-}
-
-.resource-pill.more {
-  border-style: dashed;
-  color: var(--clay-text-3);
-}
-
-.context-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 14px;
-  border: 1px solid color-mix(in srgb, var(--clay-primary) 32%, var(--clay-border));
-  border-radius: 14px;
-  background: var(--clay-primary-soft);
-  box-shadow: none;
-}
-
-.context-label {
-  color: var(--clay-text);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.context-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 @media (max-width: 1100px) {
   .overview-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1206,12 +816,5 @@ onMounted(async () => {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
   }
 
-  .search-input {
-    width: 100%;
-  }
-
-  .resource-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
