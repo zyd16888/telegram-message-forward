@@ -558,8 +558,7 @@ const canvasHasNodes = computed(
 async function refresh() {
   if (!(await confirmDiscardDraft())) return
   try {
-    await Promise.all([load(), loadFlows()])
-    ensureEditorSelections()
+    await reloadFlowData()
   } catch (e) {
     message.error('加载编排关系失败：' + errText(e))
   }
@@ -593,6 +592,11 @@ async function loadFlows() {
     flowDraft.value = emptyFlowDraft()
   }
   rememberFlowDraftBaseline()
+}
+
+async function reloadFlowData() {
+  await Promise.all([load(), loadFlows()])
+  ensureEditorSelections()
 }
 
 function draftNodes(type: FlowNodeType): FlowNode[] {
@@ -858,7 +862,7 @@ async function saveFlow() {
     message.success('Flow 已保存')
     activeFlowId.value = saved.id
     flowError.value = ''
-    await loadFlows()
+    await reloadFlowData()
   } catch (e) {
     flowError.value = errText(e)
     message.error('保存 Flow 失败：' + flowError.value)
@@ -873,7 +877,7 @@ async function deleteFlow() {
     message.success('Flow 已删除')
     activeFlowId.value = null
     flowDraft.value = null
-    await loadFlows()
+    await reloadFlowData()
   } catch (e) {
     message.error('删除 Flow 失败：' + errText(e))
   }
