@@ -159,6 +159,51 @@ func TestEvaluateLinearFlowWithProcessorsAndMultipleTargets(t *testing.T) {
 	}
 }
 
+// 「处理器分叉后又汇合」：target 同时经 src→proc→target 与 src→target 到达，
+// 会收到已处理/未处理两份内容，遍历顺序决定投递哪份——歧义，编译期必须拒绝。
+func TestCompileRejectsProcessorMergeAmbiguity(t *testing.T) {
+	src, proc, target := int64(1), int64(2), int64(3)
+	flow := &domainflow.Flow{
+		ID: 1, Name: "proc-merge", Enabled: true, UpdatedAt: time.Now(),
+		Nodes: []domainflow.Node{
+			sourceNode(src, 10),
+			processorNode(proc, domainflow.ProcessorConfig{Type: "append_source", Config: map[string]any{"text": " [p]"}}),
+			targetNode(target, 100, nil),
+		},
+		Edges: []domainflow.Edge{
+			{FromNodeID: src, ToNodeID: proc},
+			{FromNodeID: proc, ToNodeID: target},
+			{FromNodeID: src, ToNodeID: target},
+		},
+	}
+	if _, err := NewEngine().Compile(flow); err == nil {
+		t.Fatal("期望拒绝「处理器分叉后汇合」的歧义拓扑，但 Compile 通过了")
+	}
+}
+
+// 纯过滤器菱形不含处理器，两路内容一致（OR 语义），不应被歧义校验误伤。
+func TestCompileAllowsFilterOnlyDiamond(t *testing.T) {
+	src, f1, f2, target := int64(1), int64(2), int64(3), int64(4)
+	flow := &domainflow.Flow{
+		ID: 1, Name: "filter-diamond", Enabled: true, UpdatedAt: time.Now(),
+		Nodes: []domainflow.Node{
+			sourceNode(src, 10),
+			filterNode(f1, contains("go")),
+			filterNode(f2, contains("rust")),
+			targetNode(target, 100, nil),
+		},
+		Edges: []domainflow.Edge{
+			{FromNodeID: src, ToNodeID: f1},
+			{FromNodeID: src, ToNodeID: f2},
+			{FromNodeID: f1, ToNodeID: target},
+			{FromNodeID: f2, ToNodeID: target},
+		},
+	}
+	if _, err := NewEngine().Compile(flow); err != nil {
+		t.Fatalf("纯过滤器菱形不应被拒绝，却报错: %v", err)
+	}
+}
+
 func sourceNode(id, sourceID int64) domainflow.Node {
 	return domainflow.Node{ID: id, Type: domainflow.NodeTypeSource, RefID: &sourceID}
 }

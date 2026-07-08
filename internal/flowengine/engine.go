@@ -175,7 +175,78 @@ func (e *Engine) Compile(f *domainflow.Flow) (*Plan, error) {
 	if !hasSourceToTargetPath(p) {
 		return nil, fmt.Errorf("flow 至少需要一条 source 到 target 的通路")
 	}
+	if proc, merge, ok := findProcessorMergeAmbiguity(p); ok {
+		return nil, fmt.Errorf("flow 存在歧义汇合：处理节点 %d 的下游节点 %d 同时可经绕过该处理节点的路径到达，"+
+			"会收到「已处理」与「未处理」两份不同内容、且投递哪份取决于遍历顺序，请把这两条路径拆开", proc, merge)
+	}
 	return p, nil
+}
+
+// findProcessorMergeAmbiguity 检测「处理器分叉后又汇合」的歧义拓扑。
+//
+// 某处理节点 p 的下游节点 X，若同时能从同一来源经「绕过 p」的另一条路径到达，
+// 则 X 会收到「经 p 处理」与「未经处理」两份不同内容；而引擎按 BFS 先到先得去重
+// （evaluatePlan 的 seenTargets）会静默丢弃其一，投递内容取决于遍历顺序——属于歧义，
+// 编译期拒绝。纯过滤器汇合（OR 语义，两路内容一致）与普通扇出不受影响。
+//
+// 按「单一来源可达子图」判定：多个不同来源汇入同一节点是合法的（对单条消息只有一个
+// 来源处于活跃路径上），不会误伤多源汇入。
+func findProcessorMergeAmbiguity(p *Plan) (proc int64, merge int64, ok bool) {
+	sources := make([]int64, 0)
+	for _, ids := range p.sourceIDs {
+		sources = append(sources, ids...)
+	}
+	sort.Slice(sources, func(i, j int) bool { return sources[i] < sources[j] })
+	for _, s := range sources {
+		reachS := reachableFrom(p, s, nil)
+		procs := make([]int64, 0)
+		for id := range reachS {
+			if p.nodes[id].Type == domainflow.NodeTypeProcessor {
+				procs = append(procs, id)
+			}
+		}
+		sort.Slice(procs, func(i, j int) bool { return procs[i] < procs[j] })
+		for _, pr := range procs {
+			downstream := reachableFrom(p, pr, nil)
+			bypass := reachableFrom(p, s, map[int64]bool{pr: true})
+			best := int64(0)
+			found := false
+			for node := range downstream {
+				if node == pr || !bypass[node] {
+					continue
+				}
+				if !found || node < best {
+					best, found = node, true
+				}
+			}
+			if found {
+				return pr, best, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// reachableFrom 返回从 start 沿出边可达的节点集合（含 start）；exclude 中的节点视为删除，
+// 既不进入也不作为中转。
+func reachableFrom(p *Plan, start int64, exclude map[int64]bool) map[int64]bool {
+	if exclude[start] {
+		return map[int64]bool{}
+	}
+	seen := map[int64]bool{start: true}
+	queue := []int64{start}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		for _, to := range p.out[id] {
+			if exclude[to] || seen[to] {
+				continue
+			}
+			seen[to] = true
+			queue = append(queue, to)
+		}
+	}
+	return seen
 }
 
 func (e *Engine) compileCached(f *domainflow.Flow) (*Plan, error) {
