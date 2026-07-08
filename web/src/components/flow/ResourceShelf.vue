@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { FlowNodeKind } from './types'
 import type { Sink, Source } from '@/types'
 
-defineProps<{
+const MAX_PILLS_PER_KIND = 5
+
+const props = defineProps<{
   unusedSources: Source[]
   unusedSinks: Sink[]
   sourceTypeLabel: (source: Source) => string
@@ -14,120 +17,80 @@ const emit = defineEmits<{
   'reveal-resource': [kind: Exclude<FlowNodeKind, 'filter' | 'rule'>, id: number]
   'show-unused-nodes': []
 }>()
+
+const shownSources = computed(() => props.unusedSources.slice(0, MAX_PILLS_PER_KIND))
+const shownSinks = computed(() => props.unusedSinks.slice(0, MAX_PILLS_PER_KIND))
+const overflowCount = computed(
+  () => props.unusedSources.length + props.unusedSinks.length - shownSources.value.length - shownSinks.value.length,
+)
 </script>
 
 <template>
   <section class="resource-shelf">
-    <div class="resource-head">
-      <div>
-        <strong>未接入资源</strong>
-        <span>来源 {{ unusedSources.length }} 个 / 渠道 {{ unusedSinks.length }} 个</span>
-      </div>
-      <NButton size="small" secondary @click="emit('show-unused-nodes')">全部显示到画布</NButton>
-    </div>
-    <div class="resource-grid">
-      <div v-if="unusedSources.length" class="resource-column">
-        <span class="resource-title">来源</span>
-        <button
-          v-for="source in unusedSources.slice(0, 8)"
-          :key="source.id"
-          type="button"
-          class="resource-pill source"
-          @click="emit('reveal-resource', 'source', source.id)"
-        >
-          <span>{{ source.name }}</span>
-          <small>{{ sourceTypeLabel(source) }} · {{ sourceAccountLabel(source) }}</small>
-        </button>
-        <button v-if="unusedSources.length > 8" type="button" class="resource-pill more" @click="emit('show-unused-nodes')">
-          <span>还有 {{ unusedSources.length - 8 }} 个…</span>
-        </button>
-      </div>
-      <div v-if="unusedSinks.length" class="resource-column">
-        <span class="resource-title">渠道</span>
-        <button
-          v-for="sink in unusedSinks.slice(0, 8)"
-          :key="sink.id"
-          type="button"
-          class="resource-pill sink"
-          @click="emit('reveal-resource', 'sink', sink.id)"
-        >
-          <span>{{ sink.name }}</span>
-          <small>{{ sinkTypeLabel(sink) }}</small>
-        </button>
-        <button v-if="unusedSinks.length > 8" type="button" class="resource-pill more" @click="emit('show-unused-nodes')">
-          <span>还有 {{ unusedSinks.length - 8 }} 个…</span>
-        </button>
-      </div>
-    </div>
+    <span class="shelf-label">未接入</span>
+    <button
+      v-for="source in shownSources"
+      :key="`source-${source.id}`"
+      type="button"
+      class="resource-pill source"
+      :title="`${sourceTypeLabel(source)} · ${sourceAccountLabel(source)}，点击显示到画布`"
+      @click="emit('reveal-resource', 'source', source.id)"
+    >
+      <span>{{ source.name }}</span>
+      <small>{{ sourceTypeLabel(source) }}</small>
+    </button>
+    <button
+      v-for="sink in shownSinks"
+      :key="`sink-${sink.id}`"
+      type="button"
+      class="resource-pill sink"
+      :title="`${sinkTypeLabel(sink)}，点击显示到画布`"
+      @click="emit('reveal-resource', 'sink', sink.id)"
+    >
+      <span>{{ sink.name }}</span>
+      <small>{{ sinkTypeLabel(sink) }}</small>
+    </button>
+    <button v-if="overflowCount > 0" type="button" class="resource-pill more" @click="emit('show-unused-nodes')">
+      还有 {{ overflowCount }} 个…
+    </button>
+    <NButton size="tiny" quaternary class="shelf-action" @click="emit('show-unused-nodes')">全部显示到画布</NButton>
   </section>
 </template>
 
 <style scoped>
 .resource-shelf {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--clay-border);
-  border-radius: 14px;
-  background: var(--clay-surface);
-  box-shadow: var(--clay-out-sm);
-}
-
-.resource-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.resource-head strong {
-  display: block;
-  color: var(--clay-text);
-  font-size: 13px;
-}
-
-.resource-head span {
-  display: block;
-  margin-top: 2px;
-  color: var(--clay-text-3);
-  font-size: 12px;
-}
-
-.resource-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.resource-column {
   display: flex;
   align-items: center;
   gap: 7px;
   flex-wrap: wrap;
-  min-width: 0;
-  padding: 10px;
-  border-radius: 10px;
+  padding: 7px 10px;
+  border: 1px dashed var(--clay-border);
+  border-radius: 12px;
   background: var(--clay-surface-2);
 }
 
-.resource-title {
-  width: 100%;
+.shelf-label {
+  flex-shrink: 0;
   color: var(--clay-text-3);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
+}
+
+.shelf-action {
+  margin-left: auto;
 }
 
 .resource-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 220px;
-  padding: 5px 9px;
+  max-width: 200px;
+  padding: 3px 9px;
   border: 1px solid var(--clay-border);
   border-radius: 999px;
   background: var(--clay-surface);
   color: var(--clay-text-2);
+  font-size: 12px;
   cursor: pointer;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
@@ -149,7 +112,6 @@ const emit = defineEmits<{
 
 .resource-pill span {
   min-width: 0;
-  font-size: 12px;
   font-weight: 700;
 }
 
@@ -170,11 +132,5 @@ const emit = defineEmits<{
 .resource-pill.more {
   border-style: dashed;
   color: var(--clay-text-3);
-}
-
-@media (max-width: 680px) {
-  .resource-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

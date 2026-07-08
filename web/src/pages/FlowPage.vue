@@ -6,7 +6,6 @@ import PageHeader from '@/components/PageHeader.vue'
 import ClayIcon from '@/components/ClayIcon.vue'
 import ConfigFormRenderer from '@/components/ConfigFormRenderer.vue'
 import FlowCanvas from '@/components/flow/FlowCanvas.vue'
-import FlowToolbar from '@/components/flow/FlowToolbar.vue'
 import RouteInspector from '@/components/flow/RouteInspector.vue'
 import ResourceShelf from '@/components/flow/ResourceShelf.vue'
 import type {
@@ -131,55 +130,7 @@ const setupChecklist = computed(() => [
 ])
 const setupIssues = computed(() => setupChecklist.value.filter((item) => !item.done))
 const setupIncomplete = computed(() => setupIssues.value.length > 0)
-const flowReady = computed(() => !setupIncomplete.value)
-const templateModeLabel = computed(() =>
-  stats.value.totalTemplates > 0 ? `${stats.value.totalTemplates} 个模板可选` : '未创建模板，未指定模板的目标将按原文投递',
-)
-
-const overviewCards = computed(() => [
-  {
-    label: '链路状态',
-    value: flowReady.value ? '可运行' : `${setupIssues.value.length} 项待配置`,
-    tone: flowReady.value ? 'good' : 'warn',
-    hint: flowReady.value ? '来源、Flow、渠道已形成闭环' : setupIssues.value.map((item) => item.label).join(' / '),
-    route: flowReady.value ? 'deliveries' : setupIssues.value[0]?.route ?? 'flow',
-  },
-  {
-    label: '监听来源',
-    value: `${stats.value.linkedSources}/${stats.value.totalSources}`,
-    tone: stats.value.linkedSources > 0 ? 'good' : 'warn',
-    hint: '已关联 Flow / 全部来源',
-    route: 'sources',
-  },
-  {
-    label: 'Flow',
-    value: `${stats.value.enabledRules}/${stats.value.totalRules}`,
-    tone: stats.value.enabledRules > 0 ? 'good' : 'warn',
-    hint: '启用 / 全部 Flow',
-    route: 'flow',
-  },
-  {
-    label: '目标渠道',
-    value: `${stats.value.enabledSinks}/${stats.value.totalSinks}`,
-    tone: stats.value.enabledSinks > 0 ? 'good' : 'warn',
-    hint: '启用 / 全部渠道',
-    route: 'sinks',
-  },
-  {
-    label: '异常项',
-    value: String(stats.value.warningRules + stats.value.warningSources),
-    tone: stats.value.warningRules + stats.value.warningSources > 0 ? 'danger' : 'good',
-    hint: '来源与 Flow 诊断',
-    route: stats.value.warningRules > 0 ? 'flow' : 'sources',
-  },
-  {
-    label: '模板模式',
-    value: stats.value.totalTemplates > 0 ? '可选模板' : '原文投递',
-    tone: 'neutral',
-    hint: templateModeLabel.value,
-    route: 'templates',
-  },
-])
+const warningCount = computed(() => stats.value.warningRules + stats.value.warningSources)
 
 function clearSelection() {
   clearBoardSelection()
@@ -461,6 +412,21 @@ const canvasEdges = computed<CanvasEdgeInput[]>(() => {
   return out
 })
 
+// 编辑模式实时状态：按草稿连线统计每个节点的入线/出线，连线增删立即反映到节点卡片。
+const draftEdgeCountByNode = computed(() => {
+  const counts = new Map<number, number>()
+  for (const edge of flowDraft.value?.edges ?? []) {
+    counts.set(edge.from_node_id, (counts.get(edge.from_node_id) ?? 0) + 1)
+    counts.set(edge.to_node_id, (counts.get(edge.to_node_id) ?? 0) + 1)
+  }
+  return counts
+})
+
+function draftLinkLabel(nodeId: number): string {
+  const count = draftEdgeCountByNode.value.get(nodeId) ?? 0
+  return count ? `已连 ${count} 条线` : '未连线'
+}
+
 const draftSourceNodes = computed<CanvasNodeInput<SourceNodeData>[]>(() =>
   draftNodes('source').map((node) => {
     const source = node.ref_id ? sourceById.value.get(node.ref_id) : null
@@ -476,6 +442,7 @@ const draftSourceNodes = computed<CanvasNodeInput<SourceNodeData>[]>(() =>
         enabled: source?.enabled ?? false,
         running: source?.runner_status === 'running',
         ruleCount: 0,
+        linkLabel: draftLinkLabel(node.id),
       },
     }
   }),
@@ -494,6 +461,7 @@ const draftFilterNodes = computed<CanvasNodeInput<FilterNodeData>[]>(() =>
         name: firstFilter ?? (inlineConditions.length ? '内联过滤器' : '过滤器'),
         conditionCount: filterIds.length || inlineConditions.length,
         ruleCount: 0,
+        linkLabel: draftLinkLabel(node.id),
       },
     }
   }),
@@ -525,6 +493,7 @@ const draftTargetNodes = computed<CanvasNodeInput<SinkNodeData>[]>(() =>
         enabled: sink?.enabled ?? false,
         deliveryLabel: tpl ? `模板：${tpl.name}` : '原文投递',
         ruleCount: 0,
+        linkLabel: draftLinkLabel(node.id),
       },
     }
   }),
@@ -1081,10 +1050,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <NSpace vertical size="large">
+  <div class="flow-page">
     <PageHeader
-    title="转发编排"
-    desc="画布上直接拖线：来源→Flow、Flow→渠道建立关联，来源→渠道快速新建 Flow；点连线可解除关联"
+      title="转发编排"
+      desc="画布上直接拖线：来源→Flow、Flow→渠道建立关联，来源→渠道快速新建 Flow；点连线可解除关联"
       icon="flow"
     >
       <template #actions>
@@ -1099,76 +1068,64 @@ onBeforeUnmount(() => {
       </template>
     </PageHeader>
 
-    <section class="overview-grid">
-      <button
-        v-for="item in overviewCards"
-        :key="item.label"
-        type="button"
-        class="overview-card"
-        :class="item.tone"
-        @click="go(item.route)"
-      >
-        <span class="overview-label">{{ item.label }}</span>
-        <strong class="overview-value">{{ item.value }}</strong>
-        <span class="overview-hint">{{ item.hint }}</span>
+    <section v-if="setupIncomplete" class="setup-strip">
+      <span class="setup-strip-title">链路还差 {{ setupIssues.length }} 项才能自动转发：</span>
+      <button v-for="item in setupIssues" :key="item.label" type="button" class="setup-chip" @click="go(item.route)">
+        <span class="setup-chip-dot">!</span>
+        {{ item.label }}
       </button>
+      <span class="setup-strip-note">模板非必需，未配置时按原文投递</span>
     </section>
 
-    <section v-if="setupIncomplete" class="setup-panel">
-      <div class="setup-copy">
-        <div class="setup-title">链路还差 {{ setupIssues.length }} 项才能自动转发</div>
-        <div class="setup-desc">模板不是必需配置；没有模板时会按原文或默认文本投递。</div>
-      </div>
-      <div class="setup-steps">
-        <button
-          v-for="item in setupChecklist"
-          :key="item.label"
-          type="button"
-          class="setup-step"
-          :class="{ done: item.done }"
-          @click="go(item.route)"
-        >
-          <span class="step-dot">{{ item.done ? '✓' : '!' }}</span>
-          <span>{{ item.label }}</span>
-        </button>
-      </div>
-    </section>
-    <section v-else-if="stats.totalTemplates === 0" class="template-note">
-      <div>
-        <strong>当前使用原文投递</strong>
-        <span>未创建渲染模板不会阻塞转发；需要统一格式时再补模板即可。</span>
-      </div>
-      <NButton size="small" secondary @click="go('templates')">管理模板</NButton>
-    </section>
-
-    <FlowToolbar
-      v-model:keyword="keyword"
-      v-model:only-warnings="onlyWarnings"
-      v-model:show-unused-nodes="showUnusedNodes"
-      v-model:show-resource-layer="showResourceLayer"
-      v-model:template-filter-id="templateFilterId"
-      :hidden-resource-count="hiddenResourceCount"
-      :template-filter-name="templateFilterName"
-      :stats="stats"
-    />
-
-    <section class="mode-panel">
+    <section class="board-bar">
       <div class="mode-tabs">
-        <NButton :type="canvasMode === 'overview' ? 'primary' : 'default'" secondary @click="setCanvasMode('overview')">概览模式</NButton>
-        <NButton :type="canvasMode === 'edit' ? 'primary' : 'default'" secondary @click="setCanvasMode('edit')">编辑模式</NButton>
+        <button type="button" class="mode-tab" :class="{ active: canvasMode === 'overview' }" @click="setCanvasMode('overview')">概览</button>
+        <button type="button" class="mode-tab" :class="{ active: canvasMode === 'edit' }" @click="setCanvasMode('edit')">编辑</button>
       </div>
-      <div v-if="canvasMode === 'edit'" class="flow-select-row">
+
+      <template v-if="canvasMode === 'overview'">
+        <NInput v-model:value="keyword" clearable size="small" class="bar-search" placeholder="搜索来源、Flow、渠道" />
+        <NCheckbox v-model:checked="onlyWarnings">只看异常</NCheckbox>
+        <NCheckbox v-model:checked="showUnusedNodes">
+          未接入资源
+          <template v-if="hiddenResourceCount">（{{ hiddenResourceCount }}）</template>
+        </NCheckbox>
+        <NCheckbox v-model:checked="showResourceLayer">资源层</NCheckbox>
+        <NTag v-if="templateFilterId" closable size="small" type="info" @close="templateFilterId = null">
+          模板：{{ templateFilterName }}
+        </NTag>
+        <div class="bar-stats">
+          <span title="已关联 Flow / 全部来源">来源 {{ stats.linkedSources }}/{{ stats.totalSources }}</span>
+          <span title="启用 / 全部 Flow">Flow {{ stats.enabledRules }}/{{ stats.totalRules }}</span>
+          <span title="启用 / 全部渠道">渠道 {{ stats.enabledSinks }}/{{ stats.totalSinks }}</span>
+          <span v-if="warningCount" class="stat-warn" title="来源与 Flow 诊断">异常 {{ warningCount }}</span>
+          <button
+            v-if="stats.totalTemplates === 0"
+            type="button"
+            class="stat-link"
+            title="未创建渲染模板不会阻塞转发；需要统一格式时再补模板"
+            @click="go('templates')"
+          >
+            原文投递
+          </button>
+        </div>
+      </template>
+
+      <template v-else>
         <NSelect
+          class="bar-flow-select"
+          size="small"
           :value="activeFlowId"
           :options="flowOptions"
           clearable
           placeholder="选择已有 Flow"
           @update:value="onFlowSelect"
         />
-        <NButton secondary @click="newFlow">新建 Flow</NButton>
-        <NButton type="primary" :disabled="!flowDraftDirty" @click="saveFlow">保存 Flow</NButton>
-        <NButton v-if="flowDraft?.id" type="error" secondary @click="deleteFlow">删除</NButton>
-      </div>
+        <NButton size="small" secondary @click="newFlow">新建</NButton>
+        <NButton size="small" type="primary" :disabled="!flowDraftDirty" @click="saveFlow">保存</NButton>
+        <NButton v-if="flowDraft?.id" size="small" type="error" secondary @click="deleteFlow">删除</NButton>
+        <span v-if="flowDraftDirty" class="dirty-hint">有未保存修改</span>
+      </template>
     </section>
 
     <ResourceShelf
@@ -1392,193 +1349,174 @@ onBeforeUnmount(() => {
         </section>
       </aside>
     </div>
-  </NSpace>
+  </div>
 </template>
 
 <style scoped>
-.overview-grid {
+.flow-page {
   display: grid;
-  grid-template-columns: repeat(6, minmax(130px, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
-.overview-card {
-  min-width: 0;
-  min-height: 92px;
-  padding: 12px;
-  border: 1px solid var(--clay-border);
+.setup-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, #f59e0b 28%, var(--clay-border));
   border-radius: 12px;
+  background: color-mix(in srgb, #f59e0b 7%, var(--clay-surface));
+  font-size: 12px;
+}
+
+.setup-strip-title {
+  color: var(--clay-text);
+  font-weight: 800;
+}
+
+.setup-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 5px;
+  border: 1px solid var(--clay-border);
+  border-radius: 999px;
+  color: var(--clay-text-2);
   background: var(--clay-surface);
-  box-shadow: var(--clay-out-sm);
-  color: inherit;
-  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
 
-.overview-card:hover,
-.overview-card:focus-visible {
+.setup-chip:hover,
+.setup-chip:focus-visible {
   border-color: var(--clay-border-strong);
   box-shadow: var(--clay-hover);
   transform: translateY(-1px);
   outline: none;
 }
 
-.overview-label,
-.overview-hint {
-  display: block;
-  color: var(--clay-text-3);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.overview-value {
-  display: block;
-  margin: 4px 0;
-  color: var(--clay-text);
-  font-size: 22px;
-  line-height: 1.15;
-  font-weight: 900;
-}
-
-.overview-card.good .overview-value {
-  color: #14755f;
-}
-
-.overview-card.warn .overview-value {
-  color: #b45309;
-}
-
-.overview-card.danger .overview-value {
-  color: #b91c1c;
-}
-
-.setup-panel {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
-  gap: 14px;
-  align-items: center;
-  padding: 14px;
-  border: 0;
-  border-radius: 12px;
-  background: var(--clay-surface);
-  box-shadow: var(--clay-extruded-sm);
-}
-
-.setup-title {
-  color: var(--clay-text);
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.setup-desc {
-  margin-top: 5px;
-  color: var(--clay-text-3);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.setup-steps {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
-  gap: 8px;
-}
-
-.setup-step {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: 11px;
-  color: var(--clay-text-2);
-  background: var(--clay-surface-2);
-  box-shadow: var(--clay-extruded-sm);
-  font-weight: 600;
-  cursor: pointer;
-  text-align: left;
-  transition: box-shadow 0.16s ease, transform 0.16s ease, color 0.16s ease;
-}
-
-.setup-step:hover,
-.setup-step:focus-visible {
-  box-shadow: var(--clay-extruded-hover);
-  transform: translateY(-1px);
-  outline: none;
-}
-
-.setup-step:active {
-  box-shadow: var(--clay-inset-deep);
-  transform: scale(0.96);
-  transition-duration: 0.08s;
-}
-
-.setup-step.done {
-  color: #14755f;
-  background: var(--clay-success-soft);
-}
-
-.step-dot {
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
+.setup-chip-dot {
+  width: 17px;
+  height: 17px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  background: var(--clay-surface);
-  box-shadow: var(--clay-inset-sm);
-  font-size: 12px;
+  border-radius: 999px;
+  color: #b45309;
+  background: color-mix(in srgb, #f59e0b 16%, var(--clay-surface));
+  font-size: 11px;
   font-weight: 900;
 }
 
-.template-note {
+.setup-strip-note {
+  margin-left: auto;
+  color: var(--clay-text-3);
+}
+
+.board-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--clay-primary) 22%, var(--clay-border));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--clay-primary-soft) 38%, var(--clay-surface));
-}
-
-.template-note strong {
-  display: block;
-  color: var(--clay-text);
-  font-size: 13px;
-}
-
-.template-note span {
-  display: block;
-  margin-top: 3px;
-  color: var(--clay-text-3);
-  font-size: 12px;
-}
-
-.mode-panel {
-  display: grid;
   gap: 10px;
-  padding: 12px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
   border: 1px solid var(--clay-border);
   border-radius: 12px;
   background: var(--clay-surface);
   box-shadow: var(--clay-out-sm);
 }
 
-.mode-tabs,
-.flow-select-row,
+.mode-tabs {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--clay-surface-2);
+  box-shadow: var(--clay-inset-sm);
+}
+
+.mode-tab {
+  padding: 4px 14px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--clay-text-3);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.mode-tab:hover {
+  color: var(--clay-text-2);
+}
+
+.mode-tab.active {
+  color: var(--clay-primary);
+  background: var(--clay-surface);
+  box-shadow: var(--clay-out-sm);
+}
+
+.bar-search {
+  width: 220px;
+}
+
+.bar-flow-select {
+  width: min(280px, 100%);
+}
+
+.bar-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  color: var(--clay-text-2);
+  font-size: 12px;
+}
+
+.bar-stats span,
+.bar-stats .stat-link {
+  padding: 3px 9px;
+  border: 1px solid var(--clay-border);
+  border-radius: 999px;
+  background: var(--clay-surface-2);
+}
+
+.bar-stats .stat-warn {
+  border-color: color-mix(in srgb, #b45309 35%, var(--clay-border));
+  color: #b45309;
+  font-weight: 700;
+}
+
+.stat-link {
+  color: var(--clay-text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+
+.stat-link:hover,
+.stat-link:focus-visible {
+  border-color: var(--clay-border-strong);
+  color: var(--clay-text);
+  outline: none;
+}
+
+.dirty-hint {
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .editor-switches {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.flow-select-row {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto auto;
 }
 
 .flow-workspace {
@@ -1678,31 +1616,20 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1100px) {
-  .overview-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .flow-workspace {
     grid-template-columns: 1fr;
-  }
-
-  .flow-select-row {
-    grid-template-columns: 1fr 1fr;
   }
 }
 
 @media (max-width: 680px) {
-  .overview-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .bar-search,
+  .bar-flow-select {
+    width: 100%;
   }
 
-  .setup-panel {
-    grid-template-columns: 1fr;
+  .setup-strip-note {
+    margin-left: 0;
+    width: 100%;
   }
-
-  .setup-steps {
-    grid-template-columns: repeat(2, minmax(120px, 1fr));
-  }
-
 }
 </style>

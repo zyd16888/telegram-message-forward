@@ -18,7 +18,7 @@ defineProps<{
     <div class="node-meta">
       <span class="node-tag">{{ data.typeLabel }}</span>
       <span class="node-sub">{{ data.accountLabel }}</span>
-      <span class="node-sub">{{ data.ruleCount ? `${data.ruleCount} 个 Flow` : '未接 Flow' }}</span>
+      <span class="node-sub">{{ data.linkLabel ?? (data.ruleCount ? `${data.ruleCount} 个 Flow` : '未接 Flow') }}</span>
     </div>
     <div class="node-foot" :class="{ muted: !data.enabled || !data.running }">{{ data.runtimeLabel }}</div>
     <Handle type="source" :position="Position.Right" />

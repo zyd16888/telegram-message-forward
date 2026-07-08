@@ -248,7 +248,7 @@ function ruleIdOf(nodeId: string): number {
 <style scoped>
 .canvas-shell {
   position: relative;
-  height: 640px;
+  height: clamp(520px, calc(100vh - 280px), 960px);
   border: 1px solid var(--clay-border);
   border-radius: 14px;
   background: var(--clay-surface);

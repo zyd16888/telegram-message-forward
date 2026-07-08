@@ -10,6 +10,8 @@ export interface SourceNodeData {
   enabled: boolean
   running: boolean
   ruleCount: number
+  /** 编辑模式下按草稿连线实时生成，覆盖基于 ruleCount 的默认文案。 */
+  linkLabel?: string
 }
 
 export interface RuleNodeData {
@@ -27,6 +29,7 @@ export interface FilterNodeData {
   name: string
   conditionCount: number
   ruleCount: number
+  linkLabel?: string
 }
 
 export interface SinkNodeData {
@@ -35,6 +38,7 @@ export interface SinkNodeData {
   enabled: boolean
   deliveryLabel: string
   ruleCount: number
+  linkLabel?: string
 }
 
 export interface ProcessorNodeData {

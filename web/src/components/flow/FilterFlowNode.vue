@@ -17,7 +17,7 @@ defineProps<{
     </div>
     <div class="node-meta">
       <span class="node-tag">{{ data.conditionCount }} 个条件</span>
-      <span class="node-sub">{{ data.ruleCount ? `${data.ruleCount} 个 Flow 引用` : '未被引用' }}</span>
+      <span class="node-sub">{{ data.linkLabel ?? (data.ruleCount ? `${data.ruleCount} 个 Flow 引用` : '未被引用') }}</span>
     </div>
     <Handle type="target" :position="Position.Left" />
     <Handle type="source" :position="Position.Right" />
