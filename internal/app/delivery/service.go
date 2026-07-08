@@ -3,7 +3,10 @@ package delivery
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"gorm.io/gorm"
 
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
 	domainflow "telegram-message-forward/internal/domain/flow"
@@ -169,10 +172,14 @@ func (s *Service) enrich(ctx context.Context, task *domaindelivery.Task) (*View,
 
 	if task.OriginType == "flow" && task.OriginID > 0 && s.flows != nil {
 		flow, err := s.flows.GetByID(ctx, task.OriginID)
-		if err != nil {
+		switch {
+		case err == nil:
+			view.Flow = flow
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			// Flow 可被删除而历史任务保留，名字缺失不阻塞投递记录展示。
+		default:
 			return nil, fmt.Errorf("查询投递 Flow 失败 flow_id=%d: %w", task.OriginID, err)
 		}
-		view.Flow = flow
 	}
 
 	if task.TemplateID != nil && s.templates != nil {

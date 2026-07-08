@@ -1,17 +1,20 @@
 -- +goose Up
 DROP TABLE IF EXISTS flow_rule_migrations;
 
+-- origin_type 保留 'rule'：delivery_tasks 中存在下线前的历史投递记录，
+-- 新代码不再产生 rule 任务，但历史行必须能通过约束校验。
 ALTER TABLE delivery_tasks DROP CONSTRAINT IF EXISTS chk_delivery_tasks_origin;
 ALTER TABLE delivery_tasks
     ADD CONSTRAINT chk_delivery_tasks_origin CHECK (
-        (origin_type = 'ai_digest' AND origin_id IS NOT NULL AND message_snapshot IS NOT NULL)
+        (origin_type = 'rule' AND message_id IS NOT NULL AND rule_id IS NOT NULL)
+        OR (origin_type = 'ai_digest' AND origin_id IS NOT NULL AND message_snapshot IS NOT NULL)
         OR (origin_type = 'flow' AND message_id IS NOT NULL AND origin_id IS NOT NULL AND origin_node_id IS NOT NULL)
     );
 
 ALTER TABLE delivery_tasks DROP CONSTRAINT IF EXISTS delivery_tasks_origin_type_check;
 ALTER TABLE delivery_tasks
     ADD CONSTRAINT delivery_tasks_origin_type_check
-    CHECK (origin_type IN ('ai_digest','flow'));
+    CHECK (origin_type IN ('rule','ai_digest','flow'));
 
 ALTER TABLE delivery_tasks DROP CONSTRAINT IF EXISTS delivery_tasks_rule_id_fkey;
 DROP INDEX IF EXISTS idx_delivery_tasks_rule_unique;
