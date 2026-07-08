@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
 
 	domainaccount "telegram-message-forward/internal/domain/account"
@@ -124,7 +125,7 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 	}
 
 	runErr := client.Run(ctx, func(ctx context.Context) error {
-		if err := p.ensureAuthorized(ctx, client); err != nil {
+		if _, err := p.ensureAuthorized(ctx, client); err != nil {
 			return err
 		}
 		offsetPeer := tg.InputPeerClass(&tg.InputPeerEmpty{})
@@ -638,8 +639,16 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 		return nil
 	})
 
+	// gotd updates 管理器：负责 pts/qts/seq 追踪、gap 检测与 getDifference/
+	// getChannelDifference 补齐，并响应 updateChannelTooLong。缺了它，频道/超级群
+	// 的实时更新一旦出现 gap（消息突增、短暂重连、服务端要求重同步）就会静默停掉、
+	// 且永不自动恢复——表现为「源在运行但不再拉到新消息」。
+	// 说明：默认内存 storage 不跨重启，重启后按当前服务端 state 重新对齐（停机窗口内的
+	// 消息可能漏），后续可接持久化 storage 做断点续传。
+	gaps := updates.New(updates.Config{Handler: dispatcher})
+
 	var err error
-	client, err = p.buildClient(acc, dispatcher)
+	client, err = p.buildClient(acc, gaps)
 	if err != nil {
 		cancel()
 		return err
@@ -662,12 +671,17 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 
 	go func() {
 		err := client.Run(runCtx, func(ctx context.Context) error {
-			if err := p.ensureAuthorized(ctx, client); err != nil {
+			self, err := p.ensureAuthorized(ctx, client)
+			if err != nil {
 				return err
 			}
 			p.deps.Log.Info("Telegram account runner 监听中", "account", acc.ID)
-			<-ctx.Done()
-			return ctx.Err()
+			// gaps.Run 阻塞驱动更新同步循环，直到 runCtx 取消（Stop）或致命错误返回。
+			return gaps.Run(ctx, client.API(), self.ID, updates.AuthOptions{
+				OnStart: func(context.Context) {
+					p.deps.Log.Info("Telegram updates 管理器已启动，gap 恢复生效", "account", acc.ID)
+				},
+			})
 		})
 		if err != nil && !errors.Is(err, context.Canceled) {
 			p.deps.Log.Error("Telegram account runner 运行退出", "account", acc.ID, "err", err)
@@ -756,15 +770,16 @@ func (p *Plugin) forwardToSubscriptions(runCtx context.Context, accountID int64,
 	}
 }
 
-func (p *Plugin) ensureAuthorized(ctx context.Context, client *telegram.Client) error {
+// ensureAuthorized 校验账号已登录并返回 self 用户（供 updates 管理器获取 self id）。
+func (p *Plugin) ensureAuthorized(ctx context.Context, client *telegram.Client) (*tg.User, error) {
 	st, err := infratelegram.Status(ctx, client)
 	if err != nil {
-		return fmt.Errorf("查询登录状态失败: %w", err)
+		return nil, fmt.Errorf("查询登录状态失败: %w", err)
 	}
-	if st == nil || !st.Authorized {
-		return errors.New("账号未登录，请先通过 cmd/login 完成登录")
+	if st == nil || !st.Authorized || st.User == nil {
+		return nil, errors.New("账号未登录，请先通过 cmd/login 完成登录")
 	}
-	return nil
+	return st.User, nil
 }
 
 // downloadPolicy 返回当前媒体下载策略；未注入时使用内置默认。
