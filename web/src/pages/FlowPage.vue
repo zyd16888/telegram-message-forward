@@ -147,16 +147,8 @@ function onPaneClick() {
 
 // --- 展示辅助 ---
 
-function sourceName(id: number): string {
-  return sources.value.find((s) => s.id === id)?.name ?? `#${id}`
-}
-
 function ruleName(id: number): string {
   return rules.value.find((r) => r.id === id)?.name ?? `#${id}`
-}
-
-function sinkName(id: number): string {
-  return sinks.value.find((s) => s.id === id)?.name ?? `#${id}`
 }
 
 function filterName(id: number): string {
@@ -831,7 +823,17 @@ async function onFlowSelect(value: number | null) {
   }
 }
 
-async function saveFlow(options: { silent?: boolean } = {}): Promise<boolean> {
+let savedHintTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleSavedHintClear() {
+  if (savedHintTimer) clearTimeout(savedHintTimer)
+  savedHintTimer = setTimeout(() => {
+    if (flowSavedHint.value === '已保存') flowSavedHint.value = ''
+    savedHintTimer = null
+  }, 2500)
+}
+
+async function saveFlow(): Promise<boolean> {
   if (!flowDraft.value) return false
   flowSaving.value = true
   flowSavedHint.value = '保存中'
@@ -839,19 +841,61 @@ async function saveFlow(options: { silent?: boolean } = {}): Promise<boolean> {
     const body = flowBodyOf(flowDraft.value)
     if (!body) return false
     const saved = flowDraft.value.id ? await flowsApi.update(flowDraft.value.id, body) : await flowsApi.create(body)
-    if (!options.silent) message.success('Flow 已保存')
+    message.success('Flow 已保存')
     activeFlowId.value = saved.id
     flowDraft.value = cloneFlow(saved)
     replaceFlowCache(saved)
     flowError.value = ''
     flowSavedHint.value = '已保存'
+    scheduleSavedHintClear()
     rememberFlowDraftBaseline()
     await load()
     return true
   } catch (e) {
     flowError.value = errText(e)
     flowSavedHint.value = '保存失败'
-    if (!options.silent) message.error('保存 Flow 失败：' + flowError.value)
+    message.error('保存 Flow 失败：' + flowError.value)
+    return false
+  } finally {
+    flowSaving.value = false
+  }
+}
+
+// 开关类改动只把开关字段本身落库：以「已保存」的 Flow 结构为底再打补丁，
+// 避免把草稿里未保存的节点/连线一起静默提交（结构改动仍需显式点保存）。
+function patchDraftBaseline(patch: Partial<Pick<Flow, 'enabled' | 'stop_on_match'>>) {
+  const base = JSON.parse(flowDraftBaseline.value) as ReturnType<typeof flowBodyOf>
+  if (!base) return
+  Object.assign(base, patch)
+  flowDraftBaseline.value = JSON.stringify(base)
+}
+
+async function persistFlowToggle(patch: Partial<Pick<Flow, 'enabled' | 'stop_on_match'>>): Promise<boolean> {
+  const draft = flowDraft.value
+  if (!draft?.id) return true // 新建 Flow 尚未落库：仅本地切换，保存时随整体提交
+  const saved = flows.value.find((item) => item.id === draft.id)
+  if (!saved) {
+    flowError.value = 'Flow 数据未加载，请刷新后重试'
+    flowSavedHint.value = '保存失败'
+    return false
+  }
+  const savedBody = flowBodyOf(saved)
+  if (!savedBody) return false
+  flowSaving.value = true
+  flowSavedHint.value = '保存中'
+  try {
+    const body = { ...savedBody, ...patch }
+    const updated = await flowsApi.update(draft.id, body)
+    replaceFlowCache(updated)
+    patchDraftBaseline(patch)
+    flowError.value = ''
+    flowSavedHint.value = '已保存'
+    scheduleSavedHintClear()
+    await load()
+    return true
+  } catch (e) {
+    flowError.value = errText(e)
+    flowSavedHint.value = '保存失败'
     return false
   } finally {
     flowSaving.value = false
@@ -863,7 +907,7 @@ async function updateDraftEnabled(value: boolean) {
   const previous = flowDraft.value.enabled
   flowDraft.value.enabled = value
   if (!flowDraft.value.id) return
-  const ok = await saveFlow({ silent: true })
+  const ok = await persistFlowToggle({ enabled: value })
   if (!ok && flowDraft.value) flowDraft.value.enabled = previous
 }
 
@@ -872,7 +916,7 @@ async function updateDraftStopOnMatch(value: boolean) {
   const previous = flowDraft.value.stop_on_match
   flowDraft.value.stop_on_match = value
   if (!flowDraft.value.id) return
-  const ok = await saveFlow({ silent: true })
+  const ok = await persistFlowToggle({ stop_on_match: value })
   if (!ok && flowDraft.value) flowDraft.value.stop_on_match = previous
 }
 
@@ -930,14 +974,6 @@ async function toggleRule(ruleId: number, value: boolean) {
   await saveRule(rule, { enabled: value }, value ? '已启用 Flow' : '已停用 Flow')
 }
 
-async function onCanvasConnect({ from, to }: CanvasConnection) {
-  if (editorActive.value) {
-    onDraftConnect({ from, to })
-    return
-  }
-  message.info('请先编辑某个 Flow，再调整节点连线')
-}
-
 async function openCreateRule() {
   const sel = selection.value
   await newFlow()
@@ -947,23 +983,6 @@ async function openCreateRule() {
 
 async function openEditRule(ruleId: number) {
   await selectFlow(ruleId)
-}
-
-async function newFlowFromSourceToSink(sourceID: number, sinkID: number) {
-  if (!(await confirmDiscardDraft())) return
-  editorActive.value = true
-  activeFlowId.value = null
-  flowDraft.value = emptyFlowDraft()
-  flowDraft.value.name = `转发：${sourceName(sourceID)} -> ${sinkName(sinkID)}`
-  flowDraft.value.nodes = [
-    { id: -1, type: 'source', ref_id: sourceID, config: {}, pos_x: 0, pos_y: 0 },
-    { id: -2, type: 'target', ref_id: sinkID, config: {}, pos_x: 420, pos_y: 0 },
-  ]
-  flowDraft.value.edges = [{ id: 0, from_node_id: -1, to_node_id: -2 }]
-  flowError.value = ''
-  flowSavedHint.value = ''
-  clearPaneSelection()
-  rememberFlowDraftBaseline()
 }
 
 function goToDeliveries() {
@@ -1030,6 +1049,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  if (savedHintTimer) clearTimeout(savedHintTimer)
 })
 </script>
 
@@ -1104,9 +1124,10 @@ onBeforeUnmount(() => {
         <NButton size="small" type="primary" :disabled="!flowDraftDirty || flowSaving" :loading="flowSaving" @click="saveFlow()">保存</NButton>
         <NButton v-if="flowDraft?.id" size="small" type="error" secondary @click="deleteFlow">删除</NButton>
         <NButton size="small" text type="primary" @click="closeFocusedEditor">退出聚焦</NButton>
-        <span v-if="flowSaving" class="save-hint">{{ flowSavedHint }}</span>
+        <span v-if="flowSaving" class="save-hint" aria-live="polite">{{ flowSavedHint }}</span>
+        <span v-else-if="flowSavedHint === '保存失败'" class="save-hint save-hint-error" aria-live="polite">保存失败</span>
         <span v-else-if="flowDraftDirty" class="dirty-hint">有未保存修改</span>
-        <span v-else-if="flowSavedHint" class="save-hint">{{ flowSavedHint }}</span>
+        <span v-else-if="flowSavedHint" class="save-hint" aria-live="polite">{{ flowSavedHint }}</span>
       </template>
     </section>
 
@@ -1137,7 +1158,7 @@ onBeforeUnmount(() => {
           @select-node="toggleSelect"
           @select-edge="removeDraftEdge"
           @clear-select="onPaneClick"
-          @connect="onCanvasConnect"
+          @connect="onDraftConnect"
           @node-position="onDraftNodePosition"
         />
 
@@ -1464,6 +1485,10 @@ onBeforeUnmount(() => {
   color: var(--clay-text-3);
   font-size: 12px;
   font-weight: 600;
+}
+
+.save-hint-error {
+  color: #d03050;
 }
 
 .editor-switches {
