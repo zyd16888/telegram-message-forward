@@ -29,7 +29,6 @@ const emit = defineEmits<{
   'manage-config': []
   'view-deliveries': []
   'clear-selection': []
-  'detach-edge': []
   'clear-edge': []
 }>()
 
@@ -368,7 +367,7 @@ function matchingRulesForSource(sourceId: number, activeRuleId?: number): Matchi
       </section>
 
       <div class="actions">
-        <NButton size="small" type="error" secondary @click="emit('detach-edge')">解除关联</NButton>
+        <NButton size="small" type="primary" @click="emit('edit-rule', selectedEdge.ruleId)">编辑此 Flow</NButton>
         <NButton size="small" text type="primary" @click="emit('clear-edge')">取消</NButton>
       </div>
     </template>

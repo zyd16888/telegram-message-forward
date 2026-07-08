@@ -189,6 +189,7 @@ function ruleIdOf(nodeId: string): number {
       :nodes="nodes"
       :edges="edges"
       :nodes-draggable="editable ?? false"
+      :nodes-connectable="editable ?? false"
       :edges-updatable="false"
       :delete-key-code="null"
       :min-zoom="0.25"
@@ -240,7 +241,7 @@ function ruleIdOf(nodeId: string): number {
       <span v-if="(processors?.length ?? 0) > 0" class="legend-item"><span class="legend-swatch processor" />处理</span>
       <span class="legend-item"><span class="legend-swatch rule" />Flow</span>
       <span class="legend-item"><span class="legend-swatch sink" />渠道</span>
-      <span class="legend-hint">{{ editable ? '拖动节点调整位置，拖动圆点建立连线' : '拖动节点右侧圆点到下一层即可连线；来源直连渠道会创建新 Flow' }}</span>
+      <span class="legend-hint">{{ editable ? '拖动节点调整位置，拖动圆点建立连线' : '点选节点查看路径；编辑 Flow 后可调整结构' }}</span>
     </div>
   </div>
 </template>

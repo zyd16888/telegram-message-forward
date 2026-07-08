@@ -54,12 +54,14 @@ const flows = shallowRef<Flow[]>([])
 const flowDraft = ref<Flow | null>(null)
 const flowError = shallowRef('')
 const flowDraftBaseline = shallowRef('null')
-const canvasMode = shallowRef<'overview' | 'edit'>('overview')
+const editorActive = shallowRef(false)
 const activeFlowId = shallowRef<number | null>(null)
 const selectedSourceToAdd = shallowRef<number | null>(null)
 const selectedFilterToAdd = shallowRef<number | null>(null)
 const selectedSinkToAdd = shallowRef<number | null>(null)
 const selectedProcessorToAdd = shallowRef<string>('append_source')
+const flowSaving = shallowRef(false)
+const flowSavedHint = shallowRef('')
 
 const conditionLabelByType = computed(() => new Map(ruleMeta.value.conditions.map((d) => [d.type, d.label])))
 const processorLabelByType = computed(() => new Map(ruleMeta.value.processors.map((d) => [d.type, d.label])))
@@ -80,7 +82,7 @@ const templateOptions = computed(() => [
   ...templates.value.map((t) => ({ label: `${t.name} · ${t.format}`, value: t.id })),
 ])
 const selectedDraftNode = computed(() => {
-  if (canvasMode.value !== 'edit' || !selection.value || !flowDraft.value) return null
+  if (!editorActive.value || !selection.value || !flowDraft.value) return null
   return flowDraft.value.nodes.find((node) => node.id === selection.value?.id) ?? null
 })
 const selectedDraftNodeUsesSharedFilters = computed(() =>
@@ -89,7 +91,7 @@ const selectedDraftNodeUsesSharedFilters = computed(() =>
 const flowDraftDirty = computed(() => draftSnapshot() !== flowDraftBaseline.value)
 
 function draftStateClass(id: number): string {
-  if (canvasMode.value !== 'edit' || !selection.value) return ''
+  if (!editorActive.value || !selection.value) return ''
   return selection.value.id === id ? 'is-selected' : ''
 }
 
@@ -412,7 +414,7 @@ const canvasEdges = computed<CanvasEdgeInput[]>(() => {
   return out
 })
 
-// 编辑模式实时状态：按草稿连线统计每个节点的入线/出线，连线增删立即反映到节点卡片。
+// 聚焦编辑实时状态：按草稿连线统计每个节点的入线/出线，连线增删立即反映到节点卡片。
 const draftEdgeCountByNode = computed(() => {
   const counts = new Map<number, number>()
   for (const edge of flowDraft.value?.edges ?? []) {
@@ -525,7 +527,9 @@ const canvasHasNodes = computed(
 // --- 数据与操作 ---
 
 async function refresh() {
+  const discardDirtyDraft = editorActive.value && flowDraftDirty.value
   if (!(await confirmDiscardDraft())) return
+  if (discardDirtyDraft) resetDraftToSavedState()
   try {
     await reloadFlowData()
   } catch (e) {
@@ -550,17 +554,14 @@ function ensureEditorSelections() {
 
 async function loadFlows() {
   flows.value = await flowsApi.list()
-  if (!activeFlowId.value && flows.value.length) {
-    activeFlowId.value = flows.value[0].id
-  }
-  if (activeFlowId.value) {
+  if (editorActive.value && activeFlowId.value) {
     const current = flows.value.find((item) => item.id === activeFlowId.value)
     if (current) flowDraft.value = cloneFlow(current)
   }
-  if (!flowDraft.value) {
+  if (editorActive.value && !flowDraft.value) {
     flowDraft.value = emptyFlowDraft()
   }
-  rememberFlowDraftBaseline()
+  if (editorActive.value) rememberFlowDraftBaseline()
 }
 
 async function reloadFlowData() {
@@ -601,6 +602,11 @@ function rememberFlowDraftBaseline() {
   flowDraftBaseline.value = draftSnapshot()
 }
 
+function replaceFlowCache(saved: Flow) {
+  const index = flows.value.findIndex((item) => item.id === saved.id)
+  flows.value = index >= 0 ? flows.value.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...flows.value]
+}
+
 function resetDraftToSavedState() {
   if (activeFlowId.value) {
     const flow = flows.value.find((item) => item.id === activeFlowId.value)
@@ -614,7 +620,7 @@ function resetDraftToSavedState() {
 }
 
 function confirmDiscardDraft(): Promise<boolean> {
-  if (!flowDraftDirty.value) return Promise.resolve(true)
+  if (!editorActive.value || !flowDraftDirty.value) return Promise.resolve(true)
   return new Promise((resolve) => {
     dialog.warning({
       title: '放弃未保存的 Flow 草稿？',
@@ -626,6 +632,16 @@ function confirmDiscardDraft(): Promise<boolean> {
       onClose: () => resolve(false),
     })
   })
+}
+
+function resetEditorState() {
+  editorActive.value = false
+  activeFlowId.value = null
+  flowDraft.value = null
+  flowError.value = ''
+  flowSavedHint.value = ''
+  clearPaneSelection()
+  rememberFlowDraftBaseline()
 }
 
 function emptyFlowDraft(): Flow {
@@ -783,33 +799,26 @@ function updateSelectedProcessorType(item: ProcessorConfig, type: string) {
   item.config = defaultsFor(processorDescriptor(type))
 }
 
-async function setCanvasMode(mode: 'overview' | 'edit') {
-  if (canvasMode.value === mode) return
-  if (mode === 'overview' && flowDraftDirty.value) {
-    if (!(await confirmDiscardDraft())) return
-    resetDraftToSavedState()
-  }
-  canvasMode.value = mode
-}
-
 async function newFlow() {
   if (!(await confirmDiscardDraft())) return
+  editorActive.value = true
   activeFlowId.value = null
   flowDraft.value = emptyFlowDraft()
   flowError.value = ''
-  canvasMode.value = 'edit'
+  flowSavedHint.value = ''
   clearPaneSelection()
   rememberFlowDraftBaseline()
 }
 
 async function selectFlow(id: number) {
-  if (id === activeFlowId.value) return
+  if (editorActive.value && id === activeFlowId.value) return
   if (!(await confirmDiscardDraft())) return
+  editorActive.value = true
   activeFlowId.value = id
   const flow = flows.value.find((item) => item.id === id)
   flowDraft.value = flow ? cloneFlow(flow) : emptyFlowDraft()
   flowError.value = ''
-  canvasMode.value = 'edit'
+  flowSavedHint.value = ''
   clearPaneSelection()
   rememberFlowDraftBaseline()
 }
@@ -822,20 +831,56 @@ async function onFlowSelect(value: number | null) {
   }
 }
 
-async function saveFlow() {
-  if (!flowDraft.value) return
+async function saveFlow(options: { silent?: boolean } = {}): Promise<boolean> {
+  if (!flowDraft.value) return false
+  flowSaving.value = true
+  flowSavedHint.value = '保存中'
   try {
     const body = flowBodyOf(flowDraft.value)
-    if (!body) return
+    if (!body) return false
     const saved = flowDraft.value.id ? await flowsApi.update(flowDraft.value.id, body) : await flowsApi.create(body)
-    message.success('Flow 已保存')
+    if (!options.silent) message.success('Flow 已保存')
     activeFlowId.value = saved.id
+    flowDraft.value = cloneFlow(saved)
+    replaceFlowCache(saved)
     flowError.value = ''
-    await reloadFlowData()
+    flowSavedHint.value = '已保存'
+    rememberFlowDraftBaseline()
+    await load()
+    return true
   } catch (e) {
     flowError.value = errText(e)
-    message.error('保存 Flow 失败：' + flowError.value)
+    flowSavedHint.value = '保存失败'
+    if (!options.silent) message.error('保存 Flow 失败：' + flowError.value)
+    return false
+  } finally {
+    flowSaving.value = false
   }
+}
+
+async function updateDraftEnabled(value: boolean) {
+  if (!flowDraft.value) return
+  const previous = flowDraft.value.enabled
+  flowDraft.value.enabled = value
+  if (!flowDraft.value.id) return
+  const ok = await saveFlow({ silent: true })
+  if (!ok && flowDraft.value) flowDraft.value.enabled = previous
+}
+
+async function updateDraftStopOnMatch(value: boolean) {
+  if (!flowDraft.value) return
+  const previous = flowDraft.value.stop_on_match
+  flowDraft.value.stop_on_match = value
+  if (!flowDraft.value.id) return
+  const ok = await saveFlow({ silent: true })
+  if (!ok && flowDraft.value) flowDraft.value.stop_on_match = previous
+}
+
+async function closeFocusedEditor() {
+  const flowId = activeFlowId.value
+  if (!(await confirmDiscardDraft())) return
+  resetEditorState()
+  if (flowId) selection.value = { kind: 'rule', id: flowId }
 }
 
 async function deleteFlow() {
@@ -844,16 +889,15 @@ async function deleteFlow() {
   try {
     await flowsApi.remove(flowDraft.value.id)
     message.success('Flow 已删除')
-    activeFlowId.value = null
-    flowDraft.value = null
+    resetEditorState()
     await reloadFlowData()
   } catch (e) {
     message.error('删除 Flow 失败：' + errText(e))
   }
 }
 
-// 概览操作基于真实 Flow 图打增量补丁，不走线性投影往返——投影会把
-// 编辑模式画出的非线性 DAG 压扁成线性链，静默丢掉分支结构和节点坐标。
+// 全局开关基于真实 Flow 图打增量补丁，不走线性投影往返——投影会把
+// 聚焦编辑画出的非线性 DAG 压扁成线性链，静默丢掉分支结构和节点坐标。
 async function saveRule(
   rule: LinearFlow,
   patch: Partial<{ enabled: boolean; filter_ids: number[]; source_ids: number[]; targets: RuleTarget[] }>,
@@ -866,7 +910,7 @@ async function saveRule(
   }
   const result = applyPatchToFlowGraph(flow, patch)
   if (!result.ok) {
-    message.warning(`${result.reason}，请切换到编辑模式调整`)
+    message.warning(`${result.reason}，请编辑此 Flow 后调整`)
     return
   }
   const body = flowBodyOf(result.flow)
@@ -887,77 +931,16 @@ async function toggleRule(ruleId: number, value: boolean) {
 }
 
 async function onCanvasConnect({ from, to }: CanvasConnection) {
-  if (canvasMode.value === 'edit') {
+  if (editorActive.value) {
     onDraftConnect({ from, to })
     return
   }
-  if (from.kind === 'source' && to.kind === 'rule') {
-    const rule = rules.value.find((r) => r.id === to.id)
-    if (!rule) return
-    if (rule.source_ids.includes(from.id)) {
-      message.info('该来源已接入此 Flow')
-      return
-    }
-    await saveRule(rule, { source_ids: [...rule.source_ids, from.id] }, `已接入来源「${sourceName(from.id)}」`)
-    return
-  }
-  if (from.kind === 'filter' && to.kind === 'rule') {
-    const rule = rules.value.find((r) => r.id === to.id)
-    if (!rule) return
-    if (rule.filter_ids.includes(from.id)) {
-      message.info('该过滤器已接入此 Flow')
-      return
-    }
-    const attach = () => saveRule(rule, { filter_ids: [...rule.filter_ids, from.id] }, `已接入过滤器「${filterName(from.id)}」`)
-    // 后端语义：filter_ids 非空即覆盖内联条件。连线绕过了编辑器的二选一，需要用户确认。
-    if (rule.conditions.length && !rule.filter_ids.length) {
-      dialog.warning({
-        title: '接入共享过滤器',
-        content: `Flow「${rule.name}」当前使用 ${rule.conditions.length} 个专用条件。接入共享过滤器后将以过滤器为准，专用条件不再生效。`,
-        positiveText: '接入并覆盖',
-        negativeText: '取消',
-        onPositiveClick: () => attach(),
-      })
-      return
-    }
-    await attach()
-    return
-  }
-  if (from.kind === 'rule' && to.kind === 'sink') {
-    const rule = rules.value.find((r) => r.id === from.id)
-    if (!rule) return
-    if (rule.targets.some((t) => t.sink_id === to.id)) {
-      message.info('该 Flow 已投递到此渠道')
-      return
-    }
-    await saveRule(rule, { targets: [...rule.targets, { sink_id: to.id, template_id: undefined }] }, `已添加目标「${sinkName(to.id)}」`)
-    return
-  }
-  if (from.kind === 'source' && to.kind === 'sink') {
-    await newFlowFromSourceToSink(from.id, to.id)
-    return
-  }
-  message.warning('只支持 来源→Flow、过滤器→Flow、Flow→渠道、来源→渠道 四种连线')
-}
-
-async function detachSelectedEdge() {
-  const edge = selectedEdge.value
-  if (!edge) return
-  const rule = rules.value.find((r) => r.id === edge.ruleId)
-  if (!rule) return
-  if (edge.kind === 'source-rule') {
-    await saveRule(rule, { source_ids: rule.source_ids.filter((id) => id !== edge.sourceId) }, '已解除来源关联')
-  } else if (edge.kind === 'filter-rule') {
-    await saveRule(rule, { filter_ids: rule.filter_ids.filter((id) => id !== edge.filterId) }, '已解除过滤器关联')
-  } else {
-    await saveRule(rule, { targets: rule.targets.filter((t) => t.sink_id !== edge.sinkId) }, '已解除目标关联')
-  }
-  clearSelectedEdge()
+  message.info('请先编辑某个 Flow，再调整节点连线')
 }
 
 async function openCreateRule() {
-  await newFlow()
   const sel = selection.value
+  await newFlow()
   if (sel?.kind === 'source') selectedSourceToAdd.value = sel.id
   if (sel?.kind === 'sink') selectedSinkToAdd.value = sel.id
 }
@@ -968,6 +951,7 @@ async function openEditRule(ruleId: number) {
 
 async function newFlowFromSourceToSink(sourceID: number, sinkID: number) {
   if (!(await confirmDiscardDraft())) return
+  editorActive.value = true
   activeFlowId.value = null
   flowDraft.value = emptyFlowDraft()
   flowDraft.value.name = `转发：${sourceName(sourceID)} -> ${sinkName(sinkID)}`
@@ -977,7 +961,7 @@ async function newFlowFromSourceToSink(sourceID: number, sinkID: number) {
   ]
   flowDraft.value.edges = [{ id: 0, from_node_id: -1, to_node_id: -2 }]
   flowError.value = ''
-  canvasMode.value = 'edit'
+  flowSavedHint.value = ''
   clearPaneSelection()
   rememberFlowDraftBaseline()
 }
@@ -1011,7 +995,7 @@ function queryId(key: string): number | null {
 }
 
 function handleBeforeUnload(event: BeforeUnloadEvent) {
-  if (!flowDraftDirty.value) return
+  if (!editorActive.value || !flowDraftDirty.value) return
   event.preventDefault()
   event.returnValue = ''
 }
@@ -1053,7 +1037,7 @@ onBeforeUnmount(() => {
   <div class="flow-page">
     <PageHeader
       title="转发编排"
-      desc="画布上直接拖线：来源→Flow、Flow→渠道建立关联，来源→渠道快速新建 Flow；点连线可解除关联"
+      desc="全局查看转发路径；选中 Flow 后聚焦编辑，开关类操作会自动保存"
       icon="flow"
     >
       <template #actions>
@@ -1078,12 +1062,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="board-bar">
-      <div class="mode-tabs">
-        <button type="button" class="mode-tab" :class="{ active: canvasMode === 'overview' }" @click="setCanvasMode('overview')">概览</button>
-        <button type="button" class="mode-tab" :class="{ active: canvasMode === 'edit' }" @click="setCanvasMode('edit')">编辑</button>
-      </div>
-
-      <template v-if="canvasMode === 'overview'">
+      <template v-if="!editorActive">
         <NInput v-model:value="keyword" clearable size="small" class="bar-search" placeholder="搜索来源、Flow、渠道" />
         <NCheckbox v-model:checked="onlyWarnings">只看异常</NCheckbox>
         <NCheckbox v-model:checked="showUnusedNodes">
@@ -1122,14 +1101,17 @@ onBeforeUnmount(() => {
           @update:value="onFlowSelect"
         />
         <NButton size="small" secondary @click="newFlow">新建</NButton>
-        <NButton size="small" type="primary" :disabled="!flowDraftDirty" @click="saveFlow">保存</NButton>
+        <NButton size="small" type="primary" :disabled="!flowDraftDirty || flowSaving" :loading="flowSaving" @click="saveFlow()">保存</NButton>
         <NButton v-if="flowDraft?.id" size="small" type="error" secondary @click="deleteFlow">删除</NButton>
-        <span v-if="flowDraftDirty" class="dirty-hint">有未保存修改</span>
+        <NButton size="small" text type="primary" @click="closeFocusedEditor">退出聚焦</NButton>
+        <span v-if="flowSaving" class="save-hint">{{ flowSavedHint }}</span>
+        <span v-else-if="flowDraftDirty" class="dirty-hint">有未保存修改</span>
+        <span v-else-if="flowSavedHint" class="save-hint">{{ flowSavedHint }}</span>
       </template>
     </section>
 
     <ResourceShelf
-      v-if="canvasMode === 'overview' && !showUnusedNodes && hiddenResourceCount"
+      v-if="!editorActive && !showUnusedNodes && hiddenResourceCount"
       :unused-sources="unusedSources"
       :unused-sinks="unusedSinks"
       :source-type-label="sourceTypeLabel"
@@ -1142,7 +1124,7 @@ onBeforeUnmount(() => {
     <div class="flow-workspace">
       <NSpin :show="loading">
         <FlowCanvas
-          v-if="canvasMode === 'edit' && draftHasNodes"
+          v-if="editorActive && draftHasNodes"
           :key="`flow-edit-${flowDraft?.id ?? 'new'}-${flowDraft?.nodes.length ?? 0}`"
           editable
           :sources="draftSourceNodes"
@@ -1159,14 +1141,14 @@ onBeforeUnmount(() => {
           @node-position="onDraftNodePosition"
         />
 
-        <NEmpty v-else-if="canvasMode === 'edit'" description="这个 Flow 还没有节点">
+        <NEmpty v-else-if="editorActive" description="这个 Flow 还没有节点">
           <template #extra>
             <NButton type="primary" @click="addSourceNode">先添加一个来源节点</NButton>
           </template>
         </NEmpty>
 
         <FlowCanvas
-          v-else-if="canvasMode === 'overview' && canvasHasNodes"
+          v-else-if="!editorActive && canvasHasNodes"
           :key="`${showUnusedNodes ? 'all-resources' : 'linked-resources'}-${showResourceLayer ? 'resource-layer' : 'route-layer'}`"
           :sources="canvasSources"
           :filters="canvasFilters"
@@ -1176,12 +1158,11 @@ onBeforeUnmount(() => {
           @select-node="toggleSelect"
           @select-edge="selectEdge"
           @clear-select="onPaneClick"
-          @connect="onCanvasConnect"
           @edit-rule="openEditRule"
           @toggle-rule="toggleRule"
         />
 
-        <NEmpty v-else-if="canvasMode === 'overview' && (sources.length || rules.length || sinks.length)" :description="canvasEmptyHint">
+        <NEmpty v-else-if="!editorActive && (sources.length || rules.length || sinks.length)" :description="canvasEmptyHint">
           <template #extra>
             <NSpace>
               <NButton v-if="boardFilterActive" secondary @click="clearBoardFilters">清除筛选</NButton>
@@ -1191,7 +1172,7 @@ onBeforeUnmount(() => {
           </template>
         </NEmpty>
 
-        <NEmpty v-else-if="canvasMode === 'overview'" description="还没有可编排的来源、Flow 或渠道">
+        <NEmpty v-else-if="!editorActive" description="还没有可编排的来源、Flow 或渠道">
           <template #extra>
             <NSpace>
               <NButton @click="go('accounts')">去配置账号</NButton>
@@ -1202,7 +1183,7 @@ onBeforeUnmount(() => {
       </NSpin>
 
       <RouteInspector
-        v-if="canvasMode === 'overview'"
+        v-if="!editorActive"
         :selection="selection"
         :selected-edge="selectedEdge"
         :rule-nodes="ruleNodes"
@@ -1218,7 +1199,6 @@ onBeforeUnmount(() => {
         @manage-config="goToSelectedConfig"
         @view-deliveries="goToDeliveries"
         @clear-selection="clearSelection"
-        @detach-edge="detachSelectedEdge"
         @clear-edge="clearSelectedEdge"
       />
 
@@ -1234,9 +1214,9 @@ onBeforeUnmount(() => {
             <NInputNumber v-if="flowDraft" v-model:value="flowDraft.priority" placeholder="优先级" />
           </div>
           <div class="editor-switches">
-            <NSwitch v-if="flowDraft" v-model:value="flowDraft.enabled" />
+            <NSwitch v-if="flowDraft" :value="flowDraft.enabled" :loading="flowSaving" @update:value="updateDraftEnabled" />
             <span>启用</span>
-            <NSwitch v-if="flowDraft" v-model:value="flowDraft.stop_on_match" />
+            <NSwitch v-if="flowDraft" :value="flowDraft.stop_on_match" :loading="flowSaving" @update:value="updateDraftStopOnMatch" />
             <span>命中后停止后续 Flow</span>
           </div>
         </section>
@@ -1428,38 +1408,6 @@ onBeforeUnmount(() => {
   box-shadow: var(--clay-out-sm);
 }
 
-.mode-tabs {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--clay-surface-2);
-  box-shadow: var(--clay-inset-sm);
-}
-
-.mode-tab {
-  padding: 4px 14px;
-  border: 0;
-  border-radius: 8px;
-  color: var(--clay-text-3);
-  background: transparent;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
-}
-
-.mode-tab:hover {
-  color: var(--clay-text-2);
-}
-
-.mode-tab.active {
-  color: var(--clay-primary);
-  background: var(--clay-surface);
-  box-shadow: var(--clay-out-sm);
-}
-
 .bar-search {
   width: 220px;
 }
@@ -1508,6 +1456,12 @@ onBeforeUnmount(() => {
 
 .dirty-hint {
   color: #b45309;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.save-hint {
+  color: var(--clay-text-3);
   font-size: 12px;
   font-weight: 600;
 }
