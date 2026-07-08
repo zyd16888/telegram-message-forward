@@ -3,10 +3,13 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	domainmessage "telegram-message-forward/internal/domain/message"
 )
+
+var ErrNotFound = errors.New("flow 不存在")
 
 type NodeType string
 

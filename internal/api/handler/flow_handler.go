@@ -5,10 +5,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
 	"telegram-message-forward/internal/api/dto"
 	appflow "telegram-message-forward/internal/app/flow"
+	domainflow "telegram-message-forward/internal/domain/flow"
 )
 
 type FlowHandler struct {
@@ -80,7 +80,7 @@ func (h *FlowHandler) Get(c *gin.Context) {
 	}
 	f, err := h.svc.Get(c.Request.Context(), id)
 	if err != nil {
-		respondError(c, err)
+		respondFlowError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": dto.NewFlowDTO(f)})
@@ -140,7 +140,7 @@ func toFlowInput(req dto.FlowRequest) appflow.Input {
 }
 
 func respondFlowError(c *gin.Context, err error) {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, domainflow.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
 		return
 	}

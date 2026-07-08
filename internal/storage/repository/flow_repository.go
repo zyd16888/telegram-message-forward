@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -159,6 +160,9 @@ func (r *FlowRepository) assemble(ctx context.Context, ms []model.Flow) ([]*doma
 func (r *FlowRepository) getByIDTx(db *gorm.DB, id int64) (*domainflow.Flow, error) {
 	var m model.Flow
 	if err := db.First(&m, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domainflow.ErrNotFound
+		}
 		return nil, err
 	}
 	return r.loadFullDB(db, &m)
