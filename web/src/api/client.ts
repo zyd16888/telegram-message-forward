@@ -11,13 +11,10 @@ import type {
   FilterRequest,
   LoginFlow,
   Me,
-  ConditionConfig,
-  ProcessorConfig,
   Flow,
   FlowNode,
   FlowRequest,
   LinearFlow,
-  RuleTarget,
   RuleMeta,
   SharedProxy,
   Sink,
@@ -281,18 +278,6 @@ export const templatesApi = {
   remove: (id: number) => http.delete(`/templates/${id}`),
 }
 
-export type LinearFlowWriteBody = {
-  name?: string
-  enabled?: boolean
-  priority?: number
-  stop_on_match?: boolean
-  filter_ids?: number[]
-  conditions?: ConditionConfig[]
-  processors?: ProcessorConfig[]
-  source_ids?: number[]
-  targets?: RuleTarget[]
-}
-
 export function flowToLinearFlow(flow: Flow): LinearFlow {
   const byType = (type: FlowNode['type']) =>
     flow.nodes
@@ -317,63 +302,6 @@ export function flowToLinearFlow(flow: Flow): LinearFlow {
       .filter((target) => target.sink_id > 0),
     created_at: flow.created_at,
     updated_at: flow.updated_at,
-  }
-}
-
-export function linearFlowToFlowRequest(body: LinearFlowWriteBody): FlowRequest {
-  const nodes: FlowNode[] = []
-  const edges: FlowRequest['edges'] = []
-  let nextID = -1
-  const newNode = (node: Omit<FlowNode, 'id'>): number => {
-    const id = nextID--
-    nodes.push({ ...node, id })
-    return id
-  }
-  const sourceIDs = (body.source_ids ?? []).map((sourceID, index) =>
-    newNode({ type: 'source', ref_id: sourceID, config: {}, pos_x: 0, pos_y: index * 120 }),
-  )
-  let upstreamIDs = sourceIDs
-  const filterIDs = body.filter_ids ?? []
-  const conditions = filterIDs.length ? [] : body.conditions ?? []
-  if (filterIDs.length || conditions.length) {
-    const filterNodeID = newNode({
-      type: 'filter',
-      config: filterIDs.length ? { filter_ids: filterIDs } : { conditions },
-      pos_x: 280,
-      pos_y: 0,
-    })
-    for (const from of upstreamIDs) edges.push({ id: 0, from_node_id: from, to_node_id: filterNodeID })
-    upstreamIDs = [filterNodeID]
-  }
-  const processors = body.processors ?? []
-  if (processors.length) {
-    const processorNodeID = newNode({
-      type: 'processor',
-      config: { processors },
-      pos_x: 560,
-      pos_y: 0,
-    })
-    for (const from of upstreamIDs) edges.push({ id: 0, from_node_id: from, to_node_id: processorNodeID })
-    upstreamIDs = [processorNodeID]
-  }
-  for (const [index, target] of (body.targets ?? []).entries()) {
-    const targetNodeID = newNode({
-      type: 'target',
-      ref_id: target.sink_id,
-      template_id: target.template_id,
-      config: {},
-      pos_x: 840,
-      pos_y: index * 120,
-    })
-    for (const from of upstreamIDs) edges.push({ id: 0, from_node_id: from, to_node_id: targetNodeID })
-  }
-  return {
-    name: body.name ?? '',
-    enabled: body.enabled ?? true,
-    priority: body.priority ?? 0,
-    stop_on_match: body.stop_on_match ?? false,
-    nodes,
-    edges,
   }
 }
 

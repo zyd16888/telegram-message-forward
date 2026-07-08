@@ -19,7 +19,8 @@ import type {
   SinkNodeData,
   SourceNodeData,
 } from '@/components/flow/types'
-import { filtersApi, flowsApi, linearFlowToFlowRequest, sinksApi } from '@/api/client'
+import { filtersApi, flowsApi, sinksApi } from '@/api/client'
+import { applyPatchToFlowGraph } from '@/utils/flowGraph'
 import { useFlowBoard } from '@/composables/useFlowBoard'
 import { useForwardingGraph } from '@/composables/useForwardingGraph'
 import type {
@@ -878,28 +879,27 @@ async function deleteFlow() {
   }
 }
 
-// 线性 Flow 更新是全量 PUT：必须回传含 filter_ids 在内的完整投影，只覆盖 patch 字段。
-function ruleBodyOf(rule: LinearFlow) {
-  return {
-    name: rule.name,
-    enabled: rule.enabled,
-    priority: rule.priority,
-    filter_ids: rule.filter_ids,
-    conditions: rule.filter_ids.length ? [] : rule.conditions,
-    processors: rule.processors,
-    stop_on_match: rule.stop_on_match,
-    source_ids: rule.source_ids,
-    targets: rule.targets,
-  }
-}
-
+// 概览操作基于真实 Flow 图打增量补丁，不走线性投影往返——投影会把
+// 编辑模式画出的非线性 DAG 压扁成线性链，静默丢掉分支结构和节点坐标。
 async function saveRule(
   rule: LinearFlow,
   patch: Partial<{ enabled: boolean; filter_ids: number[]; source_ids: number[]; targets: RuleTarget[] }>,
   okMessage: string,
 ) {
+  const flow = flows.value.find((item) => item.id === rule.id)
+  if (!flow) {
+    message.error('Flow 数据未加载，请刷新后重试')
+    return
+  }
+  const result = applyPatchToFlowGraph(flow, patch)
+  if (!result.ok) {
+    message.warning(`${result.reason}，请切换到编辑模式调整`)
+    return
+  }
+  const body = flowBodyOf(result.flow)
+  if (!body) return
   try {
-    await flowsApi.update(rule.id, linearFlowToFlowRequest({ ...ruleBodyOf(rule), ...patch }))
+    await flowsApi.update(rule.id, body)
     message.success(okMessage)
     await refresh()
   } catch (e) {

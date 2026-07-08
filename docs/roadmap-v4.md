@@ -79,6 +79,15 @@ v4 的目标是新增一条通用的 **AI 整理旁路**：原始消息继续按
 - **验证**：`go build/test ./...` 与 `npm run build` 通过。
 - **已知观察项（暂不处理）**：影子签名只哈希消息文本，处理器若只改 media/caption 则 diff 不可见；单条 flow 编译失败会中断该消息全部求值（入库前有 Compile 校验，属数据漂移防御面）；flowmigrate 单条规则失败即 Fatalf 全停（0 来源/0 目标的死规则会卡迁移）；引擎编译缓存不清理已删除 flow；编辑模式点击连线即删（面板有提示、草稿态可撤）；processor 节点只能选类型、config 参数暂无法在画布编辑（带必填参数的处理器会在保存时被校验拦下）——列入 F5-2 补齐项。
 
+**本轮增强（2026-07-08：Flow-only 下线旧规则体系 + review 修复）**
+
+- **下线范围（Codex）**：删除 `ruleengine.Engine`、`domain/rule`、Rule repository/service/API、`cmd/flowmigrate`、RulesPage/RuleEditorModal；ingest 只跑 Flow 引擎；`Match` 收进 `domain/flow`；投递任务幂等改用 `ON CONFLICT DO NOTHING`（flow partial 唯一索引）；投递记录展示引擎来源（Flow 名 + 节点）；Flow 保存/删除后失效编译缓存；编辑面板补齐 processor 参数 / filter 内联条件编辑与草稿脏检查；新增 Flow 草稿预演 `POST /flows/preview`；Telegram 私聊 source 按 sender 匹配补强。
+- **review 修复（严重，migration 尚未执行时截获）**：`00021` 原版把 `delivery_tasks.origin_type` CHECK 收敛为 `('ai_digest','flow')`，但真实库有 1499 条历史 `origin_type='rule'` 行，`ADD CONSTRAINT` 会当场失败——已改为保留 `rule` 取值（仅历史行，新代码不再产生）。
+- **review 修复（严重，前端）**：概览模式的启停/连线/解除操作原先走「Flow→线性投影→重建请求」全量 PUT，编辑模式画出的非线性 DAG 会被静默压扁成线性链。已改为 `utils/flowGraph.ts` 的 `applyPatchToFlowGraph` 基于真实图打增量补丁（保结构、保坐标），拓扑有歧义（多过滤节点、同渠道多目标、来源分叉）时拒绝并提示去编辑模式调整。
+- **review 修复（中）**：Flow 删除后其历史投递任务会让投递记录整页报错（`enrich` 对 NotFound 直接冒泡）——已容错为名字缺失不阻塞展示。
+- **验证**：`go build/test ./...` 与 `npm run build` 通过；用只读工具核对真实库（flow 任务 1172 条在跑、rule 历史 1499 条、`00021` Pending）。
+- **待运维**：`00021` 迁移待执行（修复后可安全执行）；执行前后建议备份。
+
 **待真实外部联调**
 
 - [ ] 真实 AI provider key 联调：当前仅用本地 mock 验证 OpenAI-compatible 协议路径，未调用真实模型供应商。
@@ -1074,7 +1083,7 @@ flow_edges (id, flow_id, from_node_id, to_node_id, UNIQUE(flow_id, from_node_id,
 
 1. **已完成迁移期**：Rule→Flow 编译器与 shadow/primary 切换用于 F5-1 过渡验证；真实运行确认后进入 Flow-only。
 2. **当前运行口径**：ingest 只执行 Flow；旧 `/rules` API、RulesPage、Rule 表仓储、`cmd/flowmigrate` 与旧 `ruleengine.Engine` 已移除。
-3. **数据库清理**：`00021_drop_rules.sql` 删除 `rules`、`rule_sources`、`rule_filters`、`rule_targets`、`flow_rule_migrations`，并将 `delivery_tasks` 的 origin 约束收敛为 `flow` / `ai_digest`。
+3. **数据库清理**：`00021_drop_rules.sql` 删除 `rules`、`rule_sources`、`rule_filters`、`rule_targets`、`flow_rule_migrations` 并移除 `delivery_tasks.rule_id` 外键；origin 约束保留 `rule` 取值——库中存在下线前的历史投递记录，新代码不再产生 rule 任务但历史行必须能通过约束校验。**注意：该迁移尚未对真实库执行**，需 `go run ./cmd/migrate -config ./configs/config.yaml up`。
 
 ### 18.5 阶段任务
 
