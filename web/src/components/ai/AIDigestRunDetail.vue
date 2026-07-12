@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { AIDigestRunDetail } from '@/types'
 import AIDigestMessagesPanel from '@/components/ai/AIDigestMessagesPanel.vue'
 import AIDigestRequestPanel from '@/components/ai/AIDigestRequestPanel.vue'
+import AIDigestMediaAuditPanel from '@/components/ai/AIDigestMediaAuditPanel.vue'
 
 const props = defineProps<{
   detail: AIDigestRunDetail | null
@@ -102,6 +103,10 @@ function formatTime(value?: string): string {
 
           <NTabPane name="request" tab="AI 请求">
             <AIDigestRequestPanel :request="detail.request" />
+          </NTabPane>
+
+          <NTabPane name="media" :tab="`图片请求（${detail.run.media_audit?.length ?? 0}）`">
+            <AIDigestMediaAuditPanel :items="detail.run.media_audit" />
           </NTabPane>
 
           <NTabPane name="messages" :tab="`原文与过滤（${detail.items.length}）`">

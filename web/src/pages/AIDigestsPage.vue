@@ -293,6 +293,8 @@ function editProvider(provider: AIProvider): void {
     timeout_seconds: provider.timeout_seconds,
     max_retries: provider.max_retries,
     default_temperature: provider.default_temperature,
+    supports_vision: provider.supports_vision,
+    vision_model: provider.vision_model ?? '',
     enabled: true,
     is_default: provider.is_default,
     api_key: '',
@@ -310,6 +312,8 @@ function defaultProviderForm(): AIProviderRequest {
     timeout_seconds: 60,
     max_retries: 1,
     default_temperature: 0.2,
+    supports_vision: false,
+    vision_model: '',
     enabled: true,
     is_default: providers.value.length === 0,
     api_key: '',
@@ -326,6 +330,8 @@ function providerPayload(): AIProviderRequest {
     timeout_seconds: providerForm.timeout_seconds,
     max_retries: providerForm.max_retries,
     default_temperature: providerForm.default_temperature,
+    supports_vision: providerForm.supports_vision,
+    vision_model: providerForm.vision_model?.trim() || undefined,
     enabled: true,
     is_default: providerForm.is_default,
     api_key: providerForm.api_key?.trim() ? providerForm.api_key.trim() : undefined,
@@ -741,6 +747,12 @@ onBeforeUnmount(() => {
           </NFormItem>
           <NFormItem label="默认模型">
             <NInput v-model:value="providerForm.model" placeholder="gpt-4o-mini" />
+          </NFormItem>
+          <NFormItem label="支持图片理解">
+            <NSwitch v-model:value="providerForm.supports_vision" />
+          </NFormItem>
+          <NFormItem v-if="providerForm.supports_vision" label="视觉模型（可空=默认模型）" class="span-2">
+            <NInput v-model:value="providerForm.vision_model" placeholder="留空则沿用默认模型" />
           </NFormItem>
           <NFormItem label="API Key" class="span-2">
             <NInput

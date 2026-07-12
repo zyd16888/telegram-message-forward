@@ -518,6 +518,8 @@ export interface AIProvider {
   timeout_seconds: number
   max_retries: number
   default_temperature: number
+  supports_vision: boolean
+  vision_model?: string
   enabled: boolean
   is_default: boolean
   has_api_key: boolean
@@ -532,6 +534,8 @@ export interface AIProviderRequest {
   timeout_seconds: number
   max_retries: number
   default_temperature: number
+  supports_vision: boolean
+  vision_model?: string
   enabled?: boolean
   is_default?: boolean
   api_key?: string
@@ -564,6 +568,28 @@ export interface AIDigestLimits {
   max_prompt_chars?: number
 }
 
+export interface AIDigestMultimodalConfig {
+  enabled: boolean
+  allow_external_media: boolean
+  image_detail?: 'low' | 'high' | 'original' | 'auto' | string
+  max_images_per_run?: number
+  max_image_bytes?: number
+  max_total_image_bytes?: number
+  failure_mode?: string
+}
+
+export interface AIDigestMediaAudit {
+  message_id: number
+  media_index: number
+  grouped_id?: number
+  file_name?: string
+  mime_type?: string
+  size?: number
+  sha256?: string
+  status: 'included' | 'skipped' | 'failed' | string
+  reason?: string
+}
+
 export interface AIDigestProfile {
   id: number
   name: string
@@ -581,6 +607,7 @@ export interface AIDigestProfile {
   target_sink_ids: number[]
   model_config: AIDigestModelConfig
   limits: AIDigestLimits
+  multimodal: AIDigestMultimodalConfig
   recent_run?: AIDigestRun
   created_at: string
   updated_at: string
@@ -620,6 +647,7 @@ export interface AIDigestRun {
     completion_tokens?: number
     total_tokens?: number
   }
+  media_audit?: AIDigestMediaAudit[]
   error?: string
   started_at?: string
   finished_at?: string
@@ -677,6 +705,16 @@ export interface AIDigestRunDetail {
       model?: string
       temperature?: number
       max_tokens?: number
+      multimodal?: {
+        enabled: boolean
+        image_detail: string
+        max_images_per_run: number
+        max_image_bytes: number
+        max_total_image_bytes: number
+        included: number
+        skipped: number
+        failed: number
+      }
     }
   }
 }
@@ -699,4 +737,5 @@ export interface AIDigestPreset {
   dedupe: { enabled: boolean }
   model_config: AIDigestModelConfig
   limits: AIDigestLimits
+  multimodal: AIDigestMultimodalConfig
 }

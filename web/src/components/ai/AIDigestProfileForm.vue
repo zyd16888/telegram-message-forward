@@ -58,6 +58,15 @@ const form = reactive<AIDigestProfileRequest>({
   target_sink_ids: [],
   model_config: { provider_id: '', model: '', temperature: 0.2, max_tokens: 0 },
   limits: { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 0 },
+  multimodal: {
+    enabled: false,
+    allow_external_media: false,
+    image_detail: 'high',
+    max_images_per_run: 12,
+    max_image_bytes: 10 * 1024 * 1024,
+    max_total_image_bytes: 40 * 1024 * 1024,
+    failure_mode: 'continue_text',
+  },
 })
 
 const sourceOptions = computed(() => props.sources.map((item) => ({ label: `${item.name} (#${item.id})`, value: item.id })))
@@ -67,6 +76,11 @@ const providerOptions = computed(() =>
     label: `${item.name || item.id}${item.is_default ? '（默认）' : ''} · ${item.model}`,
     value: item.id,
   })),
+)
+const selectedProvider = computed(() =>
+  props.providers.find((item) => item.id === form.model_config.provider_id)
+    ?? props.providers.find((item) => item.is_default)
+    ?? props.providers[0],
 )
 const presetOptions = computed(() => props.presets.map((item) => ({ label: item.name, value: item.id })))
 const conditionOptions = computed(() => props.conditionDescriptors.map((item) => ({ label: item.label, value: item.type })))
@@ -159,6 +173,15 @@ function reset(): void {
     form.target_sink_ids = []
     form.model_config = { provider_id: defaultProviderID(), model: '', temperature: 0.2, max_tokens: 0 }
     form.limits = { max_messages_per_run: 50, max_chars_per_message: 1200, max_prompt_chars: 0 }
+    form.multimodal = {
+      enabled: false,
+      allow_external_media: false,
+      image_detail: 'high',
+      max_images_per_run: 12,
+      max_image_bytes: 10 * 1024 * 1024,
+      max_total_image_bytes: 40 * 1024 * 1024,
+      failure_mode: 'continue_text',
+    }
     return
   }
   Object.assign(form, {
@@ -177,6 +200,7 @@ function reset(): void {
     target_sink_ids: [...props.profile.target_sink_ids],
     model_config: { ...props.profile.model_config },
     limits: { ...props.profile.limits },
+    multimodal: { ...props.profile.multimodal },
   })
 }
 
@@ -233,10 +257,10 @@ function applyPreset(id: string): void {
   form.dedupe = { ...preset.dedupe }
   form.model_config = {
     ...preset.model_config,
-    max_tokens: 0,
     provider_id: form.model_config.provider_id || defaultProviderID(),
   }
-  form.limits = { ...preset.limits, max_prompt_chars: 0 }
+  form.limits = { ...preset.limits }
+  form.multimodal = { ...preset.multimodal }
 }
 
 function copySharedTemplateToInline(): void {
@@ -279,8 +303,9 @@ function payload(): AIDigestProfileRequest {
     output_template_id: form.output_template_id,
     output_template: usingSharedTemplate.value ? '' : form.output_template,
     target_sink_ids: [...form.target_sink_ids],
-    model_config: { ...form.model_config, max_tokens: 0 },
-    limits: { ...form.limits, max_prompt_chars: 0 },
+    model_config: { ...form.model_config },
+    limits: { ...form.limits },
+    multimodal: { ...form.multimodal },
   }
 }
 
@@ -303,6 +328,14 @@ function validate(forPreview = false): boolean {
   }
   if (form.schedule.type === 'cron' && !form.schedule.cron?.trim()) {
     message.warning('请填写 Cron 表达式')
+    return false
+  }
+  if (form.multimodal.enabled && !selectedProvider.value?.supports_vision) {
+    message.warning('当前 Provider 未启用图片理解能力')
+    return false
+  }
+  if (form.multimodal.enabled && !form.multimodal.allow_external_media) {
+    message.warning('请确认允许将媒体发送到外部 AI')
     return false
   }
   return true
@@ -479,6 +512,53 @@ function defaultOutputTemplate(): string {
               </NFormItem>
             </div>
 
+            <div class="field-head field-gap">
+              <div class="field-label">图片理解</div>
+              <NSwitch v-model:value="form.multimodal.enabled" />
+            </div>
+            <div v-if="form.multimodal.enabled" class="multimodal-panel">
+              <NAlert v-if="!selectedProvider?.supports_vision" type="warning" :show-icon="false">
+                当前 Provider 未启用图片理解能力，请先在 AI 服务中开启。
+              </NAlert>
+              <div class="triple-grid">
+                <NFormItem label="图片精度">
+                  <NSelect
+                    v-model:value="form.multimodal.image_detail"
+                    :options="[
+                      { label: '高精度（推荐）', value: 'high' },
+                      { label: '低成本', value: 'low' },
+                      { label: '原图精度', value: 'original' },
+                      { label: '自动', value: 'auto' },
+                    ]"
+                  />
+                </NFormItem>
+                <NFormItem label="单次图片数">
+                  <NInputNumber v-model:value="form.multimodal.max_images_per_run" :min="1" :max="100" class="full-input" />
+                </NFormItem>
+                <NFormItem label="单图上限（MB）">
+                  <NInputNumber
+                    :value="Math.round((form.multimodal.max_image_bytes ?? 0) / 1024 / 1024)"
+                    :min="1"
+                    :max="100"
+                    class="full-input"
+                    @update:value="form.multimodal.max_image_bytes = ($event ?? 10) * 1024 * 1024"
+                  />
+                </NFormItem>
+                <NFormItem label="总图片上限（MB）">
+                  <NInputNumber
+                    :value="Math.round((form.multimodal.max_total_image_bytes ?? 0) / 1024 / 1024)"
+                    :min="1"
+                    :max="500"
+                    class="full-input"
+                    @update:value="form.multimodal.max_total_image_bytes = ($event ?? 40) * 1024 * 1024"
+                  />
+                </NFormItem>
+                <NFormItem label="允许媒体发送到外部 AI" class="span-2">
+                  <NSwitch v-model:value="form.multimodal.allow_external_media" />
+                </NFormItem>
+              </div>
+            </div>
+
             <div class="field-label field-gap">输出与输入限制</div>
             <div class="triple-grid">
               <NFormItem label="AI 输出格式">
@@ -489,6 +569,12 @@ function defaultOutputTemplate(): string {
               </NFormItem>
               <NFormItem label="单条消息字符上限">
                 <NInputNumber v-model:value="form.limits.max_chars_per_message" :min="100" :step="100" class="full-input" />
+              </NFormItem>
+              <NFormItem label="最大输出 Tokens（0=Provider 默认）">
+                <NInputNumber v-model:value="form.model_config.max_tokens" :min="0" :step="100" class="full-input" />
+              </NFormItem>
+              <NFormItem label="Prompt 字符上限（0=不限制）">
+                <NInputNumber v-model:value="form.limits.max_prompt_chars" :min="0" :step="1000" class="full-input" />
               </NFormItem>
             </div>
             <div class="quick-presets">
@@ -625,6 +711,15 @@ function defaultOutputTemplate(): string {
   grid-template-columns: repeat(3, minmax(160px, 1fr));
   gap: 12px 14px;
   align-items: start;
+}
+
+.multimodal-panel {
+  border-left: 3px solid var(--clay-primary);
+  padding-left: 14px;
+}
+
+.triple-grid .span-2 {
+  grid-column: span 2;
 }
 
 .prompt-alert {
@@ -846,6 +941,10 @@ function defaultOutputTemplate(): string {
   .triple-grid,
   .variable-grid {
     grid-template-columns: 1fr;
+  }
+
+  .triple-grid .span-2 {
+    grid-column: auto;
   }
 
   .footer-hint {

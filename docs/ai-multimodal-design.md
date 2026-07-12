@@ -145,11 +145,11 @@ type ContentPart struct {
 
 ## 7. TODO 与验收
 
-- [ ] M1：通用 `ContentPart`，两种 OpenAI-compatible API 图片请求及单元测试。
-- [ ] M2：Provider/Profile 多模态配置、媒体读取和限制、相册顺序、Run 媒体审计及 migration。
-- [ ] M3：管理 API、前端配置与 Run 详情；修复 Token/Prompt 上限表单提交。
-- [ ] M4：内置财经 VIP 候选池 Preset、Prompt 和输出模板。
-- [ ] M5：Go test/vet/build、前端 build、桌面和移动端视觉验证、分功能提交。
+- [x] M1：通用 `ContentPart`，两种 OpenAI-compatible API 图片请求及单元测试。
+- [x] M2：Provider/Profile 多模态配置、媒体读取和限制、相册顺序、Run 媒体审计及 migration。
+- [x] M3：管理 API、前端配置与 Run 详情；修复 Token/Prompt 上限表单提交。
+- [x] M4：内置财经 VIP 候选池 Preset、Prompt 和输出模板。
+- [x] M5：Go test/vet/build、前端 build、桌面和移动端视觉验证、分功能提交。
 
 验收标准：纯文本 Profile 行为不变；视觉 Profile 能把已存储图片提交给两种 API；外传未确认或图片不合规时不会提交且原因可见；财经 Preset 可直接套用；Run 可复盘 Prompt、原文、图片摘要和结果；代码与前端构建全部通过。
 
