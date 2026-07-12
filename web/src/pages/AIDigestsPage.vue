@@ -8,7 +8,6 @@ import type {
   AIDigestProfileRequest,
   AIDigestPreset,
   AIDigestOutputTemplate,
-  AIDigestRun,
   AIDigestRunDetail as AIDigestRunDetailType,
   AIProvider,
   AIProviderRequest,
@@ -24,6 +23,7 @@ import AIDigestProfileForm from '@/components/ai/AIDigestProfileForm.vue'
 import AIDigestTemplateForm from '@/components/ai/AIDigestTemplateForm.vue'
 import AIDigestRunDetail from '@/components/ai/AIDigestRunDetail.vue'
 import AIDigestScheduleStatus from '@/components/ai/AIDigestScheduleStatus.vue'
+import AIDigestRunsDrawer from '@/components/ai/AIDigestRunsDrawer.vue'
 import { formatDateTime, formatDateTimeTitle, formatDuration, runDisplayTime } from '@/utils/datetime'
 
 const message = useMessage()
@@ -54,10 +54,8 @@ const previewing = ref(false)
 const showTemplateForm = ref(false)
 const editingTemplate = ref<AIDigestOutputTemplate | null>(null)
 
-const runs = ref<AIDigestRun[]>([])
 const runsProfile = ref<AIDigestProfile | null>(null)
 const showRunsDrawer = ref(false)
-const runsLoading = ref(false)
 
 const selectedDetail = ref<AIDigestRunDetailType | null>(null)
 const showDetail = ref(false)
@@ -205,31 +203,6 @@ const providerColumns: DataTableColumns<AIProvider> = [
         h(NButton, { size: 'small', secondary: true, onClick: () => editProvider(row) }, { default: () => '编辑' }),
         h(NButton, { size: 'small', loading: providerTesting.value, onClick: () => testProvider(row) }, { default: () => '测试' }),
         h(NButton, { size: 'small', type: 'error', quaternary: true, disabled: providers.value.length <= 1, onClick: () => confirmRemoveProvider(row) }, { default: () => '删除' }),
-      ]),
-  },
-]
-
-const runColumns: DataTableColumns<AIDigestRun> = [
-  { title: 'ID', key: 'id', width: 60 },
-  {
-    title: '状态',
-    key: 'status',
-    width: 90,
-    render: (row) => h(NTag, { size: 'small', type: runStatusType(row.status), bordered: false }, { default: () => runStatusLabel(row.status) }),
-  },
-  { title: '触发', key: 'trigger_type', width: 80, render: (row) => triggerLabel(row.trigger_type) },
-  { title: '纳入/排除', key: 'counts', width: 90, render: (row) => `${row.included_count}/${row.excluded_count}` },
-  { title: 'Provider', key: 'provider_name', render: (row) => row.provider_name || '—' },
-  { title: 'Token', key: 'token', width: 80, render: (row) => row.token_usage.total_tokens ?? 0 },
-  { title: '时间', key: 'created_at', width: 160 },
-  {
-    title: '操作',
-    key: 'actions',
-    width: 170,
-    render: (row) =>
-      h('div', { class: 'row-actions' }, [
-        h(NButton, { size: 'small', secondary: true, onClick: () => openRun(row.id) }, { default: () => '详情' }),
-        h(NButton, { size: 'small', onClick: () => deliverRun(row.id) }, { default: () => '重新投递' }),
       ]),
   },
 ]
@@ -500,7 +473,6 @@ async function runProfile(profile: AIDigestProfile): Promise<void> {
   try {
     selectedDetail.value = await aiApi.profiles.run(profile.id)
     await loadAll()
-    if (showRunsDrawer.value && runsProfile.value?.id === profile.id) await refreshRuns()
   } catch (e) {
     message.error('执行失败：' + errText(e))
   } finally {
@@ -527,29 +499,16 @@ function confirmRemoveProfile(profile: AIDigestProfile): void {
 }
 
 // --- 运行记录抽屉 ---
-async function openRunsDrawer(profile: AIDigestProfile): Promise<void> {
+function openRunsDrawer(profile: AIDigestProfile): void {
   runsProfile.value = profile
   showRunsDrawer.value = true
-  await refreshRuns()
 }
 
-async function refreshRuns(): Promise<void> {
-  if (!runsProfile.value) return
-  runsLoading.value = true
-  try {
-    runs.value = await aiApi.profiles.runs(runsProfile.value.id)
-  } catch (e) {
-    message.error('加载运行记录失败：' + errText(e))
-  } finally {
-    runsLoading.value = false
-  }
-}
-
-async function openRun(id: number): Promise<void> {
+async function openRunDetail(id: number, timeZone?: string): Promise<void> {
   detailLoading.value = true
   selectedDetail.value = null
   showDetail.value = true
-  detailTimeZone.value = runsProfile.value?.schedule.timezone
+  detailTimeZone.value = timeZone
   try {
     selectedDetail.value = await aiApi.runs.get(id)
   } catch (e) {
@@ -559,34 +518,6 @@ async function openRun(id: number): Promise<void> {
   }
 }
 
-async function deliverRun(id: number): Promise<void> {
-  try {
-    const res = await aiApi.runs.deliver(id)
-    message.success(`已创建投递任务：${res.delivery_task_ids.join(', ') || '无可用渠道'}`)
-    await openRun(id)
-  } catch (e) {
-    message.error('重新投递失败：' + errText(e))
-  }
-}
-
-function cleanupRuns(): void {
-  dialog.warning({
-    title: '清理运行记录',
-    content: '将删除所有 30 天前的运行记录，确定继续？',
-    positiveText: '清理',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      try {
-        const res = await aiApi.runs.cleanup(30)
-        message.success(`已清理 ${res.deleted} 条 30 天前运行记录`)
-        if (showRunsDrawer.value) await refreshRuns()
-      } catch (e) {
-        message.error('清理失败：' + errText(e))
-      }
-    },
-  })
-}
-
 // --- 展示辅助 ---
 function runStatusLabel(status: string): string {
   return { success: '成功', failed: '失败', running: '运行中', pending: '排队', cancelled: '已取消' }[status] ?? status
@@ -594,10 +525,6 @@ function runStatusLabel(status: string): string {
 
 function runStatusType(status: string): 'success' | 'error' | 'info' | 'warning' | 'default' {
   return ({ success: 'success', failed: 'error', running: 'info', pending: 'warning', cancelled: 'default' } as const)[status] ?? 'default'
-}
-
-function triggerLabel(trigger: string): string {
-  return { manual: '手动', schedule: '定时', preview: '预览' }[trigger] ?? trigger
 }
 
 onMounted(() => {
@@ -708,27 +635,11 @@ onBeforeUnmount(() => {
     <!-- 输出模板表单 -->
     <AIDigestTemplateForm v-model:show="showTemplateForm" :template="editingTemplate" @saved="loadTemplates" />
 
-    <!-- 运行记录抽屉 -->
-    <NDrawer v-model:show="showRunsDrawer" :width="720" placement="right">
-      <NDrawerContent :title="`运行记录 · ${runsProfile?.name ?? ''}`" closable>
-        <div class="drawer-toolbar">
-          <NButton size="small" secondary @click="refreshRuns">刷新</NButton>
-          <NButton size="small" quaternary type="error" @click="cleanupRuns">清理 30 天前记录</NButton>
-        </div>
-        <NDataTable
-          :loading="runsLoading"
-          :columns="runColumns"
-          :data="runs"
-          :bordered="false"
-          :scroll-x="820"
-          :row-key="(row: AIDigestRun) => row.id"
-        >
-          <template #empty>
-            <div class="tab-empty"><p>暂无运行记录。</p></div>
-          </template>
-        </NDataTable>
-      </NDrawerContent>
-    </NDrawer>
+    <AIDigestRunsDrawer
+      v-model:show="showRunsDrawer"
+      :profile="runsProfile"
+      @open-detail="openRunDetail"
+    />
 
     <!-- 运行详情 -->
     <NModal
@@ -809,13 +720,6 @@ onBeforeUnmount(() => {
   margin: 2px 0 14px;
   color: var(--clay-text-3);
   font-size: 13px;
-}
-
-.drawer-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 12px;
 }
 
 .tab-empty {

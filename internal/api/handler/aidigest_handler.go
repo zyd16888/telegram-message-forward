@@ -329,7 +329,7 @@ func (h *AIDigestHandler) ListRuns(c *gin.Context) {
 	if !ok {
 		return
 	}
-	runs, err := h.svc.ListRuns(c.Request.Context(), id, parseIntDefault(c.Query("limit"), 50), parseIntDefault(c.Query("offset"), 0))
+	runs, total, err := h.svc.ListRuns(c.Request.Context(), id, parseIntDefault(c.Query("limit"), 50), parseIntDefault(c.Query("offset"), 0))
 	if err != nil {
 		respondError(c, err)
 		return
@@ -338,7 +338,7 @@ func (h *AIDigestHandler) ListRuns(c *gin.Context) {
 	for _, run := range runs {
 		out = append(out, dto.NewAIDigestRunDTO(run))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": out})
+	c.JSON(http.StatusOK, gin.H{"data": out, "total": total})
 }
 
 func (h *AIDigestHandler) GetRun(c *gin.Context) {

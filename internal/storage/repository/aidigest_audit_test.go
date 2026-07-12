@@ -18,7 +18,11 @@ func TestAIDigestRunAuditRoundTrip(t *testing.T) {
 			ProviderID: "provider-1", APIType: "responses", Model: "model-1", Temperature: 0.3, MaxTokens: 2048,
 			Multimodal: &domainaidigest.MultimodalRequestConfig{Enabled: true, Included: 1},
 		},
-		MediaAudit: []domainaidigest.MediaAudit{{MessageID: 9, MediaIndex: 0, Status: "included", SHA256: "abc"}},
+		MediaAudit:         []domainaidigest.MediaAudit{{MessageID: 9, MediaIndex: 0, Status: "included", SHA256: "abc"}},
+		PromptMessageCount: 12,
+		PromptOmittedCount: 3,
+		PromptChars:        4096,
+		ProfileSnapshot:    &domainaidigest.Profile{Name: "snapshot", PromptTemplate: "original"},
 	}
 
 	model, err := toAIDigestRunModel(run)
@@ -37,5 +41,11 @@ func TestAIDigestRunAuditRoundTrip(t *testing.T) {
 	}
 	if len(restored.MediaAudit) != 1 || restored.MediaAudit[0].SHA256 != "abc" {
 		t.Fatalf("media audit round trip mismatch: %+v", restored.MediaAudit)
+	}
+	if restored.PromptMessageCount != 12 || restored.PromptOmittedCount != 3 || restored.PromptChars != 4096 {
+		t.Fatalf("prompt audit round trip mismatch: %+v", restored)
+	}
+	if restored.ProfileSnapshot == nil || restored.ProfileSnapshot.PromptTemplate != "original" {
+		t.Fatalf("profile snapshot round trip mismatch: %+v", restored.ProfileSnapshot)
 	}
 }

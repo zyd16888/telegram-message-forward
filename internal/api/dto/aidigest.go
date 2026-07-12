@@ -216,48 +216,56 @@ func (r AIDigestProfileRequest) ToInput() appaidigest.ProfileInput {
 }
 
 type AIDigestRunDTO struct {
-	ID                int64                       `json:"id"`
-	ProfileID         int64                       `json:"profile_id,omitempty"`
-	Status            string                      `json:"status"`
-	TriggerType       string                      `json:"trigger_type"`
-	WindowStart       time.Time                   `json:"window_start"`
-	WindowEnd         time.Time                   `json:"window_end"`
-	InputMessageCount int                         `json:"input_message_count"`
-	IncludedCount     int                         `json:"included_count"`
-	ExcludedCount     int                         `json:"excluded_count"`
-	DeliveryTaskIDs   []int64                     `json:"delivery_task_ids"`
-	ProviderID        string                      `json:"provider_id,omitempty"`
-	ProviderName      string                      `json:"provider_name,omitempty"`
-	ModelName         string                      `json:"model_name,omitempty"`
-	TokenUsage        domainaidigest.TokenUsage   `json:"token_usage"`
-	MediaAudit        []domainaidigest.MediaAudit `json:"media_audit,omitempty"`
-	Error             string                      `json:"error,omitempty"`
-	StartedAt         *time.Time                  `json:"started_at,omitempty"`
-	FinishedAt        *time.Time                  `json:"finished_at,omitempty"`
-	CreatedAt         time.Time                   `json:"created_at"`
+	ID                 int64                                `json:"id"`
+	ProfileID          int64                                `json:"profile_id,omitempty"`
+	Status             string                               `json:"status"`
+	TriggerType        string                               `json:"trigger_type"`
+	WindowStart        time.Time                            `json:"window_start"`
+	WindowEnd          time.Time                            `json:"window_end"`
+	InputMessageCount  int                                  `json:"input_message_count"`
+	IncludedCount      int                                  `json:"included_count"`
+	ExcludedCount      int                                  `json:"excluded_count"`
+	PromptMessageCount int                                  `json:"prompt_message_count"`
+	PromptOmittedCount int                                  `json:"prompt_omitted_count"`
+	PromptChars        int                                  `json:"prompt_chars"`
+	DeliveryTaskIDs    []int64                              `json:"delivery_task_ids"`
+	ProviderID         string                               `json:"provider_id,omitempty"`
+	ProviderName       string                               `json:"provider_name,omitempty"`
+	ModelName          string                               `json:"model_name,omitempty"`
+	TokenUsage         domainaidigest.TokenUsage            `json:"token_usage"`
+	MediaAudit         []domainaidigest.MediaAudit          `json:"media_audit,omitempty"`
+	Error              string                               `json:"error,omitempty"`
+	StartedAt          *time.Time                           `json:"started_at,omitempty"`
+	FinishedAt         *time.Time                           `json:"finished_at,omitempty"`
+	CreatedAt          time.Time                            `json:"created_at"`
+	DeliveryTasks      []domainaidigest.DeliveryTaskSummary `json:"delivery_tasks,omitempty"`
 }
 
 func NewAIDigestRunDTO(r *domainaidigest.Run) AIDigestRunDTO {
 	return AIDigestRunDTO{
-		ID:                r.ID,
-		ProfileID:         r.ProfileID,
-		Status:            string(r.Status),
-		TriggerType:       string(r.TriggerType),
-		WindowStart:       r.WindowStart,
-		WindowEnd:         r.WindowEnd,
-		InputMessageCount: r.InputMessageCount,
-		IncludedCount:     r.IncludedCount,
-		ExcludedCount:     r.ExcludedCount,
-		DeliveryTaskIDs:   r.DeliveryTaskIDs,
-		ProviderID:        r.ProviderID,
-		ProviderName:      r.ProviderName,
-		ModelName:         r.ModelName,
-		TokenUsage:        r.TokenUsage,
-		MediaAudit:        r.MediaAudit,
-		Error:             r.Error,
-		StartedAt:         r.StartedAt,
-		FinishedAt:        r.FinishedAt,
-		CreatedAt:         r.CreatedAt,
+		ID:                 r.ID,
+		ProfileID:          r.ProfileID,
+		Status:             string(r.Status),
+		TriggerType:        string(r.TriggerType),
+		WindowStart:        r.WindowStart,
+		WindowEnd:          r.WindowEnd,
+		InputMessageCount:  r.InputMessageCount,
+		IncludedCount:      r.IncludedCount,
+		ExcludedCount:      r.ExcludedCount,
+		PromptMessageCount: r.PromptMessageCount,
+		PromptOmittedCount: r.PromptOmittedCount,
+		PromptChars:        r.PromptChars,
+		DeliveryTaskIDs:    r.DeliveryTaskIDs,
+		ProviderID:         r.ProviderID,
+		ProviderName:       r.ProviderName,
+		ModelName:          r.ModelName,
+		TokenUsage:         r.TokenUsage,
+		MediaAudit:         r.MediaAudit,
+		Error:              r.Error,
+		StartedAt:          r.StartedAt,
+		FinishedAt:         r.FinishedAt,
+		CreatedAt:          r.CreatedAt,
+		DeliveryTasks:      r.DeliveryTasks,
 	}
 }
 

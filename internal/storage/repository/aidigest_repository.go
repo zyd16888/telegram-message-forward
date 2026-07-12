@@ -207,22 +207,26 @@ func (r *AIDigestRepository) UpdateRun(ctx context.Context, run *domainaidigest.
 	return r.db.WithContext(ctx).Model(&model.AIDigestRun{}).
 		Where("id = ?", run.ID).
 		Updates(map[string]any{
-			"status":              m.Status,
-			"input_message_count": m.InputMessageCount,
-			"included_count":      m.IncludedCount,
-			"excluded_count":      m.ExcludedCount,
-			"delivery_task_ids":   m.DeliveryTaskIDs,
-			"provider_id":         m.ProviderID,
-			"provider_name":       m.ProviderName,
-			"model_name":          m.ModelName,
-			"system_prompt":       m.SystemPrompt,
-			"user_prompt":         m.UserPrompt,
-			"request_config":      m.RequestConfig,
-			"media_audit":         m.MediaAudit,
-			"token_usage":         m.TokenUsage,
-			"error":               m.Error,
-			"started_at":          m.StartedAt,
-			"finished_at":         m.FinishedAt,
+			"status":               m.Status,
+			"input_message_count":  m.InputMessageCount,
+			"included_count":       m.IncludedCount,
+			"excluded_count":       m.ExcludedCount,
+			"prompt_message_count": m.PromptMessageCount,
+			"prompt_omitted_count": m.PromptOmittedCount,
+			"prompt_chars":         m.PromptChars,
+			"delivery_task_ids":    m.DeliveryTaskIDs,
+			"provider_id":          m.ProviderID,
+			"provider_name":        m.ProviderName,
+			"model_name":           m.ModelName,
+			"system_prompt":        m.SystemPrompt,
+			"user_prompt":          m.UserPrompt,
+			"request_config":       m.RequestConfig,
+			"media_audit":          m.MediaAudit,
+			"token_usage":          m.TokenUsage,
+			"error":                m.Error,
+			"started_at":           m.StartedAt,
+			"finished_at":          m.FinishedAt,
+			"profile_snapshot":     m.ProfileSnapshot,
 		}).Error
 }
 
@@ -287,6 +291,16 @@ func (r *AIDigestRepository) ListRuns(ctx context.Context, profileID int64, limi
 		out = append(out, run)
 	}
 	return out, nil
+}
+
+func (r *AIDigestRepository) CountRuns(ctx context.Context, profileID int64) (int64, error) {
+	db := r.db.WithContext(ctx).Model(&model.AIDigestRun{})
+	if profileID > 0 {
+		db = db.Where("profile_id = ?", profileID)
+	}
+	var count int64
+	err := db.Count(&count).Error
+	return count, err
 }
 
 func (r *AIDigestRepository) GetRun(ctx context.Context, id int64) (*domainaidigest.Run, error) {
@@ -524,29 +538,37 @@ func toAIDigestRunModel(r *domainaidigest.Run) (*model.AIDigestRun, error) {
 	if err != nil {
 		return nil, err
 	}
+	profileSnapshot, err := marshalJSON(r.ProfileSnapshot)
+	if err != nil {
+		return nil, err
+	}
 	return &model.AIDigestRun{
-		ID:                r.ID,
-		ProfileID:         nullablePositive(r.ProfileID),
-		Status:            string(r.Status),
-		TriggerType:       string(r.TriggerType),
-		WindowStart:       r.WindowStart,
-		WindowEnd:         r.WindowEnd,
-		InputMessageCount: r.InputMessageCount,
-		IncludedCount:     r.IncludedCount,
-		ExcludedCount:     r.ExcludedCount,
-		DeliveryTaskIDs:   taskIDs,
-		ProviderID:        r.ProviderID,
-		ProviderName:      r.ProviderName,
-		ModelName:         r.ModelName,
-		SystemPrompt:      r.SystemPrompt,
-		UserPrompt:        r.UserPrompt,
-		RequestConfig:     requestConfig,
-		MediaAudit:        mediaAudit,
-		TokenUsage:        usage,
-		Error:             r.Error,
-		StartedAt:         r.StartedAt,
-		FinishedAt:        r.FinishedAt,
-		CreatedAt:         r.CreatedAt,
+		ID:                 r.ID,
+		ProfileID:          nullablePositive(r.ProfileID),
+		Status:             string(r.Status),
+		TriggerType:        string(r.TriggerType),
+		WindowStart:        r.WindowStart,
+		WindowEnd:          r.WindowEnd,
+		InputMessageCount:  r.InputMessageCount,
+		IncludedCount:      r.IncludedCount,
+		ExcludedCount:      r.ExcludedCount,
+		PromptMessageCount: r.PromptMessageCount,
+		PromptOmittedCount: r.PromptOmittedCount,
+		PromptChars:        r.PromptChars,
+		DeliveryTaskIDs:    taskIDs,
+		ProviderID:         r.ProviderID,
+		ProviderName:       r.ProviderName,
+		ModelName:          r.ModelName,
+		SystemPrompt:       r.SystemPrompt,
+		UserPrompt:         r.UserPrompt,
+		RequestConfig:      requestConfig,
+		MediaAudit:         mediaAudit,
+		TokenUsage:         usage,
+		Error:              r.Error,
+		StartedAt:          r.StartedAt,
+		FinishedAt:         r.FinishedAt,
+		CreatedAt:          r.CreatedAt,
+		ProfileSnapshot:    profileSnapshot,
 	}, nil
 }
 
@@ -563,6 +585,9 @@ func toAIDigestRunDomain(m *model.AIDigestRun) (*domainaidigest.Run, error) {
 	r.InputMessageCount = m.InputMessageCount
 	r.IncludedCount = m.IncludedCount
 	r.ExcludedCount = m.ExcludedCount
+	r.PromptMessageCount = m.PromptMessageCount
+	r.PromptOmittedCount = m.PromptOmittedCount
+	r.PromptChars = m.PromptChars
 	r.ProviderID = m.ProviderID
 	r.ProviderName = m.ProviderName
 	r.ModelName = m.ModelName
@@ -583,6 +608,13 @@ func toAIDigestRunDomain(m *model.AIDigestRun) (*domainaidigest.Run, error) {
 	}
 	if err := unmarshalJSON(m.TokenUsage, &r.TokenUsage); err != nil {
 		return nil, err
+	}
+	if len(m.ProfileSnapshot) > 0 && string(m.ProfileSnapshot) != "{}" && string(m.ProfileSnapshot) != "null" {
+		var snapshot domainaidigest.Profile
+		if err := unmarshalJSON(m.ProfileSnapshot, &snapshot); err != nil {
+			return nil, err
+		}
+		r.ProfileSnapshot = &snapshot
 	}
 	return &r, nil
 }

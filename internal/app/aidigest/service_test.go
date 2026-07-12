@@ -44,8 +44,19 @@ func TestBuildMessagePromptBlocksUsesProfileTimeZone(t *testing.T) {
 		ReceivedAt: time.Date(2026, 7, 12, 7, 53, 35, 0, time.UTC),
 	}}
 	prompt := buildMessagePromptBlocks(messages, map[int64]string{1: "source"}, -1, loc)
-	if !strings.Contains(prompt, "2026-07-12T15:53:35+08:00") {
-		t.Fatalf("prompt time zone mismatch: %s", prompt)
+	if !strings.Contains(prompt.Text, "2026-07-12T15:53:35+08:00") {
+		t.Fatalf("prompt time zone mismatch: %s", prompt.Text)
+	}
+}
+
+func TestBuildMessagePromptBlocksReportsOmittedMessages(t *testing.T) {
+	messages := []*domainmessage.NormalizedMessage{
+		{SourceID: 1, Text: strings.Repeat("a", 100), ReceivedAt: time.Now()},
+		{SourceID: 1, Text: "second", ReceivedAt: time.Now()},
+	}
+	result := buildMessagePromptBlocks(messages, nil, 40, time.UTC)
+	if result.Count != 1 || result.Omitted != 1 {
+		t.Fatalf("unexpected prompt audit: %+v", result)
 	}
 }
 
@@ -347,6 +358,7 @@ func (r *memoryDigestRepo) LastExecutionRun(_ context.Context, profileID int64) 
 func (r *memoryDigestRepo) ListRuns(context.Context, int64, int, int) ([]*domainaidigest.Run, error) {
 	return nil, nil
 }
+func (r *memoryDigestRepo) CountRuns(context.Context, int64) (int64, error) { return 0, nil }
 func (r *memoryDigestRepo) GetRun(context.Context, int64) (*domainaidigest.Run, error) {
 	return nil, nil
 }

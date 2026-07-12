@@ -300,28 +300,32 @@ func (AIDigestOutputTemplate) TableName() string { return "ai_digest_output_temp
 
 // AIDigestRun 对应 ai_digest_runs 表。
 type AIDigestRun struct {
-	ID                int64 `gorm:"primaryKey"`
-	ProfileID         *int64
-	Status            string
-	TriggerType       string
-	WindowStart       time.Time
-	WindowEnd         time.Time
-	InputMessageCount int
-	IncludedCount     int
-	ExcludedCount     int
-	DeliveryTaskIDs   datatypes.JSON
-	ProviderID        string
-	ProviderName      string
-	ModelName         string
-	SystemPrompt      string
-	UserPrompt        string
-	RequestConfig     datatypes.JSON
-	MediaAudit        datatypes.JSON
-	TokenUsage        datatypes.JSON
-	Error             string
-	StartedAt         *time.Time
-	FinishedAt        *time.Time
-	CreatedAt         time.Time
+	ID                 int64 `gorm:"primaryKey"`
+	ProfileID          *int64
+	Status             string
+	TriggerType        string
+	WindowStart        time.Time
+	WindowEnd          time.Time
+	InputMessageCount  int
+	IncludedCount      int
+	ExcludedCount      int
+	PromptMessageCount int
+	PromptOmittedCount int
+	PromptChars        int
+	DeliveryTaskIDs    datatypes.JSON
+	ProviderID         string
+	ProviderName       string
+	ModelName          string
+	SystemPrompt       string
+	UserPrompt         string
+	RequestConfig      datatypes.JSON
+	MediaAudit         datatypes.JSON
+	TokenUsage         datatypes.JSON
+	Error              string
+	StartedAt          *time.Time
+	FinishedAt         *time.Time
+	CreatedAt          time.Time
+	ProfileSnapshot    datatypes.JSON
 }
 
 func (AIDigestRun) TableName() string { return "ai_digest_runs" }

@@ -457,7 +457,7 @@ export const aiApi = {
     run: (id: number) =>
       http.post<ApiItem<AIDigestRunDetail>>(`/ai/digests/${id}/run`, undefined, { timeout: 180000 }).then((r) => r.data.data),
     runs: (id: number, limit = 30, offset = 0) =>
-      http.get<ApiList<AIDigestRun>>(`/ai/digests/${id}/runs`, { params: { limit, offset } }).then((r) => r.data.data),
+      http.get<ApiPage<AIDigestRun>>(`/ai/digests/${id}/runs`, { params: { limit, offset } }).then((r) => r.data),
   },
   runs: {
     get: (id: number) => http.get<ApiItem<AIDigestRunDetail>>(`/ai/runs/${id}`).then((r) => r.data.data),

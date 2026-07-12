@@ -638,6 +638,9 @@ export interface AIDigestRun {
   input_message_count: number
   included_count: number
   excluded_count: number
+  prompt_message_count: number
+  prompt_omitted_count: number
+  prompt_chars: number
   delivery_task_ids: number[]
   provider_id?: string
   provider_name?: string
@@ -652,6 +655,13 @@ export interface AIDigestRun {
   started_at?: string
   finished_at?: string
   created_at: string
+  delivery_tasks?: Array<{
+    id: number
+    sink_id: number
+    status: string
+    attempt_count: number
+    last_error?: string
+  }>
 }
 
 export interface AIDigestMessageRef {

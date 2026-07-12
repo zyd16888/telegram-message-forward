@@ -152,28 +152,41 @@ type Preset struct {
 }
 
 type Run struct {
-	ID                int64
-	ProfileID         int64
-	Status            RunStatus
-	TriggerType       TriggerType
-	WindowStart       time.Time
-	WindowEnd         time.Time
-	InputMessageCount int
-	IncludedCount     int
-	ExcludedCount     int
-	DeliveryTaskIDs   []int64
-	ProviderID        string
-	ProviderName      string
-	ModelName         string
-	SystemPrompt      string
-	UserPrompt        string
-	RequestConfig     RequestConfig
-	MediaAudit        []MediaAudit
-	TokenUsage        TokenUsage
-	Error             string
-	StartedAt         *time.Time
-	FinishedAt        *time.Time
-	CreatedAt         time.Time
+	ID                 int64
+	ProfileID          int64
+	Status             RunStatus
+	TriggerType        TriggerType
+	WindowStart        time.Time
+	WindowEnd          time.Time
+	InputMessageCount  int
+	IncludedCount      int
+	ExcludedCount      int
+	PromptMessageCount int
+	PromptOmittedCount int
+	PromptChars        int
+	DeliveryTaskIDs    []int64
+	ProviderID         string
+	ProviderName       string
+	ModelName          string
+	SystemPrompt       string
+	UserPrompt         string
+	RequestConfig      RequestConfig
+	MediaAudit         []MediaAudit
+	TokenUsage         TokenUsage
+	Error              string
+	StartedAt          *time.Time
+	FinishedAt         *time.Time
+	CreatedAt          time.Time
+	ProfileSnapshot    *Profile
+	DeliveryTasks      []DeliveryTaskSummary
+}
+
+type DeliveryTaskSummary struct {
+	ID           int64  `json:"id"`
+	SinkID       int64  `json:"sink_id"`
+	Status       string `json:"status"`
+	AttemptCount int    `json:"attempt_count"`
+	LastError    string `json:"last_error,omitempty"`
 }
 
 type RunItem struct {
@@ -311,6 +324,7 @@ type Repository interface {
 	LastExecutionRun(ctx context.Context, profileID int64) (*Run, error)
 	LastSuccessfulRun(ctx context.Context, profileID int64) (*Run, error)
 	ListRuns(ctx context.Context, profileID int64, limit, offset int) ([]*Run, error)
+	CountRuns(ctx context.Context, profileID int64) (int64, error)
 	GetRun(ctx context.Context, id int64) (*Run, error)
 	AddRunItems(ctx context.Context, items []*RunItem) error
 	ListRunItems(ctx context.Context, runID int64) ([]*RunItem, error)

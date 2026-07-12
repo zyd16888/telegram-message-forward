@@ -586,8 +586,13 @@ func (s *Service) DeliverRun(ctx context.Context, runID int64) ([]int64, error) 
 	return taskIDs, nil
 }
 
-func (s *Service) ListRuns(ctx context.Context, profileID int64, limit, offset int) ([]*domainaidigest.Run, error) {
-	return s.repo.ListRuns(ctx, profileID, limit, offset)
+func (s *Service) ListRuns(ctx context.Context, profileID int64, limit, offset int) ([]*domainaidigest.Run, int64, error) {
+	runs, err := s.repo.ListRuns(ctx, profileID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := s.repo.CountRuns(ctx, profileID)
+	return runs, total, err
 }
 
 func (s *Service) GetRunDetail(ctx context.Context, id int64) (*domainaidigest.RunDetail, error) {
@@ -602,6 +607,16 @@ func (s *Service) GetRunDetail(ctx context.Context, id int64) (*domainaidigest.R
 	out, err := s.repo.GetOutputByRunID(ctx, id)
 	if err != nil {
 		out = nil
+	}
+	for _, taskID := range run.DeliveryTaskIDs {
+		task, taskErr := s.tasks.GetByID(ctx, taskID)
+		if taskErr != nil || task == nil {
+			continue
+		}
+		run.DeliveryTasks = append(run.DeliveryTasks, domainaidigest.DeliveryTaskSummary{
+			ID: task.ID, SinkID: task.SinkID, Status: string(task.Status),
+			AttemptCount: task.AttemptCount, LastError: task.LastError,
+		})
 	}
 	return &domainaidigest.RunDetail{Run: run, Items: items, Output: out}, nil
 }
@@ -650,6 +665,9 @@ func (s *Service) execute(ctx context.Context, p *domainaidigest.Profile, trigge
 		WindowEnd:   end,
 		StartedAt:   &now,
 	}
+	snapshot := *p
+	snapshot.RecentRun = nil
+	run.ProfileSnapshot = &snapshot
 	if err := s.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
@@ -916,13 +934,13 @@ func (s *Service) buildPrompt(ctx context.Context, p *domainaidigest.Profile, ru
 			messageBudget -= len([]rune("\n\n输入消息：\n"))
 		}
 	}
-	messages := buildMessagePromptBlocks(msgs, sourceNames, messageBudget, loc)
+	messageResult := buildMessagePromptBlocks(msgs, sourceNames, messageBudget, loc)
 	replacer := strings.NewReplacer(
 		"{{profile_name}}", p.Name,
 		"{{window_start}}", run.WindowStart.In(loc).Format(time.RFC3339),
 		"{{window_end}}", run.WindowEnd.In(loc).Format(time.RFC3339),
-		"{{message_count}}", fmt.Sprintf("%d", len(msgs)),
-		"{{messages}}", messages,
+		"{{message_count}}", fmt.Sprintf("%d", messageResult.Count),
+		"{{messages}}", messageResult.Text,
 		"{{source_list}}", strings.Join(sourceList, ", "),
 		"{{output_format}}", p.OutputFormat,
 		"{{output_template}}", outputTemplate,
@@ -930,14 +948,25 @@ func (s *Service) buildPrompt(ctx context.Context, p *domainaidigest.Profile, ru
 	b.WriteString(replacer.Replace(tmpl))
 	if !strings.Contains(tmpl, "{{messages}}") {
 		b.WriteString("\n\n输入消息：\n")
-		b.WriteString(messages)
+		b.WriteString(messageResult.Text)
 	}
-	return b.String()
+	prompt := b.String()
+	run.PromptMessageCount = messageResult.Count
+	run.PromptOmittedCount = messageResult.Omitted
+	run.PromptChars = len([]rune(prompt))
+	return prompt
 }
 
-func buildMessagePromptBlocks(msgs []*domainmessage.NormalizedMessage, sourceNames map[int64]string, budget int, loc *time.Location) string {
+type messagePromptResult struct {
+	Text    string
+	Count   int
+	Omitted int
+}
+
+func buildMessagePromptBlocks(msgs []*domainmessage.NormalizedMessage, sourceNames map[int64]string, budget int, loc *time.Location) messagePromptResult {
 	var messages strings.Builder
 	used := 0
+	count := 0
 	for i, msg := range msgs {
 		sourceName := sourceNames[msg.SourceID]
 		if sourceName == "" {
@@ -959,6 +988,7 @@ func buildMessagePromptBlocks(msgs []*domainmessage.NormalizedMessage, sourceNam
 			if len(blockRunes) > remain {
 				if remain > 0 {
 					messages.WriteString(string(blockRunes[:remain]))
+					count++
 				}
 				messages.WriteString("\n[已按消息内容上限截断，提示词未截断]")
 				break
@@ -966,8 +996,9 @@ func buildMessagePromptBlocks(msgs []*domainmessage.NormalizedMessage, sourceNam
 			used += len(blockRunes)
 		}
 		messages.WriteString(block)
+		count++
 	}
-	return messages.String()
+	return messagePromptResult{Text: messages.String(), Count: count, Omitted: len(msgs) - count}
 }
 
 func profileLocation(p *domainaidigest.Profile) *time.Location {
