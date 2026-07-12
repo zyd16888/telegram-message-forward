@@ -14,6 +14,12 @@ export interface ApiPage<T> {
   total: number
 }
 
+export interface CursorPage<T> {
+  data: T[]
+  has_more: boolean
+  next_cursor: number
+}
+
 export interface Proxy {
   type?: string
   addr?: string
@@ -307,6 +313,61 @@ export interface DeliveryAttempt {
   started_at?: string
   finished_at?: string
   created_at: string
+}
+
+export interface MessageDeliveryCounts {
+  total: number
+  pending: number
+  processing: number
+  success: number
+  failed: number
+  retrying: number
+  dead: number
+  cancelled: number
+}
+
+export interface MessageItem {
+  id: number
+  source_id: number
+  source_name: string
+  source_type: string
+  source_username?: string
+  external_message_id: number
+  grouped_id?: number
+  message_type: string
+  sender_peer_type?: string
+  sender_id?: number
+  sender_name?: string
+  text?: string
+  media: Array<Record<string, unknown>>
+  links: Array<{ url: string; title?: string }>
+  original_url?: string
+  sent_at?: string
+  received_at: string
+  created_at: string
+  deliveries: MessageDeliveryCounts
+}
+
+export interface MessageDeliveryRef {
+  id: number
+  sink_id: number
+  sink_name: string
+  sink_type: string
+  origin_type: string
+  origin_id?: number
+  origin_node_id?: number
+  flow_name?: string
+  status: string
+  attempt_count: number
+  max_attempts: number
+  last_error?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MessageDetail {
+  message: MessageItem
+  deliveries: MessageDeliveryRef[]
 }
 
 export interface ApiToken {

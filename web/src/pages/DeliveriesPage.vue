@@ -335,6 +335,8 @@ onMounted(() => {
   sinkId.value = queryId('sink_id')
   void load()
   void loadFilterOptions()
+  const taskID = queryId('task_id')
+  if (taskID) void openDetail({ id: taskID } as Delivery)
 })
 </script>
 

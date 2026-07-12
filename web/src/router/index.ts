@@ -10,6 +10,7 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '登录', public: true },
   },
   { path: '/dashboard', name: 'dashboard', component: () => import('@/pages/DashboardPage.vue'), meta: { title: '概览' } },
+  { path: '/messages', name: 'messages', component: () => import('@/pages/MessagesPage.vue'), meta: { title: '消息中心' } },
   { path: '/flow', name: 'flow', component: () => import('@/pages/FlowPage.vue'), meta: { title: '转发编排' } },
   { path: '/accounts', name: 'accounts', component: () => import('@/pages/AccountsPage.vue'), meta: { title: 'TG 账号' } },
   { path: '/telegram-config', name: 'telegram-config', component: () => import('@/pages/TelegramConfigPage.vue'), meta: { title: 'Telegram 配置' } },

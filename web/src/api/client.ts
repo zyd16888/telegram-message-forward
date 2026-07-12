@@ -39,6 +39,9 @@ import type {
   AIDigestProfileRequest,
   AIDigestRun,
   AIDigestRunDetail,
+  CursorPage,
+  MessageDetail,
+  MessageItem,
 } from '@/types'
 
 const TOKEN_KEY = 'tmf_api_token'
@@ -338,6 +341,13 @@ export const deliveriesApi = {
   get: (id: number) => http.get<ApiItem<Delivery>>(`/deliveries/${id}`).then((r) => r.data.data),
   retry: (id: number) => http.post(`/deliveries/${id}/retry`),
   retryDead: () => http.post<{ requeued: number }>('/deliveries/retry-dead').then((r) => r.data),
+}
+
+// --- Messages ---
+export const messagesApi = {
+  page: (params: Record<string, unknown> = {}) =>
+    http.get<CursorPage<MessageItem>>('/messages', { params }).then((r) => r.data),
+  get: (id: number) => http.get<ApiItem<MessageDetail>>(`/messages/${id}`).then((r) => r.data.data),
 }
 
 // --- Tokens ---

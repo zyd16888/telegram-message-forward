@@ -11,6 +11,8 @@ const props = withDefaults(defineProps<{ name: string; size?: number }>(), {
 const paths: Record<string, string> = {
   dashboard:
     '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/>',
+  messages:
+    '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8"/><path d="M8 13h5"/>',
   flow:
     '<circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="M8 6h8"/><path d="m7.4 8.4 3.2 7.2"/><path d="m16.6 8.4-3.2 7.2"/>',
   accounts:

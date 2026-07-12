@@ -44,17 +44,34 @@ function icon(name: string) {
 }
 
 const menuOptions: MenuOption[] = [
-  { label: '概览', key: 'dashboard', icon: icon('dashboard') },
-  { label: '转发编排', key: 'flow', icon: icon('flow') },
-  { label: 'TG 账号', key: 'accounts', icon: icon('accounts') },
-  { label: 'Telegram 配置', key: 'telegram-config', icon: icon('telegram') },
-  { label: '监听源', key: 'sources', icon: icon('sources') },
-  { label: '目标渠道', key: 'sinks', icon: icon('sinks') },
-  { label: '过滤器', key: 'filters', icon: icon('shield') },
-  { label: '渲染模板', key: 'templates', icon: icon('templates') },
-  { label: '投递记录', key: 'deliveries', icon: icon('deliveries') },
-  { label: 'AI 整理', key: 'ai-digests', icon: icon('ai') },
-  { label: '设置', key: 'settings', icon: icon('settings') },
+  {
+    type: 'group', label: '工作台', key: 'workspace', children: [
+      { label: '概览', key: 'dashboard', icon: icon('dashboard') },
+      { label: '消息中心', key: 'messages', icon: icon('messages') },
+      { label: '转发编排', key: 'flow', icon: icon('flow') },
+      { label: '投递记录', key: 'deliveries', icon: icon('deliveries') },
+    ],
+  },
+  {
+    type: 'group', label: '资源管理', key: 'resources', children: [
+      { label: 'TG 账号', key: 'accounts', icon: icon('accounts') },
+      { label: 'Telegram 配置', key: 'telegram-config', icon: icon('telegram') },
+      { label: '监听源', key: 'sources', icon: icon('sources') },
+      { label: '目标渠道', key: 'sinks', icon: icon('sinks') },
+    ],
+  },
+  {
+    type: 'group', label: '处理能力', key: 'processing', children: [
+      { label: '过滤器', key: 'filters', icon: icon('shield') },
+      { label: '渲染模板', key: 'templates', icon: icon('templates') },
+      { label: 'AI 整理', key: 'ai-digests', icon: icon('ai') },
+    ],
+  },
+  {
+    type: 'group', label: '系统', key: 'system', children: [
+      { label: '设置', key: 'settings', icon: icon('settings') },
+    ],
+  },
 ]
 
 function applyMedia() {
