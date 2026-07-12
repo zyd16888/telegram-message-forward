@@ -229,6 +229,20 @@ func (r *AIDigestRepository) HasRunningRun(ctx context.Context, profileID int64)
 	return count > 0, err
 }
 
+func (r *AIDigestRepository) LastExecutionRun(ctx context.Context, profileID int64) (*domainaidigest.Run, error) {
+	var m model.AIDigestRun
+	if err := r.db.WithContext(ctx).
+		Where("profile_id = ? AND trigger_type <> ?", profileID, string(domainaidigest.TriggerPreview)).
+		Order("id DESC").
+		First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return toAIDigestRunDomain(&m)
+}
+
 func (r *AIDigestRepository) LastSuccessfulRun(ctx context.Context, profileID int64) (*domainaidigest.Run, error) {
 	var m model.AIDigestRun
 	if err := r.db.WithContext(ctx).

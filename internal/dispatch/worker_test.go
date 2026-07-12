@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,10 +18,34 @@ import (
 	domainsink "telegram-message-forward/internal/domain/sink"
 	domaintemplate "telegram-message-forward/internal/domain/template"
 	"telegram-message-forward/internal/infra/clock"
+	pluginsink "telegram-message-forward/internal/plugin/sink"
 	tmpl "telegram-message-forward/internal/template"
 
 	_ "telegram-message-forward/internal/plugin/sink/webhook"
 )
+
+var chunkTestPayloads struct {
+	sync.Mutex
+	items []pluginsink.Payload
+}
+
+type chunkTestSink struct{}
+
+func (chunkTestSink) Name() string                        { return "dispatch_chunk_test" }
+func (chunkTestSink) ValidateConfig(map[string]any) error { return nil }
+func (chunkTestSink) Capabilities() domainsink.Capabilities {
+	return domainsink.Capabilities{SupportsText: true, MaxTextLength: 50}
+}
+func (chunkTestSink) Send(_ context.Context, _ *domainsink.Sink, payload pluginsink.Payload, _ pluginsink.Options) (*pluginsink.Result, error) {
+	chunkTestPayloads.Lock()
+	chunkTestPayloads.items = append(chunkTestPayloads.items, payload)
+	chunkTestPayloads.Unlock()
+	return &pluginsink.Result{Success: true}, nil
+}
+
+func init() {
+	pluginsink.Register("dispatch_chunk_test", func() (pluginsink.Plugin, error) { return chunkTestSink{}, nil })
+}
 
 type recordingTaskRepo struct {
 	attempt *domaindelivery.Attempt
@@ -134,13 +159,49 @@ func TestWorkerUsesMessageSnapshotForDelivery(t *testing.T) {
 	}
 }
 
+func TestWorkerSplitsTextUsingRuntimeSinkCapabilities(t *testing.T) {
+	chunkTestPayloads.Lock()
+	chunkTestPayloads.items = nil
+	chunkTestPayloads.Unlock()
+
+	worker := NewWorker(
+		"test-worker",
+		config.DispatchConfig{},
+		nil,
+		fakeSinkRepo{sink: &domainsink.Sink{
+			ID: 1, Type: "dispatch_chunk_test", Enabled: true,
+			Capabilities: domainsink.Capabilities{SupportsText: true},
+		}},
+		fakeTemplateRepo{},
+		fakeMessageRepo{msg: &domainmessage.NormalizedMessage{ID: 10, Text: strings.Repeat("digest sentence. ", 12)}},
+		tmpl.NewRenderer(),
+		clock.System{},
+		slog.Default(),
+	)
+
+	res, err := worker.deliver(context.Background(), &domaindelivery.Task{ID: 1, MessageID: 10, SinkID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("delivery should succeed: %+v", res)
+	}
+	chunkTestPayloads.Lock()
+	defer chunkTestPayloads.Unlock()
+	if len(chunkTestPayloads.items) < 2 {
+		t.Fatalf("sent parts = %d, want multiple parts", len(chunkTestPayloads.items))
+	}
+	for i, payload := range chunkTestPayloads.items {
+		if len([]rune(payload.Text)) > 50 {
+			t.Fatalf("part %d length = %d, want <= 50", i+1, len([]rune(payload.Text)))
+		}
+	}
+}
+
 func TestWorkerRejectsUnsupportedTemplateFormat(t *testing.T) {
-	var called atomic.Bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called.Store(true)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+	chunkTestPayloads.Lock()
+	chunkTestPayloads.items = nil
+	chunkTestPayloads.Unlock()
 
 	tplID := int64(7)
 	worker := NewWorker(
@@ -148,8 +209,7 @@ func TestWorkerRejectsUnsupportedTemplateFormat(t *testing.T) {
 		config.DispatchConfig{},
 		nil,
 		fakeSinkRepo{sink: &domainsink.Sink{
-			ID: 1, Type: "webhook", Enabled: true,
-			Config:       map[string]any{"url": srv.URL},
+			ID: 1, Type: "dispatch_chunk_test", Enabled: true,
 			Capabilities: domainsink.Capabilities{SupportsText: true},
 		}},
 		fakeTemplateRepo{tpl: &domaintemplate.Template{ID: tplID, Format: domaintemplate.FormatHTML, Content: "{{.Text}}"}},
@@ -166,8 +226,10 @@ func TestWorkerRejectsUnsupportedTemplateFormat(t *testing.T) {
 	if res == nil || res.Success || !strings.Contains(res.Error, "不被渠道") {
 		t.Fatalf("应拒绝不支持的模板格式: %+v", res)
 	}
-	if called.Load() {
-		t.Fatal("模板格式不支持时不应调用外部 webhook")
+	chunkTestPayloads.Lock()
+	defer chunkTestPayloads.Unlock()
+	if len(chunkTestPayloads.items) != 0 {
+		t.Fatal("模板格式不支持时不应调用 sink")
 	}
 }
 

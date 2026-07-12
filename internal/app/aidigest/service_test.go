@@ -137,6 +137,39 @@ func TestNextRunAfterCronUsesProfileAnchor(t *testing.T) {
 	}
 }
 
+func TestOverdueScheduleUsesSameNextRunForListAndDueScan(t *testing.T) {
+	now := time.Date(2026, 7, 12, 14, 0, 0, 0, time.UTC)
+	profile := &domainaidigest.Profile{
+		ID:        8,
+		Name:      "overdue digest",
+		Enabled:   true,
+		CreatedAt: now.Add(-2 * time.Hour),
+		Schedule: domainaidigest.ScheduleConfig{
+			Type:            "interval",
+			IntervalMinutes: 60,
+		},
+	}
+	repo := &memoryDigestRepo{profiles: []*domainaidigest.Profile{profile}}
+	svc := NewService(Deps{Repo: repo, Clock: fixedClock{now: now}})
+
+	profiles, err := svc.ListProfiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := now.Add(-time.Hour).Format(time.RFC3339)
+	if profiles[0].Schedule.NextRunAt != want {
+		t.Fatalf("next_run_at = %s, want overdue time %s", profiles[0].Schedule.NextRunAt, want)
+	}
+
+	due, err := svc.DueProfiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || due[0].ID != profile.ID {
+		t.Fatalf("due profiles = %#v, want profile %d", due, profile.ID)
+	}
+}
+
 func TestBuildPromptAppendsAndRendersOutputTemplate(t *testing.T) {
 	svc := NewService(Deps{})
 	run := &domainaidigest.Run{
@@ -193,7 +226,14 @@ func (r *memorySettingsRepo) Upsert(ctx context.Context, s *domainsettings.Setti
 	return nil
 }
 
-type memoryDigestRepo struct{}
+type fixedClock struct{ now time.Time }
+
+func (c fixedClock) Now() time.Time { return c.now }
+
+type memoryDigestRepo struct {
+	profiles      []*domainaidigest.Profile
+	lastExecution map[int64]*domainaidigest.Run
+}
 
 func (r *memoryDigestRepo) CreateProfile(context.Context, *domainaidigest.Profile) error { return nil }
 func (r *memoryDigestRepo) UpdateProfile(context.Context, *domainaidigest.Profile) error { return nil }
@@ -201,7 +241,7 @@ func (r *memoryDigestRepo) GetProfile(context.Context, int64) (*domainaidigest.P
 	return nil, nil
 }
 func (r *memoryDigestRepo) ListProfiles(context.Context) ([]*domainaidigest.Profile, error) {
-	return nil, nil
+	return r.profiles, nil
 }
 func (r *memoryDigestRepo) DeleteProfile(context.Context, int64) error { return nil }
 func (r *memoryDigestRepo) ListOutputTemplates(context.Context) ([]*domainaidigest.OutputTemplate, error) {
@@ -227,6 +267,9 @@ func (r *memoryDigestRepo) UpdateRun(context.Context, *domainaidigest.Run) error
 func (r *memoryDigestRepo) HasRunningRun(context.Context, int64) (bool, error)   { return false, nil }
 func (r *memoryDigestRepo) LastSuccessfulRun(context.Context, int64) (*domainaidigest.Run, error) {
 	return nil, nil
+}
+func (r *memoryDigestRepo) LastExecutionRun(_ context.Context, profileID int64) (*domainaidigest.Run, error) {
+	return r.lastExecution[profileID], nil
 }
 func (r *memoryDigestRepo) ListRuns(context.Context, int64, int, int) ([]*domainaidigest.Run, error) {
 	return nil, nil

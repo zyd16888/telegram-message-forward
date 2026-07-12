@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref, shallowRef } from 'vue'
 import { NButton, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { aiApi, filtersApi, flowsApi, sinksApi, sourcesApi } from '@/api/client'
@@ -23,6 +23,7 @@ import ClayIcon from '@/components/ClayIcon.vue'
 import AIDigestProfileForm from '@/components/ai/AIDigestProfileForm.vue'
 import AIDigestTemplateForm from '@/components/ai/AIDigestTemplateForm.vue'
 import AIDigestRunDetail from '@/components/ai/AIDigestRunDetail.vue'
+import AIDigestScheduleStatus from '@/components/ai/AIDigestScheduleStatus.vue'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -43,6 +44,7 @@ const profiles = ref<AIDigestProfile[]>([])
 const sources = ref<Source[]>([])
 const sinks = ref<Sink[]>([])
 const conditionDescriptors = ref<RuleItemDescriptor[]>([])
+const scheduleNow = shallowRef(Date.now())
 const selectedProfile = ref<AIDigestProfile | null>(null)
 const showForm = ref(false)
 const savingProfile = ref(false)
@@ -100,7 +102,12 @@ const profileColumns: DataTableColumns<AIDigestProfile> = [
         ? h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => templateNameById.value.get(row.output_template_id) ?? `#${row.output_template_id}` })
         : h(NText, { depth: 3 }, { default: () => '自定义' }),
   },
-  { title: '调度', key: 'schedule', render: (row) => scheduleLabel(row) },
+  {
+    title: '调度',
+    key: 'schedule',
+    width: 240,
+    render: (row) => h(AIDigestScheduleStatus, { schedule: row.schedule, enabled: row.enabled, now: scheduleNow.value }),
+  },
   {
     title: '最近运行',
     key: 'recent_run',
@@ -241,6 +248,22 @@ async function loadAll(): Promise<void> {
     message.error('加载 AI 整理失败：' + errText(e))
   } finally {
     loading.value = false
+  }
+}
+
+let scheduleTimer: number | null = null
+let scheduleRefreshing = false
+
+async function refreshScheduleStatus(): Promise<void> {
+  if (scheduleRefreshing) return
+  scheduleRefreshing = true
+  scheduleNow.value = Date.now()
+  try {
+    profiles.value = await aiApi.profiles.list()
+  } catch {
+    // 保留当前数据，主刷新按钮仍会展示请求错误。
+  } finally {
+    scheduleRefreshing = false
   }
 }
 
@@ -543,14 +566,6 @@ function cleanupRuns(): void {
 }
 
 // --- 展示辅助 ---
-function scheduleLabel(profile: AIDigestProfile): string {
-  const schedule = profile.schedule
-  if (schedule.type === 'interval') return `每 ${schedule.interval_minutes || 60} 分钟`
-  if (schedule.type === 'daily') return `每日 ${schedule.time || '09:00'}`
-  if (schedule.type === 'cron') return `Cron ${schedule.cron || ''}`
-  return '仅手动'
-}
-
 function runStatusLabel(status: string): string {
   return { success: '成功', failed: '失败', running: '运行中', pending: '排队', cancelled: '已取消' }[status] ?? status
 }
@@ -563,7 +578,14 @@ function triggerLabel(trigger: string): string {
   return { manual: '手动', schedule: '定时', preview: '预览' }[trigger] ?? trigger
 }
 
-onMounted(loadAll)
+onMounted(() => {
+  void loadAll()
+  scheduleTimer = window.setInterval(() => void refreshScheduleStatus(), 60_000)
+})
+
+onBeforeUnmount(() => {
+  if (scheduleTimer !== null) window.clearInterval(scheduleTimer)
+})
 </script>
 
 <template>

@@ -957,7 +957,7 @@ func (s *Service) DueProfiles(ctx context.Context) ([]*domainaidigest.Profile, e
 		if !p.Enabled || p.Schedule.Type == "" || p.Schedule.Type == "manual" {
 			continue
 		}
-		next, ok := s.nextRunAfter(ctx, p, now.Add(-24*time.Hour))
+		next, ok := s.nextRunAfter(ctx, p, now)
 		if !ok || next.After(now) {
 			continue
 		}
@@ -983,15 +983,12 @@ func (s *Service) withNextRun(ctx context.Context, p *domainaidigest.Profile) *d
 }
 
 func (s *Service) nextRunAfter(ctx context.Context, p *domainaidigest.Profile, from time.Time) (time.Time, bool) {
-	last, _ := s.repo.ListRuns(ctx, p.ID, 1, 0)
+	last, _ := s.repo.LastExecutionRun(ctx, p.ID)
 	anchor := p.CreatedAt
-	if len(last) > 0 {
-		anchor = last[0].CreatedAt
+	if last != nil {
+		anchor = last.CreatedAt
 	}
 	if anchor.IsZero() {
-		anchor = from
-	}
-	if anchor.Before(from) {
 		anchor = from
 	}
 	switch p.Schedule.Type {

@@ -28,6 +28,7 @@ type Capabilities struct {
 	SupportsAudio    bool              `json:"supports_audio"`
 	SupportsVideo    bool              `json:"supports_video"`
 	MaxTextLength    int               `json:"max_text_length,omitempty"`
+	MaxTextBytes     map[string]int    `json:"max_text_bytes,omitempty"`
 	MaxFileSizeMB    int               `json:"max_file_size_mb,omitempty"`
 	Media            []MediaCapability `json:"media,omitempty"`
 	Notes            []string          `json:"notes,omitempty"`

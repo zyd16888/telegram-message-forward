@@ -206,6 +206,7 @@ type Repository interface {
 	CreateRun(ctx context.Context, r *Run) error
 	UpdateRun(ctx context.Context, r *Run) error
 	HasRunningRun(ctx context.Context, profileID int64) (bool, error)
+	LastExecutionRun(ctx context.Context, profileID int64) (*Run, error)
 	LastSuccessfulRun(ctx context.Context, profileID int64) (*Run, error)
 	ListRuns(ctx context.Context, profileID int64, limit, offset int) ([]*Run, error)
 	GetRun(ctx context.Context, id int64) (*Run, error)

@@ -62,6 +62,7 @@ export interface Capabilities {
   supports_audio: boolean
   supports_video: boolean
   max_text_length?: number
+  max_text_bytes?: Record<string, number>
   max_file_size_mb?: number
   media?: MediaCapability[]
   notes?: string[]

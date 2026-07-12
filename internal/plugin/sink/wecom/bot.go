@@ -78,6 +78,7 @@ func (s *BotSink) Capabilities() domainsink.Capabilities {
 		SupportsImage:    true,
 		SupportsFile:     true,
 		MaxTextLength:    4096,
+		MaxTextBytes:     map[string]int{"text": 2048, "markdown": 4096},
 		MaxFileSizeMB:    20,
 		Media: []domainsink.MediaCapability{
 			{Type: "image", Supported: true, MaxSizeMB: 2, SupportsPublicURL: false, RequiresUpload: false, SupportsBinary: true, DeliveryMode: "base64_md5", Fallback: "降级为 [图片消息] + caption + 原始链接"},

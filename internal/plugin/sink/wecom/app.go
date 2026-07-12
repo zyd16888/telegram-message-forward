@@ -108,6 +108,7 @@ func (s *AppSink) Capabilities() domainsink.Capabilities {
 		SupportsImage:    true,
 		SupportsFile:     true,
 		MaxTextLength:    2048,
+		MaxTextBytes:     map[string]int{"text": 2048, "markdown": 2048},
 		MaxFileSizeMB:    20,
 		Media: []domainsink.MediaCapability{
 			{Type: "image", Supported: true, MaxSizeMB: 10, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为 [图片消息] + caption + 原始链接"},

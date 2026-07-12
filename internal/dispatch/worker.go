@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -169,6 +170,11 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 	if !s.Enabled {
 		return nil, errSinkDisabled
 	}
+	plugin, err := pluginsink.New(s.Type)
+	if err != nil {
+		return nil, err
+	}
+	caps := plugin.Capabilities()
 
 	var tpl *domaintemplate.Template
 	if task.TemplateID != nil {
@@ -182,19 +188,15 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 	if err != nil {
 		return nil, err
 	}
-	if !supportsFormat(s.Capabilities, rendered.Format) {
+	if !supportsFormat(caps, rendered.Format) {
 		return &pluginsink.Result{
 			Success: false,
 			Error:   "模板格式 " + string(rendered.Format) + " 不被渠道 " + s.Type + " 支持",
 		}, nil
 	}
 
-	plugin, err := pluginsink.New(s.Type)
-	if err != nil {
-		return nil, err
-	}
 	media := w.publicMedia(ctx, msg.Media)
-	media, cleanup := w.localUploadMedia(ctx, s.Capabilities, media)
+	media, cleanup := w.localUploadMedia(ctx, caps, media)
 	defer cleanup()
 	fallbackText := mediaFallbackText(rendered.Text, media, msg.OriginalURL)
 	payload := pluginsink.Payload{
@@ -203,11 +205,31 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 		Media:        media,
 		FallbackText: fallbackText,
 	}
-	if len(media) > 0 && !supportsAllMedia(s.Capabilities, media) {
+	if len(media) > 0 && !supportsAllMedia(caps, media) {
 		payload.Format = string(domaintemplate.FormatText)
 		payload.Text = fallbackText
 	}
-	return plugin.Send(ctx, s, payload, pluginsink.Options{})
+	parts := splitPayload(payload, caps)
+	for i, part := range parts {
+		result, sendErr := plugin.Send(ctx, s, part, pluginsink.Options{})
+		if sendErr != nil {
+			return result, fmt.Errorf("发送第 %d/%d 段: %w", i+1, len(parts), sendErr)
+		}
+		if result == nil {
+			return nil, fmt.Errorf("发送第 %d/%d 段未返回结果", i+1, len(parts))
+		}
+		if !result.Success {
+			result.Error = fmt.Sprintf("第 %d/%d 段发送失败: %s", i+1, len(parts), result.Error)
+			return result, nil
+		}
+		if len(parts) == 1 {
+			return result, nil
+		}
+	}
+	return &pluginsink.Result{
+		Success:         true,
+		ResponseSummary: []byte(fmt.Sprintf("已分 %d 段发送", len(parts))),
+	}, nil
 }
 
 func supportsFormat(c domainsink.Capabilities, f domaintemplate.Format) bool {
