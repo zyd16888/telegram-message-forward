@@ -16,7 +16,9 @@ func TestAIDigestRunAuditRoundTrip(t *testing.T) {
 		UserPrompt:   "rendered user prompt",
 		RequestConfig: domainaidigest.RequestConfig{
 			ProviderID: "provider-1", APIType: "responses", Model: "model-1", Temperature: 0.3, MaxTokens: 2048,
+			Multimodal: &domainaidigest.MultimodalRequestConfig{Enabled: true, Included: 1},
 		},
+		MediaAudit: []domainaidigest.MediaAudit{{MessageID: 9, MediaIndex: 0, Status: "included", SHA256: "abc"}},
 	}
 
 	model, err := toAIDigestRunModel(run)
@@ -30,7 +32,10 @@ func TestAIDigestRunAuditRoundTrip(t *testing.T) {
 	if restored.SystemPrompt != run.SystemPrompt || restored.UserPrompt != run.UserPrompt {
 		t.Fatalf("prompt round trip mismatch: %+v", restored)
 	}
-	if restored.RequestConfig != run.RequestConfig {
+	if restored.RequestConfig.Multimodal == nil || restored.RequestConfig.Multimodal.Included != 1 {
 		t.Fatalf("request config round trip mismatch: %+v", restored.RequestConfig)
+	}
+	if len(restored.MediaAudit) != 1 || restored.MediaAudit[0].SHA256 != "abc" {
+		t.Fatalf("media audit round trip mismatch: %+v", restored.MediaAudit)
 	}
 }

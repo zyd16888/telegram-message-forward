@@ -27,6 +27,7 @@ import (
 	domainsource "telegram-message-forward/internal/domain/source"
 	"telegram-message-forward/internal/infra/ai"
 	"telegram-message-forward/internal/infra/clock"
+	"telegram-message-forward/internal/infra/mediastore"
 	"telegram-message-forward/internal/ruleengine/condition"
 )
 
@@ -85,6 +86,7 @@ type Service struct {
 	clk      clock.Clock
 	log      *slog.Logger
 	wake     func()
+	media    mediastore.Store
 	mu       sync.Mutex
 }
 
@@ -99,6 +101,7 @@ type Deps struct {
 	Clock    clock.Clock
 	Logger   *slog.Logger
 	Wake     func()
+	Media    mediastore.Store
 }
 
 type messageWindowRepository interface {
@@ -109,7 +112,7 @@ func NewService(deps Deps) *Service {
 	return &Service{
 		repo: deps.Repo, settings: deps.Settings, messages: deps.Messages, sources: deps.Sources,
 		sinks: deps.Sinks, tasks: deps.Tasks, filters: deps.Filters,
-		clk: deps.Clock, log: deps.Logger, wake: deps.Wake,
+		clk: deps.Clock, log: deps.Logger, wake: deps.Wake, media: deps.Media,
 	}
 }
 
@@ -122,6 +125,8 @@ type ProviderInput struct {
 	TimeoutSeconds     int
 	MaxRetries         int
 	DefaultTemperature float64
+	SupportsVision     bool
+	VisionModel        string
 	Enabled            bool
 	IsDefault          bool
 	APIKey             *string
@@ -472,6 +477,7 @@ type ProfileInput struct {
 	TargetSinkIDs    []int64
 	ModelConfig      domainaidigest.ModelConfig
 	Limits           domainaidigest.LimitsConfig
+	Multimodal       domainaidigest.MultimodalConfig
 }
 
 func (s *Service) CreateProfile(ctx context.Context, in ProfileInput) (*domainaidigest.Profile, error) {
@@ -682,6 +688,19 @@ func (s *Service) runAI(ctx context.Context, p *domainaidigest.Profile, run *dom
 	}
 	userPrompt := s.buildPrompt(ctx, p, run, included)
 	request, requestConfig := buildGenerateRequest(p, cfg, userPrompt)
+	request.Content, run.MediaAudit = s.buildMultimodalContent(ctx, p, included)
+	if requestConfig.Multimodal != nil {
+		for _, item := range run.MediaAudit {
+			switch item.Status {
+			case "included":
+				requestConfig.Multimodal.Included++
+			case "failed":
+				requestConfig.Multimodal.Failed++
+			default:
+				requestConfig.Multimodal.Skipped++
+			}
+		}
+	}
 	run.ProviderID = cfg.ID
 	run.ProviderName = cfg.Name
 	run.ModelName = request.Model
@@ -716,17 +735,29 @@ func (s *Service) runAI(ctx context.Context, p *domainaidigest.Profile, run *dom
 }
 
 func buildGenerateRequest(p *domainaidigest.Profile, cfg domainaidigest.ProviderConfig, userPrompt string) (ai.GenerateRequest, domainaidigest.RequestConfig) {
+	model := firstNonEmpty(p.ModelConfig.Model, cfg.Model)
+	if p.Multimodal.Enabled && strings.TrimSpace(cfg.VisionModel) != "" {
+		model = cfg.VisionModel
+	}
 	request := ai.GenerateRequest{
-		Model:       firstNonEmpty(p.ModelConfig.Model, cfg.Model),
+		Model:       model,
 		System:      systemPrompt,
 		User:        userPrompt,
 		Temperature: firstPositiveFloat(p.ModelConfig.Temperature, cfg.DefaultTemperature),
 		MaxTokens:   p.ModelConfig.MaxTokens,
 	}
-	return request, domainaidigest.RequestConfig{
+	snapshot := domainaidigest.RequestConfig{
 		ProviderID: cfg.ID, ProviderName: cfg.Name, APIType: cfg.APIType,
 		Model: request.Model, Temperature: request.Temperature, MaxTokens: request.MaxTokens,
 	}
+	if p.Multimodal.Enabled {
+		m := normalizedMultimodal(p.Multimodal)
+		snapshot.Multimodal = &domainaidigest.MultimodalRequestConfig{
+			Enabled: true, ImageDetail: m.ImageDetail, MaxImagesPerRun: m.MaxImagesPerRun,
+			MaxImageBytes: m.MaxImageBytes, MaxTotalImageBytes: m.MaxTotalImageBytes,
+		}
+	}
+	return request, snapshot
 }
 
 func (s *Service) createDeliveryTasks(ctx context.Context, p *domainaidigest.Profile, run *domainaidigest.Run, out *domainaidigest.Output) ([]int64, error) {
@@ -1072,8 +1103,18 @@ func (s *Service) validateProfile(ctx context.Context, p *domainaidigest.Profile
 			return fmt.Errorf("时区无效: %w", err)
 		}
 	}
-	if _, _, err := s.providerForModelConfig(ctx, p.ModelConfig); err != nil {
+	cfg, _, err := s.providerForModelConfig(ctx, p.ModelConfig)
+	if err != nil {
 		return err
+	}
+	p.Multimodal = normalizedMultimodal(p.Multimodal)
+	if p.Multimodal.Enabled {
+		if !p.Multimodal.AllowExternalMedia {
+			return errors.New("开启图片分析前需要确认允许将媒体发送到外部 AI")
+		}
+		if !cfg.SupportsVision {
+			return fmt.Errorf("AI Provider %s 未启用图片理解能力", cfg.Name)
+		}
 	}
 	if p.OutputTemplateID > 0 {
 		if _, err := s.repo.GetOutputTemplate(ctx, p.OutputTemplateID); err != nil {
@@ -1262,6 +1303,8 @@ func providerFromInput(in ProviderInput) domainaidigest.ProviderConfig {
 		TimeoutSeconds:     in.TimeoutSeconds,
 		MaxRetries:         in.MaxRetries,
 		DefaultTemperature: in.DefaultTemperature,
+		SupportsVision:     in.SupportsVision,
+		VisionModel:        strings.TrimSpace(in.VisionModel),
 		Enabled:            true,
 	}
 }
@@ -1284,6 +1327,7 @@ func profileFromInput(id int64, in ProfileInput) *domainaidigest.Profile {
 		TargetSinkIDs:    in.TargetSinkIDs,
 		ModelConfig:      in.ModelConfig,
 		Limits:           in.Limits,
+		Multimodal:       in.Multimodal,
 	}
 }
 
@@ -1314,6 +1358,23 @@ func normalizedLimits(l domainaidigest.LimitsConfig) domainaidigest.LimitsConfig
 		l.MaxCharsPerMessage = 1200
 	}
 	return l
+}
+
+func normalizedMultimodal(m domainaidigest.MultimodalConfig) domainaidigest.MultimodalConfig {
+	if m.ImageDetail != "low" && m.ImageDetail != "original" && m.ImageDetail != "auto" {
+		m.ImageDetail = "high"
+	}
+	if m.MaxImagesPerRun <= 0 {
+		m.MaxImagesPerRun = 12
+	}
+	if m.MaxImageBytes <= 0 {
+		m.MaxImageBytes = 10 << 20
+	}
+	if m.MaxTotalImageBytes <= 0 {
+		m.MaxTotalImageBytes = 40 << 20
+	}
+	m.FailureMode = "continue_text"
+	return m
 }
 
 func normalizeProvider(cfg *domainaidigest.ProviderConfig) {

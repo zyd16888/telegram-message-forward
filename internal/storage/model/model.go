@@ -277,6 +277,7 @@ type AIDigestProfile struct {
 	TargetSinkIDs    datatypes.JSON
 	ModelConfig      datatypes.JSON
 	Limits           datatypes.JSON
+	Multimodal       datatypes.JSON
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -315,6 +316,7 @@ type AIDigestRun struct {
 	SystemPrompt      string
 	UserPrompt        string
 	RequestConfig     datatypes.JSON
+	MediaAudit        datatypes.JSON
 	TokenUsage        datatypes.JSON
 	Error             string
 	StartedAt         *time.Time

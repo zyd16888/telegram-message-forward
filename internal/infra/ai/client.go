@@ -23,9 +23,17 @@ type GenerateRequest struct {
 	Model       string
 	System      string
 	User        string
+	Content     []ContentPart
 	Temperature float64
 	MaxTokens   int
 	Metadata    map[string]string
+}
+
+type ContentPart struct {
+	Type     string
+	Text     string
+	ImageURL string
+	Detail   string
 }
 
 type GenerateResult struct {
@@ -85,11 +93,12 @@ func (c *OpenAICompatibleClient) Generate(ctx context.Context, req GenerateReque
 	if maxTokens <= 0 && c.cfg.DefaultMaxToken > 0 {
 		maxTokens = c.cfg.DefaultMaxToken
 	}
+	chatContent, responsesInput := requestContent(req.User, req.Content)
 	body := chatCompletionRequest{
 		Model: model,
 		Messages: []chatMessage{
 			{Role: "system", Content: req.System},
-			{Role: "user", Content: req.User},
+			{Role: "user", Content: chatContent},
 		},
 		Temperature: temperature,
 		MaxTokens:   maxTokens,
@@ -97,7 +106,7 @@ func (c *OpenAICompatibleClient) Generate(ctx context.Context, req GenerateReque
 	responseBody := responsesRequest{
 		Model:           model,
 		Instructions:    req.System,
-		Input:           req.User,
+		Input:           responsesInput,
 		Temperature:     temperature,
 		MaxOutputTokens: maxTokens,
 	}
@@ -264,14 +273,28 @@ type chatCompletionRequest struct {
 
 type chatMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+type chatImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type chatCompletionResponse struct {
 	Model   string `json:"model"`
 	Choices []struct {
-		Message      chatMessage `json:"message"`
-		FinishReason string      `json:"finish_reason"`
+		Message struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -283,9 +306,53 @@ type chatCompletionResponse struct {
 type responsesRequest struct {
 	Model           string  `json:"model"`
 	Instructions    string  `json:"instructions,omitempty"`
-	Input           string  `json:"input"`
+	Input           any     `json:"input"`
 	Temperature     float64 `json:"temperature,omitempty"`
 	MaxOutputTokens int     `json:"max_output_tokens,omitempty"`
+}
+
+type responsesInputMessage struct {
+	Role    string                 `json:"role"`
+	Content []responsesContentPart `json:"content"`
+}
+
+type responsesContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+}
+
+func requestContent(user string, parts []ContentPart) (any, any) {
+	if len(parts) == 0 {
+		return user, user
+	}
+	chatParts := make([]chatContentPart, 0, len(parts)+1)
+	responseParts := make([]responsesContentPart, 0, len(parts)+1)
+	if strings.TrimSpace(user) != "" {
+		chatParts = append(chatParts, chatContentPart{Type: "text", Text: user})
+		responseParts = append(responseParts, responsesContentPart{Type: "input_text", Text: user})
+	}
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			if strings.TrimSpace(part.Text) == "" {
+				continue
+			}
+			chatParts = append(chatParts, chatContentPart{Type: "text", Text: part.Text})
+			responseParts = append(responseParts, responsesContentPart{Type: "input_text", Text: part.Text})
+		case "image":
+			if strings.TrimSpace(part.ImageURL) == "" {
+				continue
+			}
+			image := &chatImageURL{URL: part.ImageURL, Detail: part.Detail}
+			chatParts = append(chatParts, chatContentPart{Type: "image_url", ImageURL: image})
+			responseParts = append(responseParts, responsesContentPart{
+				Type: "input_image", ImageURL: part.ImageURL, Detail: part.Detail,
+			})
+		}
+	}
+	return chatParts, []responsesInputMessage{{Role: "user", Content: responseParts}}
 }
 
 type responsesResponse struct {

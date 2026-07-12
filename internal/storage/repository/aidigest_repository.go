@@ -64,6 +64,7 @@ func (r *AIDigestRepository) UpdateProfile(ctx context.Context, p *domainaidiges
 			"target_sink_ids":    m.TargetSinkIDs,
 			"model_config":       m.ModelConfig,
 			"limits":             m.Limits,
+			"multimodal":         m.Multimodal,
 			"updated_at":         m.UpdatedAt,
 		}).Error; err != nil {
 		return err
@@ -217,6 +218,7 @@ func (r *AIDigestRepository) UpdateRun(ctx context.Context, run *domainaidigest.
 			"system_prompt":       m.SystemPrompt,
 			"user_prompt":         m.UserPrompt,
 			"request_config":      m.RequestConfig,
+			"media_audit":         m.MediaAudit,
 			"token_usage":         m.TokenUsage,
 			"error":               m.Error,
 			"started_at":          m.StartedAt,
@@ -235,7 +237,7 @@ func (r *AIDigestRepository) HasRunningRun(ctx context.Context, profileID int64)
 func (r *AIDigestRepository) LastExecutionRun(ctx context.Context, profileID int64) (*domainaidigest.Run, error) {
 	var m model.AIDigestRun
 	if err := r.db.WithContext(ctx).
-		Omit("system_prompt", "user_prompt", "request_config").
+		Omit("system_prompt", "user_prompt", "request_config", "media_audit").
 		Where("profile_id = ? AND trigger_type <> ?", profileID, string(domainaidigest.TriggerPreview)).
 		Order("id DESC").
 		First(&m).Error; err != nil {
@@ -250,7 +252,7 @@ func (r *AIDigestRepository) LastExecutionRun(ctx context.Context, profileID int
 func (r *AIDigestRepository) LastSuccessfulRun(ctx context.Context, profileID int64) (*domainaidigest.Run, error) {
 	var m model.AIDigestRun
 	if err := r.db.WithContext(ctx).
-		Omit("system_prompt", "user_prompt", "request_config").
+		Omit("system_prompt", "user_prompt", "request_config", "media_audit").
 		Where("profile_id = ? AND status = ?", profileID, string(domainaidigest.RunSuccess)).
 		Order("window_end DESC, id DESC").
 		First(&m).Error; err != nil {
@@ -267,7 +269,7 @@ func (r *AIDigestRepository) ListRuns(ctx context.Context, profileID int64, limi
 		limit = 50
 	}
 	db := r.db.WithContext(ctx).
-		Omit("system_prompt", "user_prompt", "request_config").
+		Omit("system_prompt", "user_prompt", "request_config", "media_audit").
 		Order("id DESC").Limit(limit).Offset(offset)
 	if profileID > 0 {
 		db = db.Where("profile_id = ?", profileID)
@@ -432,6 +434,10 @@ func toAIDigestProfileModel(p *domainaidigest.Profile) (*model.AIDigestProfile, 
 	if err != nil {
 		return nil, err
 	}
+	multimodal, err := marshalJSON(p.Multimodal)
+	if err != nil {
+		return nil, err
+	}
 	return &model.AIDigestProfile{
 		ID:               p.ID,
 		Name:             p.Name,
@@ -449,6 +455,7 @@ func toAIDigestProfileModel(p *domainaidigest.Profile) (*model.AIDigestProfile, 
 		TargetSinkIDs:    targets,
 		ModelConfig:      modelCfg,
 		Limits:           limits,
+		Multimodal:       multimodal,
 		CreatedAt:        p.CreatedAt,
 		UpdatedAt:        p.UpdatedAt,
 	}, nil
@@ -494,6 +501,9 @@ func toAIDigestProfileDomain(m *model.AIDigestProfile) (*domainaidigest.Profile,
 	if err := unmarshalJSON(m.Limits, &p.Limits); err != nil {
 		return nil, err
 	}
+	if err := unmarshalJSON(m.Multimodal, &p.Multimodal); err != nil {
+		return nil, err
+	}
 	return &p, nil
 }
 
@@ -507,6 +517,10 @@ func toAIDigestRunModel(r *domainaidigest.Run) (*model.AIDigestRun, error) {
 		return nil, err
 	}
 	requestConfig, err := marshalJSON(r.RequestConfig)
+	if err != nil {
+		return nil, err
+	}
+	mediaAudit, err := marshalJSON(r.MediaAudit)
 	if err != nil {
 		return nil, err
 	}
@@ -527,6 +541,7 @@ func toAIDigestRunModel(r *domainaidigest.Run) (*model.AIDigestRun, error) {
 		SystemPrompt:      r.SystemPrompt,
 		UserPrompt:        r.UserPrompt,
 		RequestConfig:     requestConfig,
+		MediaAudit:        mediaAudit,
 		TokenUsage:        usage,
 		Error:             r.Error,
 		StartedAt:         r.StartedAt,
@@ -561,6 +576,9 @@ func toAIDigestRunDomain(m *model.AIDigestRun) (*domainaidigest.Run, error) {
 		return nil, err
 	}
 	if err := unmarshalJSON(m.RequestConfig, &r.RequestConfig); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(m.MediaAudit, &r.MediaAudit); err != nil {
 		return nil, err
 	}
 	if err := unmarshalJSON(m.TokenUsage, &r.TokenUsage); err != nil {

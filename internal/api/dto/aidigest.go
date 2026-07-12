@@ -20,6 +20,8 @@ type AIProviderDTO struct {
 	TimeoutSeconds     int     `json:"timeout_seconds"`
 	MaxRetries         int     `json:"max_retries"`
 	DefaultTemperature float64 `json:"default_temperature"`
+	SupportsVision     bool    `json:"supports_vision"`
+	VisionModel        string  `json:"vision_model,omitempty"`
 	Enabled            bool    `json:"enabled"`
 	IsDefault          bool    `json:"is_default"`
 	HasAPIKey          bool    `json:"has_api_key"`
@@ -34,6 +36,8 @@ type AIProviderRequest struct {
 	TimeoutSeconds     int     `json:"timeout_seconds"`
 	MaxRetries         int     `json:"max_retries"`
 	DefaultTemperature float64 `json:"default_temperature"`
+	SupportsVision     bool    `json:"supports_vision"`
+	VisionModel        string  `json:"vision_model"`
 	Enabled            bool    `json:"enabled"`
 	IsDefault          bool    `json:"is_default"`
 	APIKey             *string `json:"api_key,omitempty"`
@@ -50,6 +54,8 @@ func NewAIProviderDTO(cfg domainaidigest.ProviderConfig) AIProviderDTO {
 		TimeoutSeconds:     cfg.TimeoutSeconds,
 		MaxRetries:         cfg.MaxRetries,
 		DefaultTemperature: cfg.DefaultTemperature,
+		SupportsVision:     cfg.SupportsVision,
+		VisionModel:        cfg.VisionModel,
 		Enabled:            cfg.Enabled,
 		IsDefault:          cfg.IsDefault,
 		HasAPIKey:          cfg.HasAPIKey,
@@ -66,6 +72,8 @@ func (r AIProviderRequest) ToInput() appaidigest.ProviderInput {
 		TimeoutSeconds:     r.TimeoutSeconds,
 		MaxRetries:         r.MaxRetries,
 		DefaultTemperature: r.DefaultTemperature,
+		SupportsVision:     r.SupportsVision,
+		VisionModel:        r.VisionModel,
 		Enabled:            r.Enabled,
 		IsDefault:          r.IsDefault,
 		APIKey:             r.APIKey,
@@ -115,43 +123,45 @@ func (r AIDigestOutputTemplateRequest) ToInput() appaidigest.OutputTemplateInput
 }
 
 type AIDigestProfileDTO struct {
-	ID               int64                         `json:"id"`
-	Name             string                        `json:"name"`
-	Enabled          bool                          `json:"enabled"`
-	SourceIDs        []int64                       `json:"source_ids"`
-	FilterID         int64                         `json:"filter_id"`
-	Conditions       []domainflow.ConditionConfig  `json:"conditions"`
-	Schedule         domainaidigest.ScheduleConfig `json:"schedule"`
-	Window           domainaidigest.WindowConfig   `json:"window"`
-	Dedupe           domainaidigest.DedupeConfig   `json:"dedupe"`
-	PromptTemplate   string                        `json:"prompt_template"`
-	OutputFormat     string                        `json:"output_format"`
-	OutputTemplateID int64                         `json:"output_template_id"`
-	OutputTemplate   string                        `json:"output_template"`
-	TargetSinkIDs    []int64                       `json:"target_sink_ids"`
-	ModelConfig      domainaidigest.ModelConfig    `json:"model_config"`
-	Limits           domainaidigest.LimitsConfig   `json:"limits"`
-	RecentRun        *AIDigestRunDTO               `json:"recent_run,omitempty"`
-	CreatedAt        time.Time                     `json:"created_at"`
-	UpdatedAt        time.Time                     `json:"updated_at"`
+	ID               int64                           `json:"id"`
+	Name             string                          `json:"name"`
+	Enabled          bool                            `json:"enabled"`
+	SourceIDs        []int64                         `json:"source_ids"`
+	FilterID         int64                           `json:"filter_id"`
+	Conditions       []domainflow.ConditionConfig    `json:"conditions"`
+	Schedule         domainaidigest.ScheduleConfig   `json:"schedule"`
+	Window           domainaidigest.WindowConfig     `json:"window"`
+	Dedupe           domainaidigest.DedupeConfig     `json:"dedupe"`
+	PromptTemplate   string                          `json:"prompt_template"`
+	OutputFormat     string                          `json:"output_format"`
+	OutputTemplateID int64                           `json:"output_template_id"`
+	OutputTemplate   string                          `json:"output_template"`
+	TargetSinkIDs    []int64                         `json:"target_sink_ids"`
+	ModelConfig      domainaidigest.ModelConfig      `json:"model_config"`
+	Limits           domainaidigest.LimitsConfig     `json:"limits"`
+	Multimodal       domainaidigest.MultimodalConfig `json:"multimodal"`
+	RecentRun        *AIDigestRunDTO                 `json:"recent_run,omitempty"`
+	CreatedAt        time.Time                       `json:"created_at"`
+	UpdatedAt        time.Time                       `json:"updated_at"`
 }
 
 type AIDigestProfileRequest struct {
-	Name             string                        `json:"name"`
-	Enabled          bool                          `json:"enabled"`
-	SourceIDs        []int64                       `json:"source_ids"`
-	FilterID         int64                         `json:"filter_id"`
-	Conditions       []domainflow.ConditionConfig  `json:"conditions"`
-	Schedule         domainaidigest.ScheduleConfig `json:"schedule"`
-	Window           domainaidigest.WindowConfig   `json:"window"`
-	Dedupe           domainaidigest.DedupeConfig   `json:"dedupe"`
-	PromptTemplate   string                        `json:"prompt_template"`
-	OutputFormat     string                        `json:"output_format"`
-	OutputTemplateID int64                         `json:"output_template_id"`
-	OutputTemplate   string                        `json:"output_template"`
-	TargetSinkIDs    []int64                       `json:"target_sink_ids"`
-	ModelConfig      domainaidigest.ModelConfig    `json:"model_config"`
-	Limits           domainaidigest.LimitsConfig   `json:"limits"`
+	Name             string                          `json:"name"`
+	Enabled          bool                            `json:"enabled"`
+	SourceIDs        []int64                         `json:"source_ids"`
+	FilterID         int64                           `json:"filter_id"`
+	Conditions       []domainflow.ConditionConfig    `json:"conditions"`
+	Schedule         domainaidigest.ScheduleConfig   `json:"schedule"`
+	Window           domainaidigest.WindowConfig     `json:"window"`
+	Dedupe           domainaidigest.DedupeConfig     `json:"dedupe"`
+	PromptTemplate   string                          `json:"prompt_template"`
+	OutputFormat     string                          `json:"output_format"`
+	OutputTemplateID int64                           `json:"output_template_id"`
+	OutputTemplate   string                          `json:"output_template"`
+	TargetSinkIDs    []int64                         `json:"target_sink_ids"`
+	ModelConfig      domainaidigest.ModelConfig      `json:"model_config"`
+	Limits           domainaidigest.LimitsConfig     `json:"limits"`
+	Multimodal       domainaidigest.MultimodalConfig `json:"multimodal"`
 }
 
 func NewAIDigestProfileDTO(p *domainaidigest.Profile) AIDigestProfileDTO {
@@ -177,6 +187,7 @@ func NewAIDigestProfileDTO(p *domainaidigest.Profile) AIDigestProfileDTO {
 		TargetSinkIDs:    p.TargetSinkIDs,
 		ModelConfig:      p.ModelConfig,
 		Limits:           p.Limits,
+		Multimodal:       p.Multimodal,
 		RecentRun:        recent,
 		CreatedAt:        p.CreatedAt,
 		UpdatedAt:        p.UpdatedAt,
@@ -200,28 +211,30 @@ func (r AIDigestProfileRequest) ToInput() appaidigest.ProfileInput {
 		TargetSinkIDs:    r.TargetSinkIDs,
 		ModelConfig:      r.ModelConfig,
 		Limits:           r.Limits,
+		Multimodal:       r.Multimodal,
 	}
 }
 
 type AIDigestRunDTO struct {
-	ID                int64                     `json:"id"`
-	ProfileID         int64                     `json:"profile_id,omitempty"`
-	Status            string                    `json:"status"`
-	TriggerType       string                    `json:"trigger_type"`
-	WindowStart       time.Time                 `json:"window_start"`
-	WindowEnd         time.Time                 `json:"window_end"`
-	InputMessageCount int                       `json:"input_message_count"`
-	IncludedCount     int                       `json:"included_count"`
-	ExcludedCount     int                       `json:"excluded_count"`
-	DeliveryTaskIDs   []int64                   `json:"delivery_task_ids"`
-	ProviderID        string                    `json:"provider_id,omitempty"`
-	ProviderName      string                    `json:"provider_name,omitempty"`
-	ModelName         string                    `json:"model_name,omitempty"`
-	TokenUsage        domainaidigest.TokenUsage `json:"token_usage"`
-	Error             string                    `json:"error,omitempty"`
-	StartedAt         *time.Time                `json:"started_at,omitempty"`
-	FinishedAt        *time.Time                `json:"finished_at,omitempty"`
-	CreatedAt         time.Time                 `json:"created_at"`
+	ID                int64                       `json:"id"`
+	ProfileID         int64                       `json:"profile_id,omitempty"`
+	Status            string                      `json:"status"`
+	TriggerType       string                      `json:"trigger_type"`
+	WindowStart       time.Time                   `json:"window_start"`
+	WindowEnd         time.Time                   `json:"window_end"`
+	InputMessageCount int                         `json:"input_message_count"`
+	IncludedCount     int                         `json:"included_count"`
+	ExcludedCount     int                         `json:"excluded_count"`
+	DeliveryTaskIDs   []int64                     `json:"delivery_task_ids"`
+	ProviderID        string                      `json:"provider_id,omitempty"`
+	ProviderName      string                      `json:"provider_name,omitempty"`
+	ModelName         string                      `json:"model_name,omitempty"`
+	TokenUsage        domainaidigest.TokenUsage   `json:"token_usage"`
+	MediaAudit        []domainaidigest.MediaAudit `json:"media_audit,omitempty"`
+	Error             string                      `json:"error,omitempty"`
+	StartedAt         *time.Time                  `json:"started_at,omitempty"`
+	FinishedAt        *time.Time                  `json:"finished_at,omitempty"`
+	CreatedAt         time.Time                   `json:"created_at"`
 }
 
 func NewAIDigestRunDTO(r *domainaidigest.Run) AIDigestRunDTO {
@@ -240,6 +253,7 @@ func NewAIDigestRunDTO(r *domainaidigest.Run) AIDigestRunDTO {
 		ProviderName:      r.ProviderName,
 		ModelName:         r.ModelName,
 		TokenUsage:        r.TokenUsage,
+		MediaAudit:        r.MediaAudit,
 		Error:             r.Error,
 		StartedAt:         r.StartedAt,
 		FinishedAt:        r.FinishedAt,

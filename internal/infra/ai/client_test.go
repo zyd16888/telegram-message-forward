@@ -51,3 +51,80 @@ func TestOpenAICompatibleClientResponsesAPI(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 }
+
+func TestOpenAICompatibleClientChatCompletionsMultimodal(t *testing.T) {
+	var content []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body.Messages[1].Content, &content); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"vision","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{}}`))
+	}))
+	defer srv.Close()
+
+	client := NewOpenAICompatibleClient(OpenAICompatibleConfig{
+		BaseURL: srv.URL, APIKey: "test-key", DefaultModel: "vision", Timeout: time.Second,
+	})
+	_, err := client.Generate(context.Background(), GenerateRequest{
+		User: "analyze", Content: []ContentPart{
+			{Type: "image", ImageURL: "data:image/png;base64,AA==", Detail: "high"},
+			{Type: "text", Text: "second"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 3 || content[0]["type"] != "text" || content[1]["type"] != "image_url" {
+		t.Fatalf("unexpected content: %#v", content)
+	}
+	image, ok := content[1]["image_url"].(map[string]any)
+	if !ok || image["url"] != "data:image/png;base64,AA==" || image["detail"] != "high" {
+		t.Fatalf("unexpected image content: %#v", content[1])
+	}
+}
+
+func TestOpenAICompatibleClientResponsesMultimodal(t *testing.T) {
+	var input []struct {
+		Content []map[string]any `json:"content"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Input []struct {
+				Content []map[string]any `json:"content"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		input = body.Input
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"vision","status":"completed","output_text":"ok","usage":{}}`))
+	}))
+	defer srv.Close()
+
+	client := NewOpenAICompatibleClient(OpenAICompatibleConfig{
+		BaseURL: srv.URL, APIKey: "test-key", APIType: "responses", DefaultModel: "vision", Timeout: time.Second,
+	})
+	_, err := client.Generate(context.Background(), GenerateRequest{
+		User: "analyze", Content: []ContentPart{{Type: "image", ImageURL: "data:image/jpeg;base64,AA==", Detail: "low"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input) != 1 || len(input[0].Content) != 2 || input[0].Content[1]["type"] != "input_image" {
+		t.Fatalf("unexpected input: %#v", input)
+	}
+	if input[0].Content[1]["image_url"] != "data:image/jpeg;base64,AA==" || input[0].Content[1]["detail"] != "low" {
+		t.Fatalf("unexpected image input: %#v", input[0].Content[1])
+	}
+}

@@ -51,6 +51,7 @@ type Profile struct {
 	TargetSinkIDs    []int64
 	ModelConfig      ModelConfig
 	Limits           LimitsConfig
+	Multimodal       MultimodalConfig
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	RecentRun        *Run
@@ -99,6 +100,16 @@ type LimitsConfig struct {
 	MaxPromptChars     int `json:"max_prompt_chars,omitempty"`
 }
 
+type MultimodalConfig struct {
+	Enabled            bool   `json:"enabled"`
+	AllowExternalMedia bool   `json:"allow_external_media"`
+	ImageDetail        string `json:"image_detail,omitempty"`
+	MaxImagesPerRun    int    `json:"max_images_per_run,omitempty"`
+	MaxImageBytes      int64  `json:"max_image_bytes,omitempty"`
+	MaxTotalImageBytes int64  `json:"max_total_image_bytes,omitempty"`
+	FailureMode        string `json:"failure_mode,omitempty"`
+}
+
 type ProviderConfig struct {
 	ID                 string  `json:"id,omitempty"`
 	Name               string  `json:"name,omitempty"`
@@ -109,6 +120,8 @@ type ProviderConfig struct {
 	TimeoutSeconds     int     `json:"timeout_seconds"`
 	MaxRetries         int     `json:"max_retries"`
 	DefaultTemperature float64 `json:"default_temperature"`
+	SupportsVision     bool    `json:"supports_vision"`
+	VisionModel        string  `json:"vision_model,omitempty"`
 	Enabled            bool    `json:"enabled"`
 	IsDefault          bool    `json:"is_default,omitempty"`
 	HasAPIKey          bool    `json:"has_api_key"`
@@ -124,17 +137,18 @@ type ProviderSecretStore struct {
 }
 
 type Preset struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	Description    string         `json:"description"`
-	PromptTemplate string         `json:"prompt_template"`
-	OutputFormat   string         `json:"output_format"`
-	OutputTemplate string         `json:"output_template"`
-	Schedule       ScheduleConfig `json:"schedule"`
-	Window         WindowConfig   `json:"window"`
-	Dedupe         DedupeConfig   `json:"dedupe"`
-	ModelConfig    ModelConfig    `json:"model_config"`
-	Limits         LimitsConfig   `json:"limits"`
+	ID             string           `json:"id"`
+	Name           string           `json:"name"`
+	Description    string           `json:"description"`
+	PromptTemplate string           `json:"prompt_template"`
+	OutputFormat   string           `json:"output_format"`
+	OutputTemplate string           `json:"output_template"`
+	Schedule       ScheduleConfig   `json:"schedule"`
+	Window         WindowConfig     `json:"window"`
+	Dedupe         DedupeConfig     `json:"dedupe"`
+	ModelConfig    ModelConfig      `json:"model_config"`
+	Limits         LimitsConfig     `json:"limits"`
+	Multimodal     MultimodalConfig `json:"multimodal"`
 }
 
 type Run struct {
@@ -154,6 +168,7 @@ type Run struct {
 	SystemPrompt      string
 	UserPrompt        string
 	RequestConfig     RequestConfig
+	MediaAudit        []MediaAudit
 	TokenUsage        TokenUsage
 	Error             string
 	StartedAt         *time.Time
@@ -174,12 +189,36 @@ type RunItem struct {
 }
 
 type RequestConfig struct {
-	ProviderID   string  `json:"provider_id,omitempty"`
-	ProviderName string  `json:"provider_name,omitempty"`
-	APIType      string  `json:"api_type,omitempty"`
-	Model        string  `json:"model,omitempty"`
-	Temperature  float64 `json:"temperature,omitempty"`
-	MaxTokens    int     `json:"max_tokens,omitempty"`
+	ProviderID   string                   `json:"provider_id,omitempty"`
+	ProviderName string                   `json:"provider_name,omitempty"`
+	APIType      string                   `json:"api_type,omitempty"`
+	Model        string                   `json:"model,omitempty"`
+	Temperature  float64                  `json:"temperature,omitempty"`
+	MaxTokens    int                      `json:"max_tokens,omitempty"`
+	Multimodal   *MultimodalRequestConfig `json:"multimodal,omitempty"`
+}
+
+type MultimodalRequestConfig struct {
+	Enabled            bool   `json:"enabled"`
+	ImageDetail        string `json:"image_detail"`
+	MaxImagesPerRun    int    `json:"max_images_per_run"`
+	MaxImageBytes      int64  `json:"max_image_bytes"`
+	MaxTotalImageBytes int64  `json:"max_total_image_bytes"`
+	Included           int    `json:"included"`
+	Skipped            int    `json:"skipped"`
+	Failed             int    `json:"failed"`
+}
+
+type MediaAudit struct {
+	MessageID  int64  `json:"message_id"`
+	MediaIndex int    `json:"media_index"`
+	GroupedID  *int64 `json:"grouped_id,omitempty"`
+	FileName   string `json:"file_name,omitempty"`
+	MimeType   string `json:"mime_type,omitempty"`
+	Size       int64  `json:"size,omitempty"`
+	SHA256     string `json:"sha256,omitempty"`
+	Status     string `json:"status"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 type MessageSnapshot struct {

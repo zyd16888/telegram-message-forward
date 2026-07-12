@@ -208,6 +208,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Clock:    clk,
 		Logger:   log,
 		Wake:     deliveryNotifier.Notify,
+		Media:    mediaStore,
 	})
 	aiScheduler := appaidigest.NewScheduler(aiDigestSvc, log)
 
