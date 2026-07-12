@@ -17,6 +17,7 @@ import (
 	appaidigest "telegram-message-forward/internal/app/aidigest"
 	apptoken "telegram-message-forward/internal/app/apitoken"
 	appauth "telegram-message-forward/internal/app/auth"
+	appbackup "telegram-message-forward/internal/app/backup"
 	appdelivery "telegram-message-forward/internal/app/delivery"
 	appfilter "telegram-message-forward/internal/app/filter"
 	appflow "telegram-message-forward/internal/app/flow"
@@ -139,6 +140,7 @@ func Build(cfg *config.Config) (*App, error) {
 	proxies := repository.NewProxyConfigRepository(db, cipher)
 	loginFlows := repository.NewTelegramLoginFlowRepository(db, cipher)
 	aiDigests := repository.NewAIDigestRepository(db)
+	backups := repository.NewBackupRepository(db, cipher)
 
 	// Flow 引擎、渲染器、投递队列。
 	flowEngine := flowengine.NewEngine(flowengine.WithFilterResolver(filters))
@@ -194,6 +196,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Templates: templates,
 	})
 	messageSvc := appmessage.NewService(messages)
+	backupSvc := appbackup.NewService(backups)
 	aiDigestSvc := appaidigest.NewService(appaidigest.Deps{
 		Repo:     aiDigests,
 		Settings: settingsRepo,
@@ -305,6 +308,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Token:          handler.NewTokenHandler(tokenSvc),
 		TelegramConfig: handler.NewTelegramConfigHandler(tgConfigSvc),
 		Settings:       handler.NewSettingsHandler(settingsSvc),
+		Backup:         handler.NewBackupHandler(backupSvc),
 		Media:          handler.NewMediaHandler(mediaStore),
 	})
 

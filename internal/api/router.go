@@ -33,6 +33,7 @@ type Deps struct {
 	Token          *handler.TokenHandler
 	TelegramConfig *handler.TelegramConfigHandler
 	Settings       *handler.SettingsHandler
+	Backup         *handler.BackupHandler
 	// Media 为 nil 时不挂载 /media 端点。
 	Media *handler.MediaHandler
 }
@@ -232,6 +233,15 @@ func NewRouter(deps Deps) *gin.Engine {
 				settings.GET("/media", deps.Settings.GetMedia)
 				settings.PUT("/media", deps.Settings.UpdateMedia)
 				settings.POST("/media/test-s3", deps.Settings.TestMediaS3)
+			}
+		}
+
+		if deps.Backup != nil {
+			backups := v1.Group("/settings/backups")
+			{
+				backups.POST("/export", deps.Backup.Export)
+				backups.POST("/inspect", deps.Backup.Inspect)
+				backups.POST("/restore", deps.Backup.Restore)
 			}
 		}
 
