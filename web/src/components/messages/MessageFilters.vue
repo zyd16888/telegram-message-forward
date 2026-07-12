@@ -59,10 +59,11 @@ const timeOptions = [
   background: var(--clay-surface);
 }
 .actions { display: flex; gap: 8px; }
-@media (max-width: 1180px) {
-  .filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1500px) {
+  .filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .search { grid-column: span 2; }
 }
+@media (max-width: 960px) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 680px) {
   .filters { grid-template-columns: 1fr; }
   .search { grid-column: auto; }

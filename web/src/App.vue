@@ -229,11 +229,10 @@ async function logout() {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  border-radius: 11px;
+  border-radius: 9px;
   color: #fff;
   background: linear-gradient(135deg, #45a9ea, #237fc2);
-  box-shadow: var(--clay-extruded-sm);
-  animation: clay-float 3.8s ease-in-out infinite;
+  box-shadow: 0 2px 6px rgba(35, 127, 194, 0.24);
 }
 
 .brand-text {
@@ -257,6 +256,13 @@ async function logout() {
 
 .sider :deep(.n-menu) {
   padding: 12px 10px;
+}
+
+.sider :deep(.n-menu-item-group-title) {
+  padding-top: 14px;
+  color: var(--clay-text-3);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .sider :deep(.n-menu-item-content) {
@@ -303,6 +309,10 @@ async function logout() {
 
 .sider.collapsed :deep(.n-menu) {
   padding: 12px 0;
+}
+
+.sider.collapsed :deep(.n-menu-item-group-title) {
+  display: none;
 }
 
 .sider.collapsed :deep(.n-menu-item) {
@@ -390,14 +400,15 @@ async function logout() {
   cursor: pointer;
   color: var(--clay-text-2);
   background: var(--clay-surface);
-  box-shadow: var(--clay-extruded-sm);
+  border: 1px solid var(--clay-border);
+  box-shadow: none;
   transition: box-shadow 0.15s ease-out, transform 0.15s ease-out, color 0.18s ease;
 }
 
 .nav-toggle:hover {
   color: var(--clay-primary);
-  box-shadow: var(--clay-extruded-hover);
-  transform: translateY(-1px);
+  border-color: var(--clay-border-strong);
+  background: var(--clay-surface-2);
 }
 
 .nav-toggle:focus-visible {
@@ -408,8 +419,8 @@ async function logout() {
 
 .nav-toggle:active {
   color: var(--clay-primary);
-  box-shadow: var(--clay-inset-deep);
-  transform: scale(0.92);
+  box-shadow: var(--clay-press);
+  transform: scale(0.97);
   transition-duration: 0.08s;
 }
 

@@ -45,16 +45,10 @@ defineProps<{ title: string; desc?: string; icon?: string }>()
   place-items: center;
   flex-shrink: 0;
   border: 0;
-  border-radius: 11px;
+  border-radius: 8px;
   color: var(--clay-primary);
   background: var(--clay-primary-soft);
-  box-shadow: var(--clay-inset-sm);
-  transition: transform 0.22s ease-out, box-shadow 0.22s ease-out;
-}
-
-.page-header:hover .ph-icon {
-  box-shadow: var(--clay-inset-deep);
-  transform: translateY(-1px);
+  border: 1px solid color-mix(in srgb, var(--clay-primary) 16%, var(--clay-border));
 }
 
 .ph-titles {
@@ -65,7 +59,7 @@ defineProps<{ title: string; desc?: string; icon?: string }>()
   margin: 0;
   color: var(--clay-text);
   font-size: 20px;
-  font-weight: 800;
+  font-weight: 750;
   line-height: 1.25;
   text-wrap: balance;
 }

@@ -273,14 +273,15 @@ onMounted(load)
   gap: 16px;
   padding: 20px;
   border: 0;
-  border-radius: 14px;
+  border: 1px solid var(--clay-border);
+  border-radius: 8px;
   background: var(--clay-surface);
   box-shadow: var(--clay-extruded-sm);
   transition: box-shadow 0.22s ease-out, transform 0.22s ease-out;
 }
 .tile:hover {
-  box-shadow: var(--clay-hover);
-  transform: translateY(-2px);
+  border-color: var(--clay-border-strong);
+  box-shadow: var(--clay-out-sm);
 }
 .tile-icon {
   width: 48px;
@@ -295,7 +296,7 @@ onMounted(load)
   transition: transform 0.3s ease-out;
 }
 .tile:hover .tile-icon {
-  animation: clay-float-scale 1.4s ease-in-out infinite;
+  transform: none;
 }
 .tile-value {
   font-size: 30px;
@@ -330,20 +331,15 @@ onMounted(load)
 .rate-badge {
   flex-shrink: 0;
   width: 150px;
-  border-radius: 18px;
+  border-radius: 8px;
   padding: 22px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   color: #fff;
-  background: linear-gradient(150deg, #56b0ea, #2f8fd6);
-  box-shadow:
-    4px 4px 10px rgba(32, 117, 179, 0.2),
-    -3px -3px 8px var(--clay-shadow-light),
-    inset 1px 1px 4px rgba(255, 255, 255, 0.22),
-    inset -2px -2px 6px rgba(22, 100, 160, 0.18);
-  animation: clay-breathe 4.6s ease-in-out infinite;
+  background: #2f8fd6;
+  box-shadow: 0 4px 12px rgba(32, 117, 179, 0.18);
 }
 .rate-value {
   font-size: 34px;

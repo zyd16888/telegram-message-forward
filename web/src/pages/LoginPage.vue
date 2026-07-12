@@ -81,9 +81,6 @@ async function doBootstrap() {
 
 <template>
   <div class="login-wrap">
-    <span class="blob blob-a" />
-    <span class="blob blob-b" />
-
     <div class="login-card">
       <div class="brand">
         <div class="brand-badge">
@@ -161,32 +158,7 @@ async function doBootstrap() {
   justify-content: center;
   padding: 20px;
   overflow: hidden;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--clay-bg) 88%, #ffffff), var(--clay-bg));
-}
-
-/* 背景柔光团 */
-.blob {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(10px);
-  pointer-events: none;
-}
-.blob-a {
-  width: 340px;
-  height: 340px;
-  top: -80px;
-  left: -60px;
-  background: radial-gradient(circle at 35% 35%, rgba(120, 190, 245, 0.55), transparent 68%);
-  animation: clay-float 5.2s ease-in-out infinite;
-}
-.blob-b {
-  width: 380px;
-  height: 380px;
-  bottom: -110px;
-  right: -80px;
-  background: radial-gradient(circle at 60% 60%, rgba(180, 235, 215, 0.5), transparent 68%);
-  animation: clay-float 5.8s ease-in-out infinite reverse;
+  background: var(--clay-bg);
 }
 
 .login-card {
@@ -195,7 +167,8 @@ async function doBootstrap() {
   width: 428px;
   max-width: 100%;
   padding: 36px 34px;
-  border-radius: 30px;
+  border: 1px solid var(--clay-border);
+  border-radius: 12px;
   background: var(--clay-surface);
   box-shadow: var(--clay-extruded);
 }
@@ -209,18 +182,13 @@ async function doBootstrap() {
 .brand-badge {
   width: 60px;
   height: 60px;
-  border-radius: 20px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   color: #fff;
   background: linear-gradient(150deg, #56b0ea, #2f8fd6);
-  box-shadow:
-    6px 6px 15px rgba(24, 108, 170, 0.4),
-    -3px -3px 9px rgba(255, 255, 255, 0.5),
-    inset 2px 2px 5px rgba(255, 255, 255, 0.45),
-    inset -3px -3px 6px rgba(18, 90, 150, 0.35);
+  box-shadow: 0 4px 12px rgba(24, 108, 170, 0.24);
   flex-shrink: 0;
-  animation: clay-breathe 4.2s ease-in-out infinite;
 }
 .brand-text {
   display: flex;
@@ -236,7 +204,7 @@ async function doBootstrap() {
 .brand-sub {
   font-size: 13px;
   font-weight: 600;
-  color: #8aa0b4;
+  color: var(--clay-text-2);
 }
 .mt {
   margin-top: 16px;
@@ -253,7 +221,7 @@ async function doBootstrap() {
 @media (max-width: 480px) {
   .login-card {
     padding: 28px 22px;
-    border-radius: 24px;
+    border-radius: 10px;
   }
 }
 </style>
