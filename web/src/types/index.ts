@@ -629,13 +629,19 @@ export interface AIDigestRun {
 export interface AIDigestMessageRef {
   id: number
   source_id: number
+  external_message_id?: number
+  grouped_id?: number
   message_type: string
+  sender_peer_type?: string
+  sender_id?: number
   sender_name?: string
   text?: string
   original_url?: string
   sent_at?: string
   received_at: string
+  created_at?: string
   media?: unknown[]
+  links?: Array<{ url: string; title?: string }>
 }
 
 export interface AIDigestRunItem {
@@ -661,6 +667,18 @@ export interface AIDigestRunDetail {
   run: AIDigestRun
   items: AIDigestRunItem[]
   output?: AIDigestOutput
+  request?: {
+    system_prompt: string
+    user_prompt: string
+    request_config: {
+      provider_id?: string
+      provider_name?: string
+      api_type?: string
+      model?: string
+      temperature?: number
+      max_tokens?: number
+    }
+  }
 }
 
 export interface AIProviderTestResult {

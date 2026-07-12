@@ -312,6 +312,9 @@ type AIDigestRun struct {
 	ProviderID        string
 	ProviderName      string
 	ModelName         string
+	SystemPrompt      string
+	UserPrompt        string
+	RequestConfig     datatypes.JSON
 	TokenUsage        datatypes.JSON
 	Error             string
 	StartedAt         *time.Time
@@ -323,13 +326,14 @@ func (AIDigestRun) TableName() string { return "ai_digest_runs" }
 
 // AIDigestRunItem 对应 ai_digest_run_items 表。
 type AIDigestRunItem struct {
-	RunID     int64 `gorm:"primaryKey"`
-	MessageID int64 `gorm:"primaryKey"`
-	SourceID  int64
-	Included  bool
-	Reason    string
-	Score     *float64
-	SortOrder int
+	RunID           int64 `gorm:"primaryKey"`
+	MessageID       int64 `gorm:"primaryKey"`
+	SourceID        int64
+	Included        bool
+	Reason          string
+	Score           *float64
+	SortOrder       int
+	MessageSnapshot datatypes.JSON
 }
 
 func (AIDigestRunItem) TableName() string { return "ai_digest_run_items" }

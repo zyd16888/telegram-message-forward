@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { AIDigestRunDetail } from '@/types'
+import AIDigestMessagesPanel from '@/components/ai/AIDigestMessagesPanel.vue'
+import AIDigestRequestPanel from '@/components/ai/AIDigestRequestPanel.vue'
 
 const props = defineProps<{
   detail: AIDigestRunDetail | null
   loading?: boolean
 }>()
 
-const items = computed(() => props.detail?.items ?? [])
-const included = computed(() => items.value.filter((item) => item.included))
-const excluded = computed(() => items.value.filter((item) => !item.included))
 const tokenTotal = computed(() => props.detail?.run.token_usage.total_tokens ?? 0)
 const statusType = computed(() => {
   const status = props.detail?.run.status
@@ -48,18 +47,6 @@ function formatTime(value?: string): string {
   return value.replace('T', ' ').replace(/\.\d+(Z)?$/, '$1')
 }
 
-function reasonLabel(reason?: string): string {
-  const labels: Record<string, string> = {
-    empty_text: '无文本内容',
-    condition_not_match: '未命中过滤条件',
-    duplicate: '重复消息',
-    limit_max_messages: '超过消息数量上限',
-    excluded: '已排除',
-  }
-  if (!reason) return labels.excluded
-  if (reason.startsWith('condition_error:')) return `条件执行失败：${reason.slice('condition_error:'.length).trim()}`
-  return labels[reason] ?? reason
-}
 </script>
 
 <template>
@@ -113,30 +100,12 @@ function reasonLabel(reason?: string): string {
             <NEmpty v-else description="本次运行没有生成可展示的 AI 输出" />
           </NTabPane>
 
-          <NTabPane name="messages" :tab="`消息明细（${items.length}）`">
-            <div class="detail-grid">
-              <NCard :title="`纳入消息（${included.length}）`" size="small">
-                <NScrollbar style="max-height: 360px">
-                  <div v-for="item in included" :key="item.message_id" class="message-item">
-                    <div class="message-meta">
-                      #{{ item.sort_order + 1 }} · Source {{ item.source_id }} · {{ formatTime(item.message?.received_at) }}
-                    </div>
-                    <div class="message-text">{{ item.message?.text || '[无文本]' }}</div>
-                  </div>
-                  <NEmpty v-if="!included.length" size="small" description="无纳入消息" />
-                </NScrollbar>
-              </NCard>
+          <NTabPane name="request" tab="AI 请求">
+            <AIDigestRequestPanel :request="detail.request" />
+          </NTabPane>
 
-              <NCard :title="`排除消息（${excluded.length}）`" size="small">
-                <NScrollbar style="max-height: 360px">
-                  <div v-for="item in excluded" :key="item.message_id" class="message-item excluded">
-                    <div class="message-meta">#{{ item.sort_order + 1 }} · {{ reasonLabel(item.reason) }}</div>
-                    <div class="message-text">{{ item.message?.text || '[无文本]' }}</div>
-                  </div>
-                  <NEmpty v-if="!excluded.length" size="small" description="无排除消息" />
-                </NScrollbar>
-              </NCard>
-            </div>
+          <NTabPane name="messages" :tab="`原文与过滤（${detail.items.length}）`">
+            <AIDigestMessagesPanel :items="detail.items" />
           </NTabPane>
 
           <NTabPane name="diagnostics" tab="运行诊断">
@@ -208,44 +177,12 @@ function reasonLabel(reason?: string): string {
   margin-top: 3px;
 }
 
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.message-item {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--clay-border);
-}
-
-.message-item:last-child {
-  border-bottom: 0;
-}
-
-.message-meta {
-  color: var(--clay-text-3);
-  font-size: 12px;
-}
-
-.message-text {
-  margin-top: 5px;
-  color: var(--clay-text);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.excluded .message-text {
-  color: var(--clay-text-2);
-}
-
 .raw-card {
   margin-top: 14px;
 }
 
 @media (max-width: 900px) {
-  .summary-strip,
-  .detail-grid {
+  .summary-strip {
     grid-template-columns: 1fr;
   }
 }

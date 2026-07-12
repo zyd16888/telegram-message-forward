@@ -10,6 +10,7 @@ import (
 	"time"
 
 	domainaidigest "telegram-message-forward/internal/domain/aidigest"
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsettings "telegram-message-forward/internal/domain/settings"
 )
 
@@ -188,6 +189,43 @@ func TestBuildPromptAppendsAndRendersOutputTemplate(t *testing.T) {
 	}
 	if strings.Contains(prompt, "{{output_template}}") {
 		t.Fatalf("prompt should not keep output_template placeholder, got:\n%s", prompt)
+	}
+}
+
+func TestBuildGenerateRequestUsesEffectiveModelSettings(t *testing.T) {
+	profile := &domainaidigest.Profile{ModelConfig: domainaidigest.ModelConfig{
+		Model: "profile-model", Temperature: 0.4, MaxTokens: 1536,
+	}}
+	cfg := domainaidigest.ProviderConfig{
+		ID: "provider-1", Name: "Primary", APIType: "responses", Model: "provider-model", DefaultTemperature: 0.2,
+	}
+
+	request, snapshot := buildGenerateRequest(profile, cfg, "rendered prompt")
+	if request.Model != "profile-model" || request.Temperature != 0.4 || request.MaxTokens != 1536 {
+		t.Fatalf("unexpected request settings: %+v", request)
+	}
+	if request.System != systemPrompt || request.User != "rendered prompt" {
+		t.Fatalf("unexpected prompts: %+v", request)
+	}
+	if snapshot.ProviderID != cfg.ID || snapshot.APIType != cfg.APIType || snapshot.MaxTokens != request.MaxTokens {
+		t.Fatalf("unexpected request snapshot: %+v", snapshot)
+	}
+}
+
+func TestMessageSnapshotOmitsInternalMediaFields(t *testing.T) {
+	snapshot := domainaidigest.NewMessageSnapshot(&domainmessage.NormalizedMessage{
+		ID: 10, SourceID: 2, Text: "original text",
+		Media: []domainmessage.Media{{
+			Type: "image", FileName: "cover.jpg", LocalPath: "D:/private/cover.jpg",
+			StorageKey: "internal/object", DownloadError: "token=secret",
+		}},
+		RawPayload: []byte(`{"secret":"value"}`),
+	})
+	if snapshot == nil || snapshot.Text != "original text" || len(snapshot.Media) != 1 {
+		t.Fatalf("unexpected snapshot: %+v", snapshot)
+	}
+	if snapshot.Media[0].FileName != "cover.jpg" {
+		t.Fatalf("safe media metadata should be preserved: %+v", snapshot.Media[0])
 	}
 }
 

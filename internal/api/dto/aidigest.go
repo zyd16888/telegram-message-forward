@@ -257,15 +257,27 @@ type AIDigestRunItemDTO struct {
 }
 
 type AIDigestMessageRefDTO struct {
-	ID          int64                 `json:"id"`
-	SourceID    int64                 `json:"source_id"`
-	MessageType string                `json:"message_type"`
-	SenderName  string                `json:"sender_name,omitempty"`
-	Text        string                `json:"text,omitempty"`
-	OriginalURL string                `json:"original_url,omitempty"`
-	SentAt      *time.Time            `json:"sent_at,omitempty"`
-	ReceivedAt  time.Time             `json:"received_at"`
-	Media       []domainmessage.Media `json:"media,omitempty"`
+	ID                int64                         `json:"id"`
+	SourceID          int64                         `json:"source_id"`
+	ExternalMessageID int64                         `json:"external_message_id,omitempty"`
+	GroupedID         *int64                        `json:"grouped_id,omitempty"`
+	MessageType       string                        `json:"message_type"`
+	SenderPeerType    string                        `json:"sender_peer_type,omitempty"`
+	SenderID          int64                         `json:"sender_id,omitempty"`
+	SenderName        string                        `json:"sender_name,omitempty"`
+	Text              string                        `json:"text,omitempty"`
+	OriginalURL       string                        `json:"original_url,omitempty"`
+	SentAt            *time.Time                    `json:"sent_at,omitempty"`
+	ReceivedAt        time.Time                     `json:"received_at"`
+	CreatedAt         time.Time                     `json:"created_at"`
+	Media             []domainaidigest.MessageMedia `json:"media,omitempty"`
+	Links             []domainmessage.Link          `json:"links,omitempty"`
+}
+
+type AIDigestRequestAuditDTO struct {
+	SystemPrompt  string                       `json:"system_prompt"`
+	UserPrompt    string                       `json:"user_prompt"`
+	RequestConfig domainaidigest.RequestConfig `json:"request_config"`
 }
 
 type AIDigestOutputDTO struct {
@@ -279,9 +291,10 @@ type AIDigestOutputDTO struct {
 }
 
 type AIDigestRunDetailDTO struct {
-	Run    AIDigestRunDTO       `json:"run"`
-	Items  []AIDigestRunItemDTO `json:"items"`
-	Output *AIDigestOutputDTO   `json:"output,omitempty"`
+	Run     AIDigestRunDTO           `json:"run"`
+	Items   []AIDigestRunItemDTO     `json:"items"`
+	Output  *AIDigestOutputDTO       `json:"output,omitempty"`
+	Request *AIDigestRequestAuditDTO `json:"request,omitempty"`
 }
 
 func NewAIDigestRunDetailDTO(d *domainaidigest.RunDetail) AIDigestRunDetailDTO {
@@ -294,17 +307,17 @@ func NewAIDigestRunDetailDTO(d *domainaidigest.RunDetail) AIDigestRunDetailDTO {
 			Reason:    item.Reason,
 			SortOrder: item.SortOrder,
 		}
-		if item.Message != nil {
+		snapshot := item.MessageSnapshot
+		if snapshot == nil {
+			snapshot = domainaidigest.NewMessageSnapshot(item.Message)
+		}
+		if snapshot != nil {
 			dto.Message = &AIDigestMessageRefDTO{
-				ID:          item.Message.ID,
-				SourceID:    item.Message.SourceID,
-				MessageType: item.Message.MessageType,
-				SenderName:  item.Message.SenderName,
-				Text:        item.Message.Text,
-				OriginalURL: item.Message.OriginalURL,
-				SentAt:      item.Message.SentAt,
-				ReceivedAt:  item.Message.ReceivedAt,
-				Media:       item.Message.Media,
+				ID: snapshot.ID, SourceID: snapshot.SourceID, ExternalMessageID: snapshot.ExternalMessageID,
+				GroupedID: snapshot.GroupedID, MessageType: snapshot.MessageType, SenderPeerType: snapshot.SenderPeerType,
+				SenderID: snapshot.SenderID, SenderName: snapshot.SenderName, Text: snapshot.Text,
+				OriginalURL: snapshot.OriginalURL, SentAt: snapshot.SentAt, ReceivedAt: snapshot.ReceivedAt,
+				CreatedAt: snapshot.CreatedAt, Media: snapshot.Media, Links: snapshot.Links,
 			}
 		}
 		items = append(items, dto)
@@ -321,9 +334,16 @@ func NewAIDigestRunDetailDTO(d *domainaidigest.RunDetail) AIDigestRunDetailDTO {
 			CreatedAt: d.Output.CreatedAt,
 		}
 	}
+	var request *AIDigestRequestAuditDTO
+	if d.Run.SystemPrompt != "" || d.Run.UserPrompt != "" {
+		request = &AIDigestRequestAuditDTO{
+			SystemPrompt: d.Run.SystemPrompt, UserPrompt: d.Run.UserPrompt, RequestConfig: d.Run.RequestConfig,
+		}
+	}
 	return AIDigestRunDetailDTO{
-		Run:    NewAIDigestRunDTO(d.Run),
-		Items:  items,
-		Output: out,
+		Run:     NewAIDigestRunDTO(d.Run),
+		Items:   items,
+		Output:  out,
+		Request: request,
 	}
 }

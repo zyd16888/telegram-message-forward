@@ -151,6 +151,9 @@ type Run struct {
 	ProviderID        string
 	ProviderName      string
 	ModelName         string
+	SystemPrompt      string
+	UserPrompt        string
+	RequestConfig     RequestConfig
 	TokenUsage        TokenUsage
 	Error             string
 	StartedAt         *time.Time
@@ -159,14 +162,74 @@ type Run struct {
 }
 
 type RunItem struct {
-	RunID     int64
-	MessageID int64
-	SourceID  int64
-	Included  bool
-	Reason    string
-	Score     *float64
-	SortOrder int
-	Message   *domainmessage.NormalizedMessage
+	RunID           int64
+	MessageID       int64
+	SourceID        int64
+	Included        bool
+	Reason          string
+	Score           *float64
+	SortOrder       int
+	Message         *domainmessage.NormalizedMessage
+	MessageSnapshot *MessageSnapshot
+}
+
+type RequestConfig struct {
+	ProviderID   string  `json:"provider_id,omitempty"`
+	ProviderName string  `json:"provider_name,omitempty"`
+	APIType      string  `json:"api_type,omitempty"`
+	Model        string  `json:"model,omitempty"`
+	Temperature  float64 `json:"temperature,omitempty"`
+	MaxTokens    int     `json:"max_tokens,omitempty"`
+}
+
+type MessageSnapshot struct {
+	ID                int64                `json:"id"`
+	SourceID          int64                `json:"source_id"`
+	ExternalMessageID int64                `json:"external_message_id,omitempty"`
+	GroupedID         *int64               `json:"grouped_id,omitempty"`
+	MessageType       string               `json:"message_type"`
+	SenderPeerType    string               `json:"sender_peer_type,omitempty"`
+	SenderID          int64                `json:"sender_id,omitempty"`
+	SenderName        string               `json:"sender_name,omitempty"`
+	Text              string               `json:"text,omitempty"`
+	Media             []MessageMedia       `json:"media,omitempty"`
+	Links             []domainmessage.Link `json:"links,omitempty"`
+	OriginalURL       string               `json:"original_url,omitempty"`
+	SentAt            *time.Time           `json:"sent_at,omitempty"`
+	ReceivedAt        time.Time            `json:"received_at"`
+	CreatedAt         time.Time            `json:"created_at"`
+}
+
+type MessageMedia struct {
+	Type      string `json:"type"`
+	URL       string `json:"url,omitempty"`
+	RemoteURL string `json:"remote_url,omitempty"`
+	FileName  string `json:"file_name,omitempty"`
+	MimeType  string `json:"mime_type,omitempty"`
+	Size      int64  `json:"size,omitempty"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Caption   string `json:"caption,omitempty"`
+}
+
+func NewMessageSnapshot(message *domainmessage.NormalizedMessage) *MessageSnapshot {
+	if message == nil {
+		return nil
+	}
+	media := make([]MessageMedia, 0, len(message.Media))
+	for _, item := range message.Media {
+		media = append(media, MessageMedia{
+			Type: item.Type, URL: item.URL, RemoteURL: item.RemoteURL, FileName: item.FileName,
+			MimeType: item.MimeType, Size: item.Size, Width: item.Width, Height: item.Height, Caption: item.Caption,
+		})
+	}
+	return &MessageSnapshot{
+		ID: message.ID, SourceID: message.SourceID, ExternalMessageID: message.ExternalMessageID,
+		GroupedID: message.GroupedID, MessageType: message.MessageType, SenderPeerType: message.SenderPeerType,
+		SenderID: message.SenderID, SenderName: message.SenderName, Text: message.Text, Media: media,
+		Links: append([]domainmessage.Link(nil), message.Links...), OriginalURL: message.OriginalURL,
+		SentAt: message.SentAt, ReceivedAt: message.ReceivedAt, CreatedAt: message.CreatedAt,
+	}
 }
 
 type Output struct {

@@ -681,19 +681,19 @@ func (s *Service) runAI(ctx context.Context, p *domainaidigest.Profile, run *dom
 		return nil, err
 	}
 	userPrompt := s.buildPrompt(ctx, p, run, included)
+	request, requestConfig := buildGenerateRequest(p, cfg, userPrompt)
+	run.ProviderID = cfg.ID
+	run.ProviderName = cfg.Name
+	run.ModelName = request.Model
+	run.SystemPrompt = request.System
+	run.UserPrompt = request.User
+	run.RequestConfig = requestConfig
 	client := s.providerClient(cfg, apiKey)
-	res, err := client.Generate(ctx, ai.GenerateRequest{
-		Model:       firstNonEmpty(p.ModelConfig.Model, cfg.Model),
-		System:      systemPrompt,
-		User:        userPrompt,
-		Temperature: firstPositiveFloat(p.ModelConfig.Temperature, cfg.DefaultTemperature),
-	})
+	res, err := client.Generate(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	run.ProviderID = cfg.ID
-	run.ProviderName = cfg.Name
-	run.ModelName = firstNonEmpty(res.Model, p.ModelConfig.Model, cfg.Model)
+	run.ModelName = firstNonEmpty(res.Model, request.Model)
 	run.TokenUsage = res.Usage
 	output := &domainaidigest.Output{
 		RunID:       run.ID,
@@ -713,6 +713,20 @@ func (s *Service) runAI(ctx context.Context, p *domainaidigest.Profile, run *dom
 		run.DeliveryTaskIDs = ids
 	}
 	return &domainaidigest.RunDetail{Run: run, Items: items, Output: output}, nil
+}
+
+func buildGenerateRequest(p *domainaidigest.Profile, cfg domainaidigest.ProviderConfig, userPrompt string) (ai.GenerateRequest, domainaidigest.RequestConfig) {
+	request := ai.GenerateRequest{
+		Model:       firstNonEmpty(p.ModelConfig.Model, cfg.Model),
+		System:      systemPrompt,
+		User:        userPrompt,
+		Temperature: firstPositiveFloat(p.ModelConfig.Temperature, cfg.DefaultTemperature),
+		MaxTokens:   p.ModelConfig.MaxTokens,
+	}
+	return request, domainaidigest.RequestConfig{
+		ProviderID: cfg.ID, ProviderName: cfg.Name, APIType: cfg.APIType,
+		Model: request.Model, Temperature: request.Temperature, MaxTokens: request.MaxTokens,
+	}
 }
 
 func (s *Service) createDeliveryTasks(ctx context.Context, p *domainaidigest.Profile, run *domainaidigest.Run, out *domainaidigest.Output) ([]int64, error) {
@@ -764,7 +778,10 @@ func (s *Service) filterMessages(ctx context.Context, p *domainaidigest.Profile,
 	included := make([]*domainmessage.NormalizedMessage, 0, len(msgs))
 	seen := map[string]struct{}{}
 	for i, msg := range msgs {
-		item := &domainaidigest.RunItem{RunID: runID, MessageID: msg.ID, SourceID: msg.SourceID, Included: false, SortOrder: i, Message: msg}
+		item := &domainaidigest.RunItem{
+			RunID: runID, MessageID: msg.ID, SourceID: msg.SourceID, Included: false, SortOrder: i,
+			Message: msg, MessageSnapshot: domainaidigest.NewMessageSnapshot(msg),
+		}
 		reason := ""
 		text := strings.TrimSpace(msg.Text)
 		if text == "" && len(msg.Media) == 0 {

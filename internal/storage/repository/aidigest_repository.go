@@ -214,6 +214,9 @@ func (r *AIDigestRepository) UpdateRun(ctx context.Context, run *domainaidigest.
 			"provider_id":         m.ProviderID,
 			"provider_name":       m.ProviderName,
 			"model_name":          m.ModelName,
+			"system_prompt":       m.SystemPrompt,
+			"user_prompt":         m.UserPrompt,
+			"request_config":      m.RequestConfig,
 			"token_usage":         m.TokenUsage,
 			"error":               m.Error,
 			"started_at":          m.StartedAt,
@@ -232,6 +235,7 @@ func (r *AIDigestRepository) HasRunningRun(ctx context.Context, profileID int64)
 func (r *AIDigestRepository) LastExecutionRun(ctx context.Context, profileID int64) (*domainaidigest.Run, error) {
 	var m model.AIDigestRun
 	if err := r.db.WithContext(ctx).
+		Omit("system_prompt", "user_prompt", "request_config").
 		Where("profile_id = ? AND trigger_type <> ?", profileID, string(domainaidigest.TriggerPreview)).
 		Order("id DESC").
 		First(&m).Error; err != nil {
@@ -246,6 +250,7 @@ func (r *AIDigestRepository) LastExecutionRun(ctx context.Context, profileID int
 func (r *AIDigestRepository) LastSuccessfulRun(ctx context.Context, profileID int64) (*domainaidigest.Run, error) {
 	var m model.AIDigestRun
 	if err := r.db.WithContext(ctx).
+		Omit("system_prompt", "user_prompt", "request_config").
 		Where("profile_id = ? AND status = ?", profileID, string(domainaidigest.RunSuccess)).
 		Order("window_end DESC, id DESC").
 		First(&m).Error; err != nil {
@@ -261,7 +266,9 @@ func (r *AIDigestRepository) ListRuns(ctx context.Context, profileID int64, limi
 	if limit <= 0 {
 		limit = 50
 	}
-	db := r.db.WithContext(ctx).Order("id DESC").Limit(limit).Offset(offset)
+	db := r.db.WithContext(ctx).
+		Omit("system_prompt", "user_prompt", "request_config").
+		Order("id DESC").Limit(limit).Offset(offset)
 	if profileID > 0 {
 		db = db.Where("profile_id = ?", profileID)
 	}
@@ -294,14 +301,23 @@ func (r *AIDigestRepository) AddRunItems(ctx context.Context, items []*domainaid
 	}
 	ms := make([]model.AIDigestRunItem, 0, len(items))
 	for _, item := range items {
+		snapshot := item.MessageSnapshot
+		if snapshot == nil {
+			snapshot = domainaidigest.NewMessageSnapshot(item.Message)
+		}
+		snapshotJSON, err := marshalJSON(snapshot)
+		if err != nil {
+			return err
+		}
 		ms = append(ms, model.AIDigestRunItem{
-			RunID:     item.RunID,
-			MessageID: item.MessageID,
-			SourceID:  item.SourceID,
-			Included:  item.Included,
-			Reason:    item.Reason,
-			Score:     item.Score,
-			SortOrder: item.SortOrder,
+			RunID:           item.RunID,
+			MessageID:       item.MessageID,
+			SourceID:        item.SourceID,
+			Included:        item.Included,
+			Reason:          item.Reason,
+			Score:           item.Score,
+			SortOrder:       item.SortOrder,
+			MessageSnapshot: snapshotJSON,
 		})
 	}
 	return r.db.WithContext(ctx).Create(&ms).Error
@@ -317,15 +333,11 @@ func (r *AIDigestRepository) ListRunItems(ctx context.Context, runID int64) ([]*
 	}
 	out := make([]*domainaidigest.RunItem, 0, len(rows))
 	for i := range rows {
-		var mm model.Message
-		if err := r.db.WithContext(ctx).First(&mm, rows[i].MessageID).Error; err != nil {
+		var snapshot domainaidigest.MessageSnapshot
+		if err := unmarshalJSON(rows[i].MessageSnapshot, &snapshot); err != nil {
 			return nil, err
 		}
-		msg, err := toMessageDomain(&mm)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, &domainaidigest.RunItem{
+		item := &domainaidigest.RunItem{
 			RunID:     rows[i].RunID,
 			MessageID: rows[i].MessageID,
 			SourceID:  rows[i].SourceID,
@@ -333,8 +345,11 @@ func (r *AIDigestRepository) ListRunItems(ctx context.Context, runID int64) ([]*
 			Reason:    rows[i].Reason,
 			Score:     rows[i].Score,
 			SortOrder: rows[i].SortOrder,
-			Message:   msg,
-		})
+		}
+		if snapshot.ID > 0 {
+			item.MessageSnapshot = &snapshot
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -491,6 +506,10 @@ func toAIDigestRunModel(r *domainaidigest.Run) (*model.AIDigestRun, error) {
 	if err != nil {
 		return nil, err
 	}
+	requestConfig, err := marshalJSON(r.RequestConfig)
+	if err != nil {
+		return nil, err
+	}
 	return &model.AIDigestRun{
 		ID:                r.ID,
 		ProfileID:         nullablePositive(r.ProfileID),
@@ -505,6 +524,9 @@ func toAIDigestRunModel(r *domainaidigest.Run) (*model.AIDigestRun, error) {
 		ProviderID:        r.ProviderID,
 		ProviderName:      r.ProviderName,
 		ModelName:         r.ModelName,
+		SystemPrompt:      r.SystemPrompt,
+		UserPrompt:        r.UserPrompt,
+		RequestConfig:     requestConfig,
 		TokenUsage:        usage,
 		Error:             r.Error,
 		StartedAt:         r.StartedAt,
@@ -529,11 +551,16 @@ func toAIDigestRunDomain(m *model.AIDigestRun) (*domainaidigest.Run, error) {
 	r.ProviderID = m.ProviderID
 	r.ProviderName = m.ProviderName
 	r.ModelName = m.ModelName
+	r.SystemPrompt = m.SystemPrompt
+	r.UserPrompt = m.UserPrompt
 	r.Error = m.Error
 	r.StartedAt = m.StartedAt
 	r.FinishedAt = m.FinishedAt
 	r.CreatedAt = m.CreatedAt
 	if err := unmarshalJSON(m.DeliveryTaskIDs, &r.DeliveryTaskIDs); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(m.RequestConfig, &r.RequestConfig); err != nil {
 		return nil, err
 	}
 	if err := unmarshalJSON(m.TokenUsage, &r.TokenUsage); err != nil {
