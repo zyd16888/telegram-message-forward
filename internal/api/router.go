@@ -28,6 +28,7 @@ type Deps struct {
 	Flow           *handler.FlowHandler
 	Filter         *handler.FilterHandler
 	Delivery       *handler.DeliveryHandler
+	Message        *handler.MessageHandler
 	AIDigest       *handler.AIDigestHandler
 	Token          *handler.TokenHandler
 	TelegramConfig *handler.TelegramConfigHandler
@@ -163,6 +164,14 @@ func NewRouter(deps Deps) *gin.Engine {
 			deliveries.POST("/retry-dead", deps.Delivery.RetryDeadBatch)
 			deliveries.GET("/:id", deps.Delivery.Get)
 			deliveries.POST("/:id/retry", deps.Delivery.Retry)
+		}
+
+		if deps.Message != nil {
+			messages := v1.Group("/messages")
+			{
+				messages.GET("", deps.Message.List)
+				messages.GET("/:id", deps.Message.Get)
+			}
 		}
 
 		if deps.AIDigest != nil {

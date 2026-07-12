@@ -21,6 +21,7 @@ import (
 	appfilter "telegram-message-forward/internal/app/filter"
 	appflow "telegram-message-forward/internal/app/flow"
 	appingest "telegram-message-forward/internal/app/ingest"
+	appmessage "telegram-message-forward/internal/app/message"
 	appsettings "telegram-message-forward/internal/app/settings"
 	appsink "telegram-message-forward/internal/app/sink"
 	appsource "telegram-message-forward/internal/app/source"
@@ -192,6 +193,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Flows:     flows,
 		Templates: templates,
 	})
+	messageSvc := appmessage.NewService(messages)
 	aiDigestSvc := appaidigest.NewService(appaidigest.Deps{
 		Repo:     aiDigests,
 		Settings: settingsRepo,
@@ -298,6 +300,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Flow:           handler.NewFlowHandler(flowSvc),
 		Filter:         handler.NewFilterHandler(filterSvc),
 		Delivery:       handler.NewDeliveryHandler(deliverySvc),
+		Message:        handler.NewMessageHandler(messageSvc),
 		AIDigest:       handler.NewAIDigestHandler(aiDigestSvc),
 		Token:          handler.NewTokenHandler(tokenSvc),
 		TelegramConfig: handler.NewTelegramConfigHandler(tgConfigSvc),

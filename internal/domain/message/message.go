@@ -58,3 +58,68 @@ type Repository interface {
 	GetByID(ctx context.Context, id int64) (*NormalizedMessage, error)
 	ExistsByExternalID(ctx context.Context, sourceID, externalMessageID int64) (bool, error)
 }
+
+// Query 是消息中心的只读查询条件。BeforeID 用于按消息 ID 倒序游标分页。
+type Query struct {
+	SourceID       int64
+	SourceType     string
+	MessageType    string
+	Keyword        string
+	HasMedia       *bool
+	DeliveryStatus string
+	From           *time.Time
+	To             *time.Time
+	BeforeID       int64
+	Limit          int
+}
+
+// DeliveryCounts 汇总一条消息关联的投递任务状态。
+type DeliveryCounts struct {
+	Total      int64
+	Pending    int64
+	Processing int64
+	Success    int64
+	Failed     int64
+	Retrying   int64
+	Dead       int64
+	Cancelled  int64
+}
+
+// ListItem 是消息中心列表所需的消息、来源和投递摘要。
+type ListItem struct {
+	Message        *NormalizedMessage
+	SourceName     string
+	SourceType     string
+	SourceUsername string
+	Deliveries     DeliveryCounts
+}
+
+// DeliveryRef 是消息详情中的精简投递引用。
+type DeliveryRef struct {
+	ID           int64
+	SinkID       int64
+	SinkName     string
+	SinkType     string
+	OriginType   string
+	OriginID     int64
+	OriginNodeID int64
+	FlowName     string
+	Status       string
+	AttemptCount int
+	MaxAttempts  int
+	LastError    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// Detail 是消息中心详情，不包含 raw_payload。
+type Detail struct {
+	Item       *ListItem
+	Deliveries []DeliveryRef
+}
+
+// QueryRepository 是消息中心使用的只读仓储接口，与实时采集写入契约分离。
+type QueryRepository interface {
+	List(ctx context.Context, q Query) ([]ListItem, bool, error)
+	GetDetail(ctx context.Context, id int64) (*Detail, error)
+}
