@@ -4,10 +4,12 @@ import type { AIDigestRunDetail } from '@/types'
 import AIDigestMessagesPanel from '@/components/ai/AIDigestMessagesPanel.vue'
 import AIDigestRequestPanel from '@/components/ai/AIDigestRequestPanel.vue'
 import AIDigestMediaAuditPanel from '@/components/ai/AIDigestMediaAuditPanel.vue'
+import { formatDateTime, formatDuration } from '@/utils/datetime'
 
 const props = defineProps<{
   detail: AIDigestRunDetail | null
   loading?: boolean
+  timeZone?: string
 }>()
 
 const tokenTotal = computed(() => props.detail?.run.token_usage.total_tokens ?? 0)
@@ -42,11 +44,6 @@ const deliveryTaskText = computed(() => {
   const ids = props.detail?.run.delivery_task_ids ?? []
   return ids.length ? ids.join(', ') : '-'
 })
-
-function formatTime(value?: string): string {
-  if (!value) return '-'
-  return value.replace('T', ' ').replace(/\.\d+(Z)?$/, '$1')
-}
 
 </script>
 
@@ -110,7 +107,7 @@ function formatTime(value?: string): string {
           </NTabPane>
 
           <NTabPane name="messages" :tab="`原文与过滤（${detail.items.length}）`">
-            <AIDigestMessagesPanel :items="detail.items" />
+            <AIDigestMessagesPanel :items="detail.items" :time-zone="timeZone" />
           </NTabPane>
 
           <NTabPane name="diagnostics" tab="运行诊断">
@@ -118,7 +115,7 @@ function formatTime(value?: string): string {
               <NDescriptionsItem label="Run ID">{{ detail.run.id }}</NDescriptionsItem>
               <NDescriptionsItem label="触发方式">{{ detail.run.trigger_type }}</NDescriptionsItem>
               <NDescriptionsItem label="窗口">
-                {{ formatTime(detail.run.window_start) }} - {{ formatTime(detail.run.window_end) }}
+                {{ formatDateTime(detail.run.window_start, { timeZone }) }} - {{ formatDateTime(detail.run.window_end, { timeZone }) }}
               </NDescriptionsItem>
               <NDescriptionsItem label="输入/纳入/排除">
                 {{ detail.run.input_message_count }} / {{ detail.run.included_count }} / {{ detail.run.excluded_count }}
@@ -126,7 +123,10 @@ function formatTime(value?: string): string {
               <NDescriptionsItem label="Prompt Tokens">{{ detail.run.token_usage.prompt_tokens ?? '-' }}</NDescriptionsItem>
               <NDescriptionsItem label="Completion Tokens">{{ detail.run.token_usage.completion_tokens ?? '-' }}</NDescriptionsItem>
               <NDescriptionsItem label="投递任务">{{ deliveryTaskText }}</NDescriptionsItem>
-              <NDescriptionsItem label="完成时间">{{ formatTime(detail.run.finished_at) }}</NDescriptionsItem>
+              <NDescriptionsItem label="开始时间">{{ formatDateTime(detail.run.started_at, { timeZone }) }}</NDescriptionsItem>
+              <NDescriptionsItem label="完成时间">{{ formatDateTime(detail.run.finished_at, { timeZone }) }}</NDescriptionsItem>
+              <NDescriptionsItem label="执行耗时">{{ formatDuration(detail.run.started_at, detail.run.finished_at) }}</NDescriptionsItem>
+              <NDescriptionsItem label="展示时区">{{ timeZone || '浏览器时区' }}</NDescriptionsItem>
             </NDescriptions>
             <NCard v-if="rawResponseText" title="原始响应" size="small" class="raw-card">
               <NCode :code="rawResponseText" language="json" word-wrap />

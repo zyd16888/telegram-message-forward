@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { AIDigestSchedule } from '@/types'
+import { formatDateTime, resolvedTimeZone } from '@/utils/datetime'
 
 const props = defineProps<{
   schedule: AIDigestSchedule
@@ -24,17 +25,10 @@ const nextTimestamp = computed(() => {
 
 const nextRunLabel = computed(() => {
   if (nextTimestamp.value === null) return '下次执行 --'
-  const options: Intl.DateTimeFormatOptions = {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }
-  if (props.schedule.timezone) options.timeZone = props.schedule.timezone
-  return `下次执行 ${new Intl.DateTimeFormat('zh-CN', options).format(nextTimestamp.value)}`
+  return `下次执行 ${formatDateTime(props.schedule.next_run_at, { timeZone: props.schedule.timezone, seconds: false })}`
 })
+
+const timeZoneLabel = computed(() => resolvedTimeZone(props.schedule.timezone))
 
 const relativeLabel = computed(() => {
   if (nextTimestamp.value === null) return ''
@@ -56,6 +50,7 @@ const isDue = computed(() => nextTimestamp.value !== null && nextTimestamp.value
     <span class="next-run" :class="{ due: isDue }">
       {{ nextRunLabel }}<template v-if="relativeLabel"> · {{ relativeLabel }}</template>
     </span>
+    <span v-if="nextTimestamp !== null" class="timezone-label">{{ timeZoneLabel }}</span>
   </div>
 </template>
 
@@ -76,6 +71,11 @@ const isDue = computed(() => nextTimestamp.value !== null && nextTimestamp.value
   color: var(--clay-text-3);
   font-size: 12px;
   line-height: 1.4;
+}
+
+.timezone-label {
+  color: var(--clay-text-3);
+  font-size: 11px;
 }
 
 .next-run.due {

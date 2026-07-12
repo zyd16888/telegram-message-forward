@@ -50,8 +50,7 @@ const form = reactive<AIDigestProfileRequest>({
   schedule: { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai', cron: '0 9 * * *' },
   window: { type: 'last_duration', duration_minutes: 60 },
   dedupe: { enabled: true },
-  prompt_template:
-    '请整理以下窗口内的消息，严格按照输出结构模板组织内容。\n\n输出结构模板：\n{{output_template}}\n\n{{messages}}\n\n输出格式：{{output_format}}',
+  prompt_template: '',
   output_format: 'markdown',
   output_template_id: 0,
   output_template: defaultOutputTemplate(),
@@ -165,8 +164,7 @@ function reset(): void {
     form.schedule = { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai', cron: '0 9 * * *' }
     form.window = { type: 'last_duration', duration_minutes: 60 }
     form.dedupe = { enabled: true }
-    form.prompt_template =
-      '请整理以下窗口内的消息，严格按照输出结构模板组织内容。\n\n输出结构模板：\n{{output_template}}\n\n{{messages}}\n\n输出格式：{{output_format}}'
+    form.prompt_template = defaultPromptTemplate()
     form.output_format = 'markdown'
     form.output_template_id = props.templates[0]?.id ?? 0
     form.output_template = defaultOutputTemplate()
@@ -202,6 +200,12 @@ function reset(): void {
     limits: { ...props.profile.limits },
     multimodal: { ...props.profile.multimodal },
   })
+}
+
+function defaultPromptTemplate(): string {
+  return props.presets.find((item) => item.id === 'group_digest')?.prompt_template
+    ?? props.presets[0]?.prompt_template
+    ?? ''
 }
 
 watch(

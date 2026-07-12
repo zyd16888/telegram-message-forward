@@ -1,18 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { AIDigestRunItem } from '@/types'
+import { formatDateTime } from '@/utils/datetime'
 
 const props = defineProps<{
   items: AIDigestRunItem[]
+  timeZone?: string
 }>()
 
 const included = computed(() => props.items.filter((item) => item.included))
 const excluded = computed(() => props.items.filter((item) => !item.included))
-
-function formatTime(value?: string): string {
-  if (!value) return '-'
-  return value.replace('T', ' ').replace(/\.\d+(Z)?$/, '$1')
-}
 
 function reasonLabel(reason?: string): string {
   const labels: Record<string, string> = {
@@ -32,7 +29,7 @@ function sourceMeta(item: AIDigestRunItem): string {
   const fields = [`#${item.sort_order + 1}`, `Source ${item.source_id}`]
   if (message?.external_message_id) fields.push(`消息 ${message.external_message_id}`)
   if (message?.sender_name) fields.push(message.sender_name)
-  fields.push(formatTime(message?.sent_at || message?.received_at))
+  fields.push(formatDateTime(message?.sent_at || message?.received_at, { timeZone: props.timeZone }))
   return fields.join(' · ')
 }
 </script>

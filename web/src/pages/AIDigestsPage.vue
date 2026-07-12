@@ -24,6 +24,7 @@ import AIDigestProfileForm from '@/components/ai/AIDigestProfileForm.vue'
 import AIDigestTemplateForm from '@/components/ai/AIDigestTemplateForm.vue'
 import AIDigestRunDetail from '@/components/ai/AIDigestRunDetail.vue'
 import AIDigestScheduleStatus from '@/components/ai/AIDigestScheduleStatus.vue'
+import { formatDateTime, formatDateTimeTitle, formatDuration, runDisplayTime } from '@/utils/datetime'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -61,6 +62,7 @@ const runsLoading = ref(false)
 const selectedDetail = ref<AIDigestRunDetailType | null>(null)
 const showDetail = ref(false)
 const detailLoading = ref(false)
+const detailTimeZone = ref<string>()
 
 const providerForm = reactive<AIProviderRequest>(defaultProviderForm())
 
@@ -114,7 +116,17 @@ const profileColumns: DataTableColumns<AIDigestProfile> = [
     render: (row) => {
       const run = row.recent_run
       if (!run) return h(NText, { depth: 3 }, { default: () => '—' })
-      return h(NTag, { size: 'small', type: runStatusType(run.status), bordered: false }, { default: () => `${runStatusLabel(run.status)} · ${run.created_at}` })
+      const value = runDisplayTime(run)
+      return h(
+        'div',
+        { class: 'recent-run', title: formatDateTimeTitle(value, row.schedule.timezone) },
+        [
+          h(NTag, { size: 'small', type: runStatusType(run.status), bordered: false }, { default: () => runStatusLabel(run.status) }),
+          h('span', formatDateTime(value, { timeZone: row.schedule.timezone, seconds: false })),
+          run.finished_at ? h('small', `耗时 ${formatDuration(run.started_at, run.finished_at)}`) : null,
+          run.error ? h('small', { class: 'recent-error', title: run.error }, run.error) : null,
+        ],
+      )
     },
   },
   {
@@ -455,6 +467,7 @@ async function previewDraft(payload: AIDigestProfileRequest): Promise<void> {
   detailLoading.value = true
   selectedDetail.value = null
   showDetail.value = true
+  detailTimeZone.value = payload.schedule.timezone
   try {
     selectedDetail.value = await aiApi.profiles.previewDraft(payload)
   } catch (e) {
@@ -469,6 +482,7 @@ async function previewProfile(profile: AIDigestProfile): Promise<void> {
   detailLoading.value = true
   selectedDetail.value = null
   showDetail.value = true
+  detailTimeZone.value = profile.schedule.timezone
   try {
     selectedDetail.value = await aiApi.profiles.preview(profile.id)
   } catch (e) {
@@ -482,6 +496,7 @@ async function runProfile(profile: AIDigestProfile): Promise<void> {
   detailLoading.value = true
   selectedDetail.value = null
   showDetail.value = true
+  detailTimeZone.value = profile.schedule.timezone
   try {
     selectedDetail.value = await aiApi.profiles.run(profile.id)
     await loadAll()
@@ -534,6 +549,7 @@ async function openRun(id: number): Promise<void> {
   detailLoading.value = true
   selectedDetail.value = null
   showDetail.value = true
+  detailTimeZone.value = runsProfile.value?.schedule.timezone
   try {
     selectedDetail.value = await aiApi.runs.get(id)
   } catch (e) {
@@ -721,7 +737,7 @@ onBeforeUnmount(() => {
       title="AI 运行详情"
       :style="{ width: 'min(1000px, calc(100vw - 32px))' }"
     >
-      <AIDigestRunDetail :detail="selectedDetail" :loading="detailLoading" />
+      <AIDigestRunDetail :detail="selectedDetail" :loading="detailLoading" :time-zone="detailTimeZone" />
     </NModal>
 
     <!-- Provider 表单 -->
@@ -821,6 +837,26 @@ onBeforeUnmount(() => {
 .cell-title {
   font-weight: 700;
   color: var(--clay-text);
+}
+
+.recent-run {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: center;
+  min-width: 190px;
+}
+
+.recent-run small {
+  grid-column: 2;
+  color: var(--clay-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-run .recent-error {
+  color: var(--clay-error);
 }
 
 .provider-grid {
