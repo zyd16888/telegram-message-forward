@@ -482,6 +482,29 @@ export interface MediaS3TestResult {
   error?: string
 }
 
+export type BackupCounts = Record<string, number>
+
+export interface BackupManifest {
+  version: number
+  installation_id: string
+  created_at: string
+  includes_session: boolean
+  counts: BackupCounts
+}
+
+export interface BackupPreview {
+  manifest: BackupManifest
+  target_empty: boolean
+  same_installation: boolean
+  can_restore: boolean
+  warning?: string
+}
+
+export interface BackupRestoreResult {
+  counts: BackupCounts
+  restart_required: boolean
+}
+
 // --- AI 整理 ---
 
 export interface AIProvider {

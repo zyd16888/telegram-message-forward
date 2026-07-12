@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import type { ApiToken, MediaSettingsRequest } from '@/types'
 import { errText } from '@/utils/error'
 import PageHeader from '@/components/PageHeader.vue'
+import BackupRestorePanel from '@/components/settings/BackupRestorePanel.vue'
 
 const message = useMessage()
 const auth = useAuthStore()
@@ -319,6 +320,8 @@ onMounted(() => {
         {{ authStatus.desc }}
       </n-alert>
     </n-card>
+
+    <BackupRestorePanel />
 
     <n-card title="Token 管理（管理凭证维护）">
       <n-space vertical>

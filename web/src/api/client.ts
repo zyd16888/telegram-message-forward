@@ -42,6 +42,8 @@ import type {
   CursorPage,
   MessageDetail,
   MessageItem,
+  BackupPreview,
+  BackupRestoreResult,
 } from '@/types'
 
 const TOKEN_KEY = 'tmf_api_token'
@@ -386,6 +388,23 @@ export const settingsApi = {
       http.put<ApiItem<MediaSettings>>('/settings/media', body).then((r) => r.data.data),
     testS3: (body: MediaSettingsRequest) =>
       http.post<ApiItem<MediaS3TestResult>>('/settings/media/test-s3', body).then((r) => r.data.data),
+  },
+  backups: {
+    export: (password: string, includeSessions: boolean) =>
+      http.post<Blob>('/settings/backups/export', { password, include_sessions: includeSessions }, { responseType: 'blob', timeout: 120000 }),
+    inspect: (file: File, password: string) => {
+      const body = new FormData()
+      body.append('file', file)
+      body.append('password', password)
+      return http.post<ApiItem<BackupPreview>>('/settings/backups/inspect', body, { timeout: 120000 }).then((r) => r.data.data)
+    },
+    restore: (file: File, password: string) => {
+      const body = new FormData()
+      body.append('file', file)
+      body.append('password', password)
+      body.append('confirmed', 'true')
+      return http.post<ApiItem<BackupRestoreResult>>('/settings/backups/restore', body, { timeout: 120000 }).then((r) => r.data.data)
+    },
   },
 }
 
