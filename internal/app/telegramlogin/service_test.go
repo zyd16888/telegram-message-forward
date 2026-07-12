@@ -120,13 +120,20 @@ func (f *fakeRunner) SendCode(ctx context.Context, cfg infratelegram.LoginFlowCo
 }
 
 type fakeConnectionController struct {
-	stopped []int64
-	err     error
+	stopped  []int64
+	started  []int64
+	err      error
+	startErr error
 }
 
 func (f *fakeConnectionController) StopAccount(_ context.Context, accountID int64) error {
 	f.stopped = append(f.stopped, accountID)
 	return f.err
+}
+
+func (f *fakeConnectionController) StartAccount(_ context.Context, accountID int64) error {
+	f.started = append(f.started, accountID)
+	return f.startErr
 }
 func (f *fakeRunner) SignInCode(ctx context.Context, cfg infratelegram.LoginFlowConfig, _, _, _ string) (infratelegram.SignInResult, error) {
 	if f.codeErr != nil {
@@ -204,6 +211,8 @@ func TestStartDoesNotClearSessionWhenRunnerCannotStop(t *testing.T) {
 // TestPhoneLoginHappyPath 验证无 2FA 的完整登录：验证码通过后账号 active、session 为授权后 session。
 func TestPhoneLoginHappyPath(t *testing.T) {
 	svc, accounts, _, _, accID := setup(t, &fakeRunner{})
+	connections := &fakeConnectionController{}
+	svc.UseConnectionController(connections)
 	ctx := context.Background()
 
 	flow, err := svc.Start(ctx, accID)
@@ -233,6 +242,9 @@ func TestPhoneLoginHappyPath(t *testing.T) {
 	}
 	if acc.LastLoginAt == nil {
 		t.Fatal("应记录 last_login_at")
+	}
+	if len(connections.started) != 1 || connections.started[0] != accID {
+		t.Fatalf("登录成功后应恢复账号 Source，实际 %v", connections.started)
 	}
 }
 

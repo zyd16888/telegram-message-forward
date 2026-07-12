@@ -291,7 +291,7 @@ func Build(cfg *config.Config) (*App, error) {
 	tgLoginRunner := infratelegram.LoginFlowService{}
 	tgQRRunner := infratelegram.NewQRSessionManager()
 	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, tgLoginRunner, tgQRRunner, clk, log).
-		UseConnectionController(tgPlugin)
+		UseConnectionController(srcManager)
 
 	router := api.NewRouter(api.Deps{
 		Logger:         log,

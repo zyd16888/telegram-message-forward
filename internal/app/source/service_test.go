@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 
 	appingest "telegram-message-forward/internal/app/ingest"
@@ -88,6 +89,55 @@ func TestUpdateEnableReturnsStartError(t *testing.T) {
 	}
 }
 
+func TestManagerStartAccountRestoresOnlyMatchingEnabledSources(t *testing.T) {
+	repo := newFakeSourceRepo()
+	plugin := &fakeSourcePlugin{}
+	manager := NewManager(&fakeAccountRepo{}, repo, plugin, &appingest.Service{}, slog.Default())
+	for _, src := range []*domainsource.Source{
+		{AccountID: 1, Name: "account-1-enabled", Enabled: true},
+		{AccountID: 2, Name: "account-2-enabled", Enabled: true},
+		{AccountID: 1, Name: "account-1-disabled", Enabled: false},
+	} {
+		if err := repo.Create(context.Background(), src); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := manager.StartAccount(context.Background(), 1); err != nil {
+		t.Fatalf("StartAccount() error = %v", err)
+	}
+	if len(plugin.started) != 1 || plugin.started[0] != 1 {
+		t.Fatalf("只应恢复账号 1 的已启用 Source，started=%v", plugin.started)
+	}
+}
+
+func TestManagerStopAccountDelegatesToAccountRunner(t *testing.T) {
+	plugin := &fakeSourcePlugin{}
+	manager := NewManager(&fakeAccountRepo{}, newFakeSourceRepo(), plugin, &appingest.Service{}, slog.Default())
+
+	if err := manager.StopAccount(context.Background(), 7); err != nil {
+		t.Fatalf("StopAccount() error = %v", err)
+	}
+	if len(plugin.stoppedAccounts) != 1 || plugin.stoppedAccounts[0] != 7 {
+		t.Fatalf("应停止账号级 runner，stopped=%v", plugin.stoppedAccounts)
+	}
+}
+
+func TestManagerStartAccountReturnsSourceStartError(t *testing.T) {
+	repo := newFakeSourceRepo()
+	plugin := &fakeSourcePlugin{startErr: errors.New("start failed")}
+	manager := NewManager(&fakeAccountRepo{}, repo, plugin, &appingest.Service{}, slog.Default())
+	src := &domainsource.Source{AccountID: 1, Name: "source", Enabled: true}
+	if err := repo.Create(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+
+	err := manager.StartAccount(context.Background(), 1)
+	if !errors.Is(err, plugin.startErr) {
+		t.Fatalf("应返回 Source 启动错误，实际 %v", err)
+	}
+}
+
 func newTestService() (*Service, *fakeSourcePlugin, *fakeSourceRepo) {
 	repo := newFakeSourceRepo()
 	plugin := &fakeSourcePlugin{}
@@ -97,9 +147,15 @@ func newTestService() (*Service, *fakeSourcePlugin, *fakeSourceRepo) {
 }
 
 type fakeSourcePlugin struct {
-	startErr error
-	started  []int64
-	stopped  []int64
+	startErr        error
+	started         []int64
+	stopped         []int64
+	stoppedAccounts []int64
+}
+
+func (p *fakeSourcePlugin) StopAccount(_ context.Context, accountID int64) error {
+	p.stoppedAccounts = append(p.stoppedAccounts, accountID)
+	return nil
 }
 
 func (p *fakeSourcePlugin) Name() string { return "fake" }

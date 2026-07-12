@@ -55,6 +55,7 @@ type qrRunner interface {
 
 type connectionController interface {
 	StopAccount(ctx context.Context, accountID int64) error
+	StartAccount(ctx context.Context, accountID int64) error
 }
 
 // Service 是 Telegram 登录应用服务。
@@ -457,6 +458,15 @@ func (s *Service) finalize(ctx context.Context, flow *domainloginflow.Flow) (*do
 	clearSensitive(flow)
 	if err := s.flows.Update(ctx, flow); err != nil {
 		return nil, err
+	}
+	if s.connections != nil {
+		if err := s.connections.StartAccount(ctx, acc.ID); err != nil {
+			acc.LastError = "登录成功，但恢复 Source 监听失败: " + err.Error()
+			_ = s.accounts.Update(ctx, acc)
+			if s.log != nil {
+				s.log.Error("登录成功后恢复账号 Source 失败", "account", acc.ID, "err", err)
+			}
+		}
 	}
 	return flow, nil
 }

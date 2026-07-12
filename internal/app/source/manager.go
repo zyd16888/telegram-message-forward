@@ -5,6 +5,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -76,6 +77,56 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		started++
 	}
 	m.log.Info("Source 监听已启动", "count", started, "total", len(srcs))
+	return nil
+}
+
+// StartAccount 恢复指定账号下全部已启用 Source。登录成功后调用，避免必须重启服务。
+func (m *Manager) StartAccount(ctx context.Context, accountID int64) error {
+	acc, err := m.accounts.GetByID(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if acc.Status != domainaccount.StatusActive {
+		return fmt.Errorf("账号未登录: %s", acc.Status)
+	}
+	srcs, err := m.sources.ListEnabled(ctx)
+	if err != nil {
+		return err
+	}
+	started := 0
+	var startErrs []error
+	for _, src := range srcs {
+		if !sourceRequiresAccount(src) || src.AccountID != accountID {
+			continue
+		}
+		plugin, err := m.pluginForSource(src)
+		if err != nil {
+			m.log.Warn("恢复账号 Source 时插件未注册", "account", accountID, "source", src.ID, "err", err)
+			startErrs = append(startErrs, fmt.Errorf("source %d: %w", src.ID, err))
+			continue
+		}
+		if err := plugin.Start(ctx, acc, src, m.ingest.Ingest); err != nil {
+			m.log.Error("恢复账号 Source 失败", "account", accountID, "source", src.ID, "err", err)
+			startErrs = append(startErrs, fmt.Errorf("source %d: %w", src.ID, err))
+			continue
+		}
+		started++
+	}
+	m.log.Info("账号 Source 监听已恢复", "account", accountID, "count", started)
+	return errors.Join(startErrs...)
+}
+
+// StopAccount 停止指定账号的长连接，并等待连接完全退出。
+func (m *Manager) StopAccount(ctx context.Context, accountID int64) error {
+	for _, plugin := range m.plugins {
+		if stopper, ok := plugin.(interface {
+			StopAccount(context.Context, int64) error
+		}); ok {
+			if err := stopper.StopAccount(ctx, accountID); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

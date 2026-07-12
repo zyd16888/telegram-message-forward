@@ -86,6 +86,8 @@ func TestQRStartAndAuthorize(t *testing.T) {
 		{Authorized: true},
 	}
 	svc, accounts, _, _, accID := setupQR(t, qr)
+	connections := &fakeConnectionController{}
+	svc.UseConnectionController(connections)
 	ctx := context.Background()
 
 	flow, err := svc.StartQR(ctx, accID)
@@ -126,6 +128,9 @@ func TestQRStartAndAuthorize(t *testing.T) {
 	}
 	if string(acc.Session) != "qr-session-bytes" {
 		t.Fatalf("应保存 session，实际 %q", string(acc.Session))
+	}
+	if len(connections.started) != 1 || connections.started[0] != accID {
+		t.Fatalf("扫码登录成功后应恢复账号 Source，实际 %v", connections.started)
 	}
 }
 
