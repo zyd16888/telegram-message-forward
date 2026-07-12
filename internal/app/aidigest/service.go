@@ -80,18 +80,19 @@ const systemPrompt = `你是信息整理助手。只能基于用户提供的消�
 如果内容涉及财经、医疗、法律或其它高风险领域，仅做信息整理，不构成建议。`
 
 type Service struct {
-	repo     domainaidigest.Repository
-	settings domainsettings.Repository
-	messages messageWindowRepository
-	sources  domainsource.Repository
-	sinks    domainsink.Repository
-	tasks    domaindelivery.Repository
-	filters  domainfilter.Repository
-	clk      clock.Clock
-	log      *slog.Logger
-	wake     func()
-	media    mediastore.Store
-	mu       sync.Mutex
+	repo          domainaidigest.Repository
+	settings      domainsettings.Repository
+	messages      messageWindowRepository
+	sources       domainsource.Repository
+	sinks         domainsink.Repository
+	tasks         domaindelivery.Repository
+	filters       domainfilter.Repository
+	clk           clock.Clock
+	log           *slog.Logger
+	wake          func()
+	media         mediastore.Store
+	mu            sync.Mutex
+	activeCancels map[int64]context.CancelFunc
 }
 
 type Deps struct {
@@ -117,6 +118,7 @@ func NewService(deps Deps) *Service {
 		repo: deps.Repo, settings: deps.Settings, messages: deps.Messages, sources: deps.Sources,
 		sinks: deps.Sinks, tasks: deps.Tasks, filters: deps.Filters,
 		clk: deps.Clock, log: deps.Logger, wake: deps.Wake, media: deps.Media,
+		activeCancels: make(map[int64]context.CancelFunc),
 	}
 }
 
@@ -621,6 +623,36 @@ func (s *Service) GetRunDetail(ctx context.Context, id int64) (*domainaidigest.R
 	return &domainaidigest.RunDetail{Run: run, Items: items, Output: out}, nil
 }
 
+func (s *Service) CloneProfileFromRun(ctx context.Context, runID int64) (*domainaidigest.Profile, error) {
+	run, err := s.repo.GetRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := run.ProfileSnapshot
+	if snapshot == nil && run.ProfileID > 0 {
+		snapshot, err = s.repo.GetProfile(ctx, run.ProfileID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if snapshot == nil {
+		return nil, errors.New("该运行记录没有可复制的 Profile 快照")
+	}
+	clone := *snapshot
+	clone.ID = 0
+	clone.Name = strings.TrimSpace(snapshot.Name) + "（复制）"
+	clone.Enabled = false
+	clone.Schedule.NextRunAt = ""
+	clone.CreatedAt = time.Time{}
+	clone.UpdatedAt = time.Time{}
+	clone.RecentRun = nil
+	normalizeProfileDefaults(&clone)
+	if err := s.repo.CreateProfile(ctx, &clone); err != nil {
+		return nil, err
+	}
+	return s.withNextRun(ctx, &clone), nil
+}
+
 func (s *Service) CancelRun(ctx context.Context, id int64) error {
 	run, err := s.repo.GetRun(ctx, id)
 	if err != nil {
@@ -632,7 +664,11 @@ func (s *Service) CancelRun(ctx context.Context, id int64) error {
 	now := s.clk.Now()
 	run.Status = domainaidigest.RunCancelled
 	run.FinishedAt = &now
-	return s.repo.UpdateRun(ctx, run)
+	if err := s.repo.UpdateRun(ctx, run); err != nil {
+		return err
+	}
+	s.cancelActiveRun(id)
+	return nil
 }
 
 func (s *Service) CleanupRuns(ctx context.Context, retentionDays int) (int64, error) {
@@ -642,6 +678,14 @@ func (s *Service) CleanupRuns(ctx context.Context, retentionDays int) (int64, er
 	return s.repo.CleanupRuns(ctx, s.clk.Now().Add(-time.Duration(retentionDays)*24*time.Hour))
 }
 
+func (s *Service) RecoverStaleRuns(ctx context.Context, timeout time.Duration) (int64, error) {
+	if timeout <= 0 {
+		timeout = 2 * time.Hour
+	}
+	now := s.clk.Now()
+	return s.repo.RecoverStaleRuns(ctx, now.Add(-timeout), now)
+}
+
 func (s *Service) execute(ctx context.Context, p *domainaidigest.Profile, trigger domainaidigest.TriggerType, deliver bool) (*domainaidigest.RunDetail, error) {
 	if p.ID > 0 && trigger != domainaidigest.TriggerPreview {
 		running, err := s.repo.HasRunningRun(ctx, p.ID)
@@ -649,7 +693,7 @@ func (s *Service) execute(ctx context.Context, p *domainaidigest.Profile, trigge
 			return nil, err
 		}
 		if running {
-			return nil, errors.New("同一 AI Profile 已有运行中的任务")
+			return nil, domainaidigest.ErrActiveRunExists
 		}
 	}
 	start, end, err := s.resolveWindow(ctx, p)
@@ -671,12 +715,29 @@ func (s *Service) execute(ctx context.Context, p *domainaidigest.Profile, trigge
 	if err := s.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
-	detail, execErr := s.runAI(ctx, p, run, deliver)
+	runCtx, cancel := context.WithCancel(ctx)
+	s.trackActiveRun(run.ID, cancel)
+	defer func() {
+		cancel()
+		s.untrackActiveRun(run.ID)
+	}()
+	detail, execErr := s.runAI(runCtx, p, run, deliver)
 	finished := s.clk.Now()
 	run.FinishedAt = &finished
+	if current, currentErr := s.repo.GetRun(ctx, run.ID); currentErr == nil && current != nil && current.Status == domainaidigest.RunCancelled {
+		run.Status = domainaidigest.RunCancelled
+		run.Error = current.Error
+		_ = s.repo.UpdateRun(ctx, run)
+		return &domainaidigest.RunDetail{Run: run}, context.Canceled
+	}
 	if execErr != nil {
-		run.Status = domainaidigest.RunFailed
-		run.Error = execErr.Error()
+		if errors.Is(runCtx.Err(), context.Canceled) {
+			run.Status = domainaidigest.RunCancelled
+			run.Error = ""
+		} else {
+			run.Status = domainaidigest.RunFailed
+			run.Error = execErr.Error()
+		}
 		_ = s.repo.UpdateRun(ctx, run)
 		return &domainaidigest.RunDetail{Run: run}, execErr
 	}
@@ -686,6 +747,27 @@ func (s *Service) execute(ctx context.Context, p *domainaidigest.Profile, trigge
 	}
 	detail.Run = run
 	return detail, nil
+}
+
+func (s *Service) trackActiveRun(id int64, cancel context.CancelFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeCancels[id] = cancel
+}
+
+func (s *Service) untrackActiveRun(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.activeCancels, id)
+}
+
+func (s *Service) cancelActiveRun(id int64) {
+	s.mu.Lock()
+	cancel := s.activeCancels[id]
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (s *Service) runAI(ctx context.Context, p *domainaidigest.Profile, run *domainaidigest.Run, deliver bool) (*domainaidigest.RunDetail, error) {

@@ -206,6 +206,7 @@ func NewRouter(deps Deps) *gin.Engine {
 				ai.POST("/digests/:id/run", deps.AIDigest.RunProfile)
 				ai.GET("/digests/:id/runs", deps.AIDigest.ListRuns)
 				ai.GET("/runs/:id", deps.AIDigest.GetRun)
+				ai.POST("/runs/:id/clone-profile", deps.AIDigest.CloneProfileFromRun)
 				ai.POST("/runs/:id/cancel", deps.AIDigest.CancelRun)
 				ai.POST("/runs/:id/deliver", deps.AIDigest.DeliverRun)
 				ai.POST("/runs/cleanup", deps.AIDigest.CleanupRuns)

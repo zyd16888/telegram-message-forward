@@ -855,7 +855,7 @@ Dashboard 后续可增加：
 - [x] 防止同一 Profile 并发运行。
 - [x] 支持 interval 和 daily，daily 按 schedule.timezone 计算执行时刻。
 - [x] 支持 since_last_run 和 last_duration 窗口（按 received_at 划分，since_last_run 衔接上次 window_end）。
-- [~] 前端展示下一次预计运行时间和生效时区。
+- [x] 前端展示下一次预计运行时间和生效时区，并按 Profile 时区格式化历史运行与消息时间。
 
 验收：
 
@@ -869,10 +869,10 @@ Dashboard 后续可增加：
 
 目标：让 AI 整理可解释、可调优。
 
-- [~] Profile 列表展示最近运行状态、耗时、错误。
+- [x] Profile 列表展示最近运行状态、耗时、错误。
 - [x] Run 详情展示 input/included/excluded/output/token usage/delivery tasks。
-- [ ] 支持复制输出。
-- [ ] 支持从 run 复制为新的 prompt/profile。
+- [x] 支持复制输出。
+- [x] 支持从 run 快照复制为新的禁用 Profile。
 - [~] Dashboard 可选展示 AI 近 24 小时成功率和 token usage。
 - [x] 增加运行记录清理策略。
 
@@ -882,7 +882,7 @@ Dashboard 后续可增加：
 - [~] 用户能比较不同 prompt 的输出效果。
 - [x] 长期运行不会无限增长无用运行记录。
 
-进度说明（2026-07-05）：Run 详情已展示纳入/排除消息、输出和 token usage；Dashboard 已展示 AI 整理概况，但当前统计基于各 Profile 最近 run，不是完整 24 小时 run 聚合。复制输出、从 run 复制为新 prompt/profile 尚未实现。
+进度说明（2026-07-12）：Run 详情已展示窗口输入、过滤纳入、实际提交 AI、省略数、Prompt 字符数、输出、token usage 与投递状态；运行记录支持分页、复制输出和从 Run 快照复制 Profile。系统每天自动清理 30 天前记录，并通过数据库唯一索引防止同一 Profile 并发运行，超过 2 小时的僵死 Run 会自动恢复。Dashboard 当前统计仍基于各 Profile 最近 run，不是完整 24 小时 run 聚合。
 
 ## 15. 推荐提交拆分
 

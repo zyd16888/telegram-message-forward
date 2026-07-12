@@ -10,6 +10,7 @@ const show = defineModel<boolean>('show', { required: true })
 const props = defineProps<{ profile: AIDigestProfile | null }>()
 const emit = defineEmits<{
   openDetail: [id: number, timeZone?: string]
+  profileCloned: [profile: AIDigestProfile]
 }>()
 
 const message = useMessage()
@@ -49,9 +50,10 @@ const columns: DataTableColumns<AIDigestRun> = [
       : h(NText, { depth: 3 }, { default: () => '—' }),
   },
   {
-    title: '操作', key: 'actions', width: 168, fixed: 'right',
+    title: '操作', key: 'actions', width: 246, fixed: 'right',
     render: (row) => h('div', { class: 'run-actions' }, [
       h(NButton, { size: 'small', secondary: true, onClick: () => emit('openDetail', row.id, props.profile?.schedule.timezone) }, { default: () => '详情' }),
+      h(NButton, { size: 'small', secondary: true, onClick: () => cloneProfile(row) }, { default: () => '复制 Profile' }),
       h(NButton, { size: 'small', disabled: row.status !== 'success', onClick: () => deliver(row) }, { default: () => '重新投递' }),
     ]),
   },
@@ -93,6 +95,17 @@ async function deliver(run: AIDigestRun): Promise<void> {
     emit('openDetail', run.id, props.profile?.schedule.timezone)
   } catch (error) {
     message.error('重新投递失败：' + errText(error))
+  }
+}
+
+async function cloneProfile(run: AIDigestRun): Promise<void> {
+  try {
+    const profile = await aiApi.runs.cloneProfile(run.id)
+    message.success(`已创建禁用的 Profile「${profile.name}」`)
+    show.value = false
+    emit('profileCloned', profile)
+  } catch (error) {
+    message.error('复制 Profile 失败：' + errText(error))
   }
 }
 

@@ -19,6 +19,7 @@ type Scheduler struct {
 const (
 	runRetentionDays    = 30
 	maintenanceInterval = 24 * time.Hour
+	staleRunTimeout     = 2 * time.Hour
 )
 
 func NewScheduler(svc *Service, log *slog.Logger) *Scheduler {
@@ -26,6 +27,7 @@ func NewScheduler(svc *Service, log *slog.Logger) *Scheduler {
 }
 
 func (s *Scheduler) Run(ctx context.Context) {
+	s.recoverStale(ctx)
 	s.maintain(ctx)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -44,6 +46,7 @@ func (s *Scheduler) Tick(ctx context.Context) {
 }
 
 func (s *Scheduler) tick(ctx context.Context) {
+	s.recoverStale(ctx)
 	s.maintain(ctx)
 	profiles, err := s.svc.DueProfiles(ctx)
 	if err != nil {
@@ -57,6 +60,17 @@ func (s *Scheduler) tick(ctx context.Context) {
 				s.log.Warn("AI 整理定时执行失败", "profile_id", profile.ID, "err", err)
 			}
 		}()
+	}
+}
+
+func (s *Scheduler) recoverStale(ctx context.Context) {
+	recovered, err := s.svc.RecoverStaleRuns(ctx, staleRunTimeout)
+	if err != nil {
+		s.log.Warn("恢复僵死 AI 运行任务失败", "err", err)
+		return
+	}
+	if recovered > 0 {
+		s.log.Warn("已恢复僵死 AI 运行任务", "recovered", recovered)
 	}
 }
 

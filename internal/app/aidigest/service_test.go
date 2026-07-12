@@ -258,6 +258,41 @@ func TestBuildGenerateRequestUsesEffectiveModelSettings(t *testing.T) {
 	}
 }
 
+func TestCloneProfileFromRunUsesSnapshotAndDisablesSchedule(t *testing.T) {
+	repo := &memoryDigestRepo{
+		lastExecution: map[int64]*domainaidigest.Run{},
+		runs: map[int64]*domainaidigest.Run{
+			7: {
+				ID: 7,
+				ProfileSnapshot: &domainaidigest.Profile{
+					Name: "日报", Enabled: true, PromptTemplate: "original prompt",
+					Schedule: domainaidigest.ScheduleConfig{Type: "daily", Time: "09:00", Timezone: "Asia/Shanghai"},
+				},
+			},
+		},
+	}
+	svc := NewService(Deps{Repo: repo, Clock: fixedClock{now: time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC)}})
+	clone, err := svc.CloneProfileFromRun(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clone.ID == 0 || clone.Enabled || clone.Name != "日报（复制）" || clone.PromptTemplate != "original prompt" {
+		t.Fatalf("unexpected cloned profile: %+v", clone)
+	}
+}
+
+func TestCancelActiveRunCancelsRegisteredContext(t *testing.T) {
+	svc := NewService(Deps{})
+	ctx, cancel := context.WithCancel(context.Background())
+	svc.trackActiveRun(9, cancel)
+	svc.cancelActiveRun(9)
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("registered run context was not cancelled")
+	}
+}
+
 func TestMessageSnapshotOmitsInternalMediaFields(t *testing.T) {
 	snapshot := domainaidigest.NewMessageSnapshot(&domainmessage.NormalizedMessage{
 		ID: 10, SourceID: 2, Text: "original text",
@@ -317,11 +352,21 @@ func (c fixedClock) Now() time.Time { return c.now }
 type memoryDigestRepo struct {
 	profiles      []*domainaidigest.Profile
 	lastExecution map[int64]*domainaidigest.Run
+	runs          map[int64]*domainaidigest.Run
 }
 
-func (r *memoryDigestRepo) CreateProfile(context.Context, *domainaidigest.Profile) error { return nil }
+func (r *memoryDigestRepo) CreateProfile(_ context.Context, profile *domainaidigest.Profile) error {
+	profile.ID = int64(len(r.profiles) + 1)
+	r.profiles = append(r.profiles, profile)
+	return nil
+}
 func (r *memoryDigestRepo) UpdateProfile(context.Context, *domainaidigest.Profile) error { return nil }
-func (r *memoryDigestRepo) GetProfile(context.Context, int64) (*domainaidigest.Profile, error) {
+func (r *memoryDigestRepo) GetProfile(_ context.Context, id int64) (*domainaidigest.Profile, error) {
+	for _, profile := range r.profiles {
+		if profile.ID == id {
+			return profile, nil
+		}
+	}
 	return nil, nil
 }
 func (r *memoryDigestRepo) ListProfiles(context.Context) ([]*domainaidigest.Profile, error) {
@@ -359,8 +404,11 @@ func (r *memoryDigestRepo) ListRuns(context.Context, int64, int, int) ([]*domain
 	return nil, nil
 }
 func (r *memoryDigestRepo) CountRuns(context.Context, int64) (int64, error) { return 0, nil }
-func (r *memoryDigestRepo) GetRun(context.Context, int64) (*domainaidigest.Run, error) {
-	return nil, nil
+func (r *memoryDigestRepo) RecoverStaleRuns(context.Context, time.Time, time.Time) (int64, error) {
+	return 0, nil
+}
+func (r *memoryDigestRepo) GetRun(_ context.Context, id int64) (*domainaidigest.Run, error) {
+	return r.runs[id], nil
 }
 func (r *memoryDigestRepo) AddRunItems(context.Context, []*domainaidigest.RunItem) error {
 	return nil

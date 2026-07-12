@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -32,6 +33,10 @@ func (r *AIDigestRepository) CreateProfile(ctx context.Context, p *domainaidiges
 		return err
 	}
 	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_ai_digest_runs_active_profile" {
+			return domainaidigest.ErrActiveRunExists
+		}
 		return err
 	}
 	p.ID = m.ID
@@ -401,6 +406,17 @@ func (r *AIDigestRepository) GetOutputByRunID(ctx context.Context, runID int64) 
 
 func (r *AIDigestRepository) CleanupRuns(ctx context.Context, before time.Time) (int64, error) {
 	res := r.db.WithContext(ctx).Where("created_at < ?", before).Delete(&model.AIDigestRun{})
+	return res.RowsAffected, res.Error
+}
+
+func (r *AIDigestRepository) RecoverStaleRuns(ctx context.Context, before, finishedAt time.Time) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.AIDigestRun{}).
+		Where("status IN ? AND COALESCE(started_at, created_at) < ?", []string{"pending", "running"}, before).
+		Updates(map[string]any{
+			"status":      string(domainaidigest.RunFailed),
+			"finished_at": finishedAt,
+			"error":       "运行进程异常中断或超过 2 小时未完成，已自动恢复",
+		})
 	return res.RowsAffected, res.Error
 }
 

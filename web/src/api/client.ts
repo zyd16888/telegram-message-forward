@@ -461,6 +461,8 @@ export const aiApi = {
   },
   runs: {
     get: (id: number) => http.get<ApiItem<AIDigestRunDetail>>(`/ai/runs/${id}`).then((r) => r.data.data),
+    cloneProfile: (id: number) =>
+      http.post<ApiItem<AIDigestProfile>>(`/ai/runs/${id}/clone-profile`).then((r) => r.data.data),
     cancel: (id: number) => http.post(`/ai/runs/${id}/cancel`),
     deliver: (id: number) =>
       http.post<ApiItem<{ delivery_task_ids: number[] }>>(`/ai/runs/${id}/deliver`).then((r) => r.data.data),

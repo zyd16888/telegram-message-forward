@@ -3,11 +3,14 @@ package aidigest
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
 )
+
+var ErrActiveRunExists = errors.New("同一 AI Profile 已有运行中的任务")
 
 const (
 	ProviderSettingKey  = "ai.provider"
@@ -331,4 +334,5 @@ type Repository interface {
 	UpsertOutput(ctx context.Context, out *Output) error
 	GetOutputByRunID(ctx context.Context, runID int64) (*Output, error)
 	CleanupRuns(ctx context.Context, before time.Time) (int64, error)
+	RecoverStaleRuns(ctx context.Context, before, finishedAt time.Time) (int64, error)
 }

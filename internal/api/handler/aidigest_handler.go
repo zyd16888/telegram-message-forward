@@ -354,6 +354,19 @@ func (h *AIDigestHandler) GetRun(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": dto.NewAIDigestRunDetailDTO(detail)})
 }
 
+func (h *AIDigestHandler) CloneProfileFromRun(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	profile, err := h.svc.CloneProfileFromRun(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": dto.NewAIDigestProfileDTO(profile)})
+}
+
 func (h *AIDigestHandler) CancelRun(c *gin.Context) {
 	id, ok := parseID(c)
 	if !ok {
