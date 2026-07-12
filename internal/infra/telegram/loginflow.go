@@ -15,11 +15,12 @@ import (
 
 // 可读的登录错误分类，供 app 层分支与 UI 展示；不携带敏感明文。
 var (
-	ErrCodeInvalid     = errors.New("验证码错误")
-	ErrCodeExpired     = errors.New("验证码已过期，请重新获取")
-	ErrPhoneInvalid    = errors.New("手机号无效")
-	ErrPasswordInvalid = errors.New("两步验证密码错误")
-	ErrTooManyRequests = errors.New("操作过于频繁，请稍后再试")
+	ErrCodeInvalid       = errors.New("验证码错误")
+	ErrCodeExpired       = errors.New("验证码已过期，请重新获取")
+	ErrPhoneInvalid      = errors.New("手机号无效")
+	ErrPasswordInvalid   = errors.New("两步验证密码错误")
+	ErrTooManyRequests   = errors.New("操作过于频繁，请稍后再试")
+	ErrSessionDuplicated = errors.New("Telegram 登录态已失效，请确认只有一个服务实例运行后重新登录")
 )
 
 // LoginFlowConfig 描述执行一步登录所需的客户端配置。
@@ -136,6 +137,8 @@ func classifyLoginErr(err error) error {
 		return ErrPhoneInvalid
 	case tgerr.Is(err, "PASSWORD_HASH_INVALID"):
 		return ErrPasswordInvalid
+	case tgerr.Is(err, "AUTH_KEY_DUPLICATED"):
+		return ErrSessionDuplicated
 	}
 	if _, ok := tgerr.AsFloodWait(err); ok {
 		return ErrTooManyRequests

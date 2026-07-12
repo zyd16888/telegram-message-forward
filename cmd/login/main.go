@@ -54,14 +54,36 @@ func main() {
 	if err != nil {
 		log.Fatalf("连接数据库失败: %v", err)
 	}
-	accounts := repository.NewAccountRepository(db, cipher)
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("获取底层数据库连接失败: %v", err)
+	}
 	ctx := context.Background()
+	runtimeLock, acquired, err := storage.TryAcquireRuntimeLock(ctx, sqlDB)
+	if err != nil {
+		log.Fatalf("获取运行时锁失败: %v", err)
+	}
+	if !acquired {
+		log.Fatal("服务正在运行，请在管理后台完成 Telegram 登录，或先停止服务后再使用 cmd/login")
+	}
+	defer func() {
+		if err := runtimeLock.Release(); err != nil {
+			log.Printf("释放运行时锁失败: %v", err)
+		}
+	}()
+	accounts := repository.NewAccountRepository(db, cipher)
 
 	var acc *domainaccount.Account
 	if *accountID != 0 {
 		acc, err = accounts.GetByID(ctx, *accountID)
 		if err != nil {
 			log.Fatalf("查询账号失败: %v", err)
+		}
+		acc.Session = nil
+		acc.Status = domainaccount.StatusLoggingIn
+		acc.LastError = ""
+		if err := accounts.Update(ctx, acc); err != nil {
+			log.Fatalf("重置账号登录态失败: %v", err)
 		}
 	} else {
 		if *phone == "" || *appID == 0 || *appHash == "" {

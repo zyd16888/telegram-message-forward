@@ -37,7 +37,7 @@ const step = computed<'start' | 'code' | 'password' | 'done'>(() => {
 const restartHint = computed(() => {
   const s = flow.value?.status
   if (s === 'expired') return '登录流程已过期，请重新发送验证码。'
-  if (s === 'failed') return flow.value?.last_error || '上次登录失败，请重试。'
+  if (s === 'failed') return friendlyLoginError(flow.value?.last_error || '上次登录失败，请重试。')
   return ''
 })
 
@@ -125,10 +125,17 @@ function handleErr(e: unknown, target: 'code' | 'qr') {
     if (target === 'qr') qrFlow.value = resp.data
     else flow.value = resp.data
   }
-  const msg = errText(e)
+  const msg = friendlyLoginError(errText(e))
   if (target === 'qr') qrError.value = msg
   else serverError.value = msg
   message.error(msg)
+}
+
+function friendlyLoginError(error: string) {
+  if (error.includes('AUTH_KEY_DUPLICATED')) {
+    return 'Telegram 登录态已失效。系统会清理旧登录态，请确认只有一个服务实例运行后重新登录。'
+  }
+  return error
 }
 
 // --- 验证码登录动作 ---

@@ -54,6 +54,16 @@ docker compose up -d          # 再次启动即可
 
 访问 `http://localhost:8080`。
 
+更新版本时先停止旧实例，再启动新实例，避免 Telegram session 被并行使用：
+
+```bash
+docker compose pull
+docker compose stop app
+docker compose up -d app
+```
+
+同一 PostgreSQL 数据库只允许一个服务实例运行；新版本会通过数据库运行时锁拒绝重复实例。
+
 ### 源码运行
 
 依赖：Go 1.26+、Node.js 20+、PostgreSQL。

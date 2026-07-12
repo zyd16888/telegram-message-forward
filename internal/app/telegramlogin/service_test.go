@@ -43,7 +43,7 @@ func (r *fakeAccountRepo) GetByID(_ context.Context, id int64) (*domainaccount.A
 	return &cp, nil
 }
 func (r *fakeAccountRepo) List(context.Context) ([]*domainaccount.Account, error) { return nil, nil }
-func (r *fakeAccountRepo) Delete(context.Context, int64) error                     { return nil }
+func (r *fakeAccountRepo) Delete(context.Context, int64) error                    { return nil }
 
 type fakeFlowRepo struct {
 	items  map[string]domainloginflow.Flow
@@ -106,15 +106,27 @@ type fakeRunner struct {
 	needPassword bool
 	passwordErr  error
 	authorized   bool // password 步骤是否成功
+	sendSession  []byte
 }
 
 func (f *fakeRunner) SendCode(ctx context.Context, cfg infratelegram.LoginFlowConfig, _ string) (infratelegram.SendCodeResult, error) {
+	f.sendSession = append([]byte(nil), cfg.Session...)
 	if f.sendErr != nil {
 		return infratelegram.SendCodeResult{}, f.sendErr
 	}
 	// 模拟 gotd 建立连接后持久化未授权 session。
 	_ = cfg.SaveSession(ctx, []byte("unauth-session"))
 	return infratelegram.SendCodeResult{PhoneCodeHash: "hash-123"}, nil
+}
+
+type fakeConnectionController struct {
+	stopped []int64
+	err     error
+}
+
+func (f *fakeConnectionController) StopAccount(_ context.Context, accountID int64) error {
+	f.stopped = append(f.stopped, accountID)
+	return f.err
 }
 func (f *fakeRunner) SignInCode(ctx context.Context, cfg infratelegram.LoginFlowConfig, _, _, _ string) (infratelegram.SignInResult, error) {
 	if f.codeErr != nil {
@@ -151,6 +163,43 @@ func setup(t *testing.T, runner *fakeRunner) (*Service, *fakeAccountRepo, *fakeF
 }
 
 // --- tests ---
+
+func TestStartStopsRunnerAndClearsOldSession(t *testing.T) {
+	runner := &fakeRunner{}
+	svc, accounts, _, _, accID := setup(t, runner)
+	connections := &fakeConnectionController{}
+	svc.UseConnectionController(connections)
+	acc, _ := accounts.GetByID(context.Background(), accID)
+	acc.Session = []byte("invalid-old-session")
+	acc.Status = domainaccount.StatusActive
+	_ = accounts.Update(context.Background(), acc)
+
+	if _, err := svc.Start(context.Background(), accID); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	if len(connections.stopped) != 1 || connections.stopped[0] != accID {
+		t.Fatalf("应先停止账号 runner，实际 %v", connections.stopped)
+	}
+	if len(runner.sendSession) != 0 {
+		t.Fatalf("发送验证码不应复用旧 session，实际 %q", string(runner.sendSession))
+	}
+}
+
+func TestStartDoesNotClearSessionWhenRunnerCannotStop(t *testing.T) {
+	svc, accounts, _, _, accID := setup(t, &fakeRunner{})
+	svc.UseConnectionController(&fakeConnectionController{err: errors.New("stop failed")})
+	acc, _ := accounts.GetByID(context.Background(), accID)
+	acc.Session = []byte("existing-session")
+	_ = accounts.Update(context.Background(), acc)
+
+	if _, err := svc.Start(context.Background(), accID); err == nil {
+		t.Fatal("runner 停止失败时应中止登录")
+	}
+	got, _ := accounts.GetByID(context.Background(), accID)
+	if string(got.Session) != "existing-session" {
+		t.Fatal("runner 未停止时不能提前清除 session")
+	}
+}
 
 // TestPhoneLoginHappyPath 验证无 2FA 的完整登录：验证码通过后账号 active、session 为授权后 session。
 func TestPhoneLoginHappyPath(t *testing.T) {

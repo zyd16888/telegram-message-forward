@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -52,15 +53,26 @@ type qrRunner interface {
 	QRCancel(sessionID string)
 }
 
+type connectionController interface {
+	StopAccount(ctx context.Context, accountID int64) error
+}
+
 // Service 是 Telegram 登录应用服务。
 type Service struct {
-	accounts domainaccount.Repository
-	flows    domainloginflow.Repository
-	runner   flowRunner
-	qr       qrRunner
-	clk      clock.Clock
-	log      *slog.Logger
-	ttl      time.Duration
+	accounts    domainaccount.Repository
+	flows       domainloginflow.Repository
+	runner      flowRunner
+	qr          qrRunner
+	clk         clock.Clock
+	log         *slog.Logger
+	ttl         time.Duration
+	connections connectionController
+}
+
+// UseConnectionController 在重新登录前停止账号现有连接，避免同 session 并行使用。
+func (s *Service) UseConnectionController(controller connectionController) *Service {
+	s.connections = controller
+	return s
 }
 
 // NewService 创建登录服务。runner 处理验证码登录，qr 处理扫码登录。
@@ -90,9 +102,7 @@ func (s *Service) Start(ctx context.Context, accountID int64) (*domainloginflow.
 		_ = s.flows.Update(ctx, existing)
 	}
 
-	acc.Status = domainaccount.StatusLoggingIn
-	acc.LastError = ""
-	if err := s.accounts.Update(ctx, acc); err != nil {
+	if err := s.prepareFreshLogin(ctx, acc); err != nil {
 		return nil, err
 	}
 
@@ -283,9 +293,7 @@ func (s *Service) StartQR(ctx context.Context, accountID int64) (*domainloginflo
 		_ = s.flows.Update(ctx, existing)
 	}
 
-	acc.Status = domainaccount.StatusLoggingIn
-	acc.LastError = ""
-	if err := s.accounts.Update(ctx, acc); err != nil {
+	if err := s.prepareFreshLogin(ctx, acc); err != nil {
 		return nil, err
 	}
 
@@ -473,6 +481,19 @@ func (s *Service) buildConfig(acc *domainaccount.Account) infratelegram.LoginFlo
 	}
 }
 
+// prepareFreshLogin 停止旧连接并丢弃旧 auth key。每次新登录都从全新 session 开始。
+func (s *Service) prepareFreshLogin(ctx context.Context, acc *domainaccount.Account) error {
+	if s.connections != nil {
+		if err := s.connections.StopAccount(ctx, acc.ID); err != nil {
+			return fmt.Errorf("停止账号现有连接失败: %w", err)
+		}
+	}
+	acc.Session = nil
+	acc.Status = domainaccount.StatusLoggingIn
+	acc.LastError = ""
+	return s.accounts.Update(ctx, acc)
+}
+
 // loadFlowForAccount 加载 flow 并校验其属于 accountID，避免跨账号误操作。
 // 不匹配时不返回 flow，避免向调用方泄露其它账号的登录状态。
 func (s *Service) loadFlowForAccount(ctx context.Context, accountID int64, flowID string) (*domainloginflow.Flow, error) {
@@ -511,6 +532,9 @@ func (s *Service) markAccountError(ctx context.Context, accountID int64, cause e
 	}
 	acc.Status = domainaccount.StatusError
 	acc.LastError = cause.Error()
+	if errors.Is(cause, infratelegram.ErrSessionDuplicated) {
+		acc.Session = nil
+	}
 	_ = s.accounts.Update(ctx, acc)
 }
 

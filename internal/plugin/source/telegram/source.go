@@ -118,6 +118,13 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 	if err := p.emitCachedPeers(ctx, acc.ID, emit); err != nil {
 		return err
 	}
+	runningClient, ok, err := p.runningClient(ctx, acc.ID)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return p.syncDialogs(ctx, acc.ID, runningClient, emit)
+	}
 
 	client, err := p.buildClient(acc, nil)
 	if err != nil {
@@ -128,77 +135,77 @@ func (p *Plugin) SyncSourcesStream(ctx context.Context, acc *domainaccount.Accou
 		if _, err := p.ensureAuthorized(ctx, client); err != nil {
 			return err
 		}
-		offsetPeer := tg.InputPeerClass(&tg.InputPeerEmpty{})
-		offsetID := 0
-		offsetDate := 0
-		seen := map[string]struct{}{}
-		seenCursors := map[string]struct{}{}
-		page := 0
-		staleStreak := 0
-		started := time.Now()
-
-		for {
-			page++
-			pageStarted := time.Now()
-			res, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-				ExcludePinned: offsetID != 0,
-				Limit:         syncDialogsPageSize,
-				OffsetPeer:    offsetPeer,
-				OffsetID:      offsetID,
-				OffsetDate:    offsetDate,
-			})
-			if err != nil {
-				return fmt.Errorf("拉取会话列表失败: %w", err)
-			}
-			dialogs, messages, chats, users, hasMore, err := unpackDialogs(res)
-			if err != nil {
-				return err
-			}
-			newCount, err := p.emitDialogPeers(ctx, acc.ID, dialogs, chats, users, seen, emit)
-			if err != nil {
-				return err
-			}
-			p.deps.Log.Info("同步会话列表分页完成",
-				"account", acc.ID, "page", page, "dialogs", len(dialogs), "new_peers", newCount,
-				"page_cost", time.Since(pageStarted), "total_cost", time.Since(started))
-			if !hasMore || len(dialogs) == 0 {
-				break
-			}
-			nextPeer, nextID, nextDate := nextDialogOffset(dialogs, messages, chats, users)
-			if nextPeer == nil || nextID == 0 {
-				break
-			}
-
-			// 分页游标必须严格前进；同一游标重复出现说明 offset 没有推进，
-			// 会导致对同一批 dialog 无限重复请求（每次都触发 FLOOD_WAIT 却毫无进展）。
-			cursorKey := fmt.Sprintf("%s:%d:%d", inputPeerKey(nextPeer), nextID, nextDate)
-			if _, dup := seenCursors[cursorKey]; dup {
-				p.deps.Log.Warn("同步会话列表分页游标未推进，提前终止", "account", acc.ID, "page", page, "cursor", cursorKey)
-				break
-			}
-			seenCursors[cursorKey] = struct{}{}
-
-			// 连续多页都没有新增 peer，说明后面大概率是重复/陈旧数据，没必要继续为一批
-			// 已经见过的 dialog 反复承受 FLOOD_WAIT。
-			if newCount == 0 {
-				staleStreak++
-			} else {
-				staleStreak = 0
-			}
-			if staleStreak >= 3 {
-				p.deps.Log.Warn("同步会话列表连续多页无新增 peer，提前终止",
-					"account", acc.ID, "page", page, "stale_streak", staleStreak)
-				break
-			}
-
-			offsetPeer, offsetID, offsetDate = nextPeer, nextID, nextDate
-		}
-		p.deps.Log.Info("同步会话列表完成", "account", acc.ID, "pages", page, "total_cost", time.Since(started))
-		return nil
+		return p.syncDialogs(ctx, acc.ID, client, emit)
 	})
 	if runErr != nil {
 		return runErr
 	}
+	return nil
+}
+
+func (p *Plugin) syncDialogs(ctx context.Context, accountID int64, client *telegram.Client, emit pluginsource.SyncPeerHandler) error {
+	offsetPeer := tg.InputPeerClass(&tg.InputPeerEmpty{})
+	offsetID := 0
+	offsetDate := 0
+	seen := map[string]struct{}{}
+	seenCursors := map[string]struct{}{}
+	page := 0
+	staleStreak := 0
+	started := time.Now()
+
+	for {
+		page++
+		pageStarted := time.Now()
+		res, err := client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
+			ExcludePinned: offsetID != 0,
+			Limit:         syncDialogsPageSize,
+			OffsetPeer:    offsetPeer,
+			OffsetID:      offsetID,
+			OffsetDate:    offsetDate,
+		})
+		if err != nil {
+			return fmt.Errorf("拉取会话列表失败: %w", err)
+		}
+		dialogs, messages, chats, users, hasMore, err := unpackDialogs(res)
+		if err != nil {
+			return err
+		}
+		newCount, err := p.emitDialogPeers(ctx, accountID, dialogs, chats, users, seen, emit)
+		if err != nil {
+			return err
+		}
+		p.deps.Log.Info("同步会话列表分页完成",
+			"account", accountID, "page", page, "dialogs", len(dialogs), "new_peers", newCount,
+			"page_cost", time.Since(pageStarted), "total_cost", time.Since(started))
+		if !hasMore || len(dialogs) == 0 {
+			break
+		}
+		nextPeer, nextID, nextDate := nextDialogOffset(dialogs, messages, chats, users)
+		if nextPeer == nil || nextID == 0 {
+			break
+		}
+
+		cursorKey := fmt.Sprintf("%s:%d:%d", inputPeerKey(nextPeer), nextID, nextDate)
+		if _, dup := seenCursors[cursorKey]; dup {
+			p.deps.Log.Warn("同步会话列表分页游标未推进，提前终止", "account", accountID, "page", page, "cursor", cursorKey)
+			break
+		}
+		seenCursors[cursorKey] = struct{}{}
+
+		if newCount == 0 {
+			staleStreak++
+		} else {
+			staleStreak = 0
+		}
+		if staleStreak >= 3 {
+			p.deps.Log.Warn("同步会话列表连续多页无新增 peer，提前终止",
+				"account", accountID, "page", page, "stale_streak", staleStreak)
+			break
+		}
+
+		offsetPeer, offsetID, offsetDate = nextPeer, nextID, nextDate
+	}
+	p.deps.Log.Info("同步会话列表完成", "account", accountID, "pages", page, "total_cost", time.Since(started))
 	return nil
 }
 
@@ -559,6 +566,9 @@ type accountRunner struct {
 	sources         map[int64]sourceSubscription // source_id -> subscription
 	recentMessageAt *time.Time
 	lastError       string
+	ready           chan struct{}
+	done            chan struct{}
+	readyOnce       sync.Once
 }
 
 func newAccountRunner(accountID int64, client *telegram.Client, cancel context.CancelFunc) *accountRunner {
@@ -567,7 +577,13 @@ func newAccountRunner(accountID int64, client *telegram.Client, cancel context.C
 		client:    client,
 		cancel:    cancel,
 		sources:   map[int64]sourceSubscription{},
+		ready:     make(chan struct{}),
+		done:      make(chan struct{}),
 	}
+}
+
+func (r *accountRunner) markReady() {
+	r.readyOnce.Do(func() { close(r.ready) })
 }
 
 func (r *accountRunner) setSource(src *domainsource.Source, handler pluginsource.Handler) {
@@ -612,6 +628,43 @@ func (p *Plugin) RunnerStatuses() []pluginsource.RunnerStatus {
 		})
 	}
 	return out
+}
+
+// StopAccount 停止账号级 runner，并等待底层连接完全退出后再返回。
+func (p *Plugin) StopAccount(ctx context.Context, accountID int64) error {
+	p.mu.Lock()
+	runner := p.runners[accountID]
+	if runner != nil {
+		delete(p.runners, accountID)
+	}
+	p.mu.Unlock()
+	if runner == nil {
+		return nil
+	}
+	runner.cancel()
+	select {
+	case <-runner.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *Plugin) runningClient(ctx context.Context, accountID int64) (*telegram.Client, bool, error) {
+	p.mu.Lock()
+	runner := p.runners[accountID]
+	p.mu.Unlock()
+	if runner == nil {
+		return nil, false, nil
+	}
+	select {
+	case <-runner.ready:
+		return runner.client, true, nil
+	case <-runner.done:
+		return nil, false, nil
+	case <-ctx.Done():
+		return nil, false, ctx.Err()
+	}
 }
 
 // Start 为一个 source 启动监听：同账号复用一个 runner，只增删 source 订阅。
@@ -670,11 +723,13 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 	p.mu.Unlock()
 
 	go func() {
+		defer close(runner.done)
 		err := client.Run(runCtx, func(ctx context.Context) error {
 			self, err := p.ensureAuthorized(ctx, client)
 			if err != nil {
 				return err
 			}
+			runner.markReady()
 			p.deps.Log.Info("Telegram account runner 监听中", "account", acc.ID)
 			// gaps.Run 阻塞驱动更新同步循环，直到 runCtx 取消（Stop）或致命错误返回。
 			return gaps.Run(ctx, client.API(), self.ID, updates.AuthOptions{

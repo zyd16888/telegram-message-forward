@@ -39,6 +39,35 @@ func TestStopRemovesSourceAndCancelsLastRunner(t *testing.T) {
 	}
 }
 
+func TestStopAccountWaitsForRunnerExit(t *testing.T) {
+	p := NewPlugin(Deps{})
+	var runner *accountRunner
+	runner = newAccountRunner(10, nil, func() { close(runner.done) })
+	p.runners[10] = runner
+
+	if err := p.StopAccount(context.Background(), 10); err != nil {
+		t.Fatalf("StopAccount 失败: %v", err)
+	}
+	if _, ok := p.runners[10]; ok {
+		t.Fatal("StopAccount 后应移除账号 runner")
+	}
+}
+
+func TestRunningClientReusesReadyRunner(t *testing.T) {
+	p := NewPlugin(Deps{})
+	runner := newAccountRunner(10, nil, func() {})
+	runner.markReady()
+	p.runners[10] = runner
+
+	client, ok, err := p.runningClient(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || client != runner.client {
+		t.Fatal("同步应复用已就绪账号 runner 的 client")
+	}
+}
+
 func TestForwardToSubscriptionsOnlyMatchesSource(t *testing.T) {
 	p := NewPlugin(Deps{})
 	var got []int64

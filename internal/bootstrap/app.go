@@ -3,6 +3,7 @@ package bootstrap
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -69,6 +70,7 @@ type App struct {
 	tgLogin    *apptelegramlogin.Service
 	aiSched    *appaidigest.Scheduler
 	mediaStore *mediastore.Manager
+	db         *sql.DB
 	deps       *Deps
 }
 
@@ -110,12 +112,12 @@ func Build(cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("获取底层数据库连接失败: %w", err)
+	}
 
 	if cfg.Database.AutoMigrate {
-		sqlDB, err := db.DB()
-		if err != nil {
-			return nil, fmt.Errorf("获取底层连接失败: %w", err)
-		}
 		if err := storagemigrate.Run(context.Background(), sqlDB, "up"); err != nil {
 			return nil, fmt.Errorf("自动迁移失败: %w", err)
 		}
@@ -288,7 +290,8 @@ func Build(cfg *config.Config) (*App, error) {
 	tgConfigSvc := apptelegramconfig.NewService(telegramApps, proxies)
 	tgLoginRunner := infratelegram.LoginFlowService{}
 	tgQRRunner := infratelegram.NewQRSessionManager()
-	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, tgLoginRunner, tgQRRunner, clk, log)
+	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, tgLoginRunner, tgQRRunner, clk, log).
+		UseConnectionController(tgPlugin)
 
 	router := api.NewRouter(api.Deps{
 		Logger:         log,
@@ -341,7 +344,7 @@ func Build(cfg *config.Config) (*App, error) {
 		AIDigest:     aiDigestSvc,
 	}
 
-	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, tgLogin: tgLoginSvc, aiSched: aiScheduler, mediaStore: mediaStore, deps: deps}, nil
+	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, tgLogin: tgLoginSvc, aiSched: aiScheduler, mediaStore: mediaStore, db: sqlDB, deps: deps}, nil
 }
 
 // Handler 返回已装配的 HTTP handler，供集成测试使用。
@@ -417,6 +420,19 @@ func (a *App) runMediaCleanup(ctx context.Context) {
 
 // Run 启动投递 worker 与 HTTP 服务，阻塞直到 ctx 取消后优雅关闭。
 func (a *App) Run(ctx context.Context) error {
+	runtimeLock, acquired, err := storage.TryAcquireRuntimeLock(ctx, a.db)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return errors.New("已有另一个服务实例连接当前数据库，拒绝启动以保护 Telegram session")
+	}
+	defer func() {
+		if err := runtimeLock.Release(); err != nil {
+			a.log.Warn("释放运行时单实例锁失败", "err", err)
+		}
+	}()
+
 	var wg sync.WaitGroup
 	for _, w := range a.workers {
 		wg.Add(1)

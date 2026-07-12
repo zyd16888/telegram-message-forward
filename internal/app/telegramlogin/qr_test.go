@@ -129,6 +129,28 @@ func TestQRStartAndAuthorize(t *testing.T) {
 	}
 }
 
+func TestQRStartClearsOldSession(t *testing.T) {
+	qr := newFakeQRRunner()
+	svc, accounts, _, _, accID := setupQR(t, qr)
+	connections := &fakeConnectionController{}
+	svc.UseConnectionController(connections)
+	acc, _ := accounts.GetByID(context.Background(), accID)
+	acc.Session = []byte("invalid-old-session")
+	acc.Status = domainaccount.StatusActive
+	_ = accounts.Update(context.Background(), acc)
+
+	if _, err := svc.StartQR(context.Background(), accID); err != nil {
+		t.Fatalf("StartQR 失败: %v", err)
+	}
+	if len(connections.stopped) != 1 || connections.stopped[0] != accID {
+		t.Fatalf("扫码登录应先停止账号 runner，实际 %v", connections.stopped)
+	}
+	got, _ := accounts.GetByID(context.Background(), accID)
+	if string(got.Session) != "qr-session-bytes" {
+		t.Fatalf("应使用新扫码 session 覆盖旧 session，实际 %q", string(got.Session))
+	}
+}
+
 // TestQRStatusDoesNotRefreshTokenOnEachPoll 验证多次轮询「等待中」状态时，
 // qr_url（由 token 派生）保持不变，且底层 QRCheck 不会重新 export 新 token——
 // 这正是修复的核心问题：轮询不应每次替换二维码。
