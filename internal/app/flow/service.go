@@ -211,11 +211,11 @@ func (s *Service) validate(ctx context.Context, f *domainflow.Flow) error {
 		case domainflow.NodeTypeSource:
 			if s.sources != nil && n.RefID != nil {
 				if _, err := s.sources.GetByID(ctx, *n.RefID); err != nil {
-					return fmt.Errorf("source 节点引用的来源不存在 id=%d: %w", *n.RefID, err)
+					return fmt.Errorf("来源节点(node=%d)引用的监听源不存在 id=%d: %w", n.ID, *n.RefID, err)
 				}
 			}
 		case domainflow.NodeTypeFilter:
-			if err := s.validateFilters(ctx, n.Config.FilterIDs); err != nil {
+			if err := s.validateFilters(ctx, n.ID, n.Config.FilterIDs); err != nil {
 				return err
 			}
 		case domainflow.NodeTypeTarget:
@@ -227,21 +227,21 @@ func (s *Service) validate(ctx context.Context, f *domainflow.Flow) error {
 	return nil
 }
 
-func (s *Service) validateFilters(ctx context.Context, ids []int64) error {
+func (s *Service) validateFilters(ctx context.Context, nodeID int64, ids []int64) error {
 	if len(ids) == 0 || s.filters == nil {
 		return nil
 	}
 	seen := map[int64]struct{}{}
 	for _, id := range ids {
 		if id <= 0 {
-			return fmt.Errorf("过滤器 id 无效: %d", id)
+			return fmt.Errorf("过滤节点(node=%d)过滤器 id 无效: %d", nodeID, id)
 		}
 		if _, ok := seen[id]; ok {
-			return fmt.Errorf("filter 节点不能重复引用同一个过滤器 id=%d", id)
+			return fmt.Errorf("过滤节点(node=%d)不能重复引用同一个过滤器 id=%d", nodeID, id)
 		}
 		seen[id] = struct{}{}
 		if _, err := s.filters.GetByID(ctx, id); err != nil {
-			return fmt.Errorf("filter 节点引用的过滤器不存在 id=%d: %w", id, err)
+			return fmt.Errorf("过滤节点(node=%d)引用的过滤器不存在 id=%d: %w", nodeID, id, err)
 		}
 	}
 	return nil
@@ -253,7 +253,7 @@ func (s *Service) validateTarget(ctx context.Context, n domainflow.Node) error {
 	}
 	sk, err := s.sinks.GetByID(ctx, *n.RefID)
 	if err != nil {
-		return fmt.Errorf("target 节点引用的渠道不存在 id=%d: %w", *n.RefID, err)
+		return fmt.Errorf("目标节点(node=%d)引用的渠道不存在 id=%d: %w", n.ID, *n.RefID, err)
 	}
 	format := domaintemplate.FormatText
 	if n.TemplateID != nil {
@@ -262,12 +262,12 @@ func (s *Service) validateTarget(ctx context.Context, n domainflow.Node) error {
 		}
 		tpl, err := s.templates.GetByID(ctx, *n.TemplateID)
 		if err != nil {
-			return fmt.Errorf("target 节点引用的模板不存在 id=%d: %w", *n.TemplateID, err)
+			return fmt.Errorf("目标节点(node=%d)引用的模板不存在 id=%d: %w", n.ID, *n.TemplateID, err)
 		}
 		format = tpl.Format
 	}
 	if !sinkSupportsFormat(sk.Capabilities, format) {
-		return fmt.Errorf("渠道 %s 不支持模板格式 %s", sk.Type, format)
+		return fmt.Errorf("目标节点(node=%d)渠道 %s 不支持模板格式 %s", n.ID, sk.Type, format)
 	}
 	return nil
 }

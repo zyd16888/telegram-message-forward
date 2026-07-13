@@ -20,6 +20,12 @@ import type {
 } from '@/components/flow/types'
 import { filtersApi, flowsApi, sinksApi } from '@/api/client'
 import { applyPatchToFlowGraph } from '@/utils/flowGraph'
+import {
+  FLOW_TEMPLATES,
+  buildFlowFromTemplate,
+  buildLinearSkeleton,
+  type FlowTemplateId,
+} from '@/utils/flowTemplates'
 import { useFlowBoard } from '@/composables/useFlowBoard'
 import { useForwardingGraph } from '@/composables/useForwardingGraph'
 import type {
@@ -429,10 +435,10 @@ const draftSourceNodes = computed<CanvasNodeInput<SourceNodeData>[]>(() =>
       position: { x: node.pos_x, y: node.pos_y },
       stateClass: draftStateClass(node.id),
       data: {
-        name: source?.name ?? `来源 #${node.ref_id ?? '?'}`,
-        typeLabel: source ? sourceTypeLabel(source) : 'Source',
-        accountLabel: source ? sourceAccountLabel(source) : '引用缺失',
-        runtimeLabel: source ? sourceRuntimeLabel(source) : '保存时后端会校验',
+        name: source?.name ?? (node.ref_id ? `来源 #${node.ref_id}` : '请选择来源'),
+        typeLabel: source ? sourceTypeLabel(source) : 'Source 占位',
+        accountLabel: source ? sourceAccountLabel(source) : '未绑定监听源',
+        runtimeLabel: source ? sourceRuntimeLabel(source) : '保存前请绑定真实来源',
         enabled: source?.enabled ?? false,
         running: source?.runner_status === 'running',
         ruleCount: 0,
@@ -482,10 +488,10 @@ const draftTargetNodes = computed<CanvasNodeInput<SinkNodeData>[]>(() =>
       position: { x: node.pos_x, y: node.pos_y },
       stateClass: draftStateClass(node.id),
       data: {
-        name: sink?.name ?? `渠道 #${node.ref_id ?? '?'}`,
-        typeLabel: sink ? sinkTypeLabel(sink) : 'Target',
+        name: sink?.name ?? (node.ref_id ? `渠道 #${node.ref_id}` : '请选择渠道'),
+        typeLabel: sink ? sinkTypeLabel(sink) : 'Target 占位',
         enabled: sink?.enabled ?? false,
-        deliveryLabel: tpl ? `模板：${tpl.name}` : '原文投递',
+        deliveryLabel: tpl ? `模板：${tpl.name}` : sink ? '原文投递' : '未绑定目标渠道',
         ruleCount: 0,
         linkLabel: draftLinkLabel(node.id),
       },
@@ -637,17 +643,26 @@ function resetEditorState() {
 }
 
 function emptyFlowDraft(): Flow {
-  return {
-    id: 0,
-    name: '新 Flow',
-    enabled: true,
-    priority: 0,
-    stop_on_match: false,
-    nodes: [],
-    edges: [],
-    created_at: '',
-    updated_at: '',
+  return buildLinearSkeleton({
+    sourceId: selectedSourceToAdd.value,
+    sinkId: selectedSinkToAdd.value,
+  })
+}
+
+function applyTemplate(id: FlowTemplateId) {
+  if (!editorActive.value) {
+    editorActive.value = true
   }
+  activeFlowId.value = null
+  flowDraft.value = buildFlowFromTemplate(id, {
+    sourceId: selectedSourceToAdd.value,
+    sinkId: selectedSinkToAdd.value,
+  })
+  flowError.value = ''
+  flowSavedHint.value = ''
+  clearPaneSelection()
+  rememberFlowDraftBaseline()
+  message.success('已应用模板，请绑定未选择的来源/渠道后保存')
 }
 
 function nextTempNodeId(): number {
@@ -745,6 +760,12 @@ function updateSelectedTargetTemplate(value: number | null) {
   const node = selectedDraftNode.value
   if (!node || node.type !== 'target') return
   node.template_id = value && value > 0 ? value : undefined
+}
+
+function updateSelectedNodeRef(value: number | null) {
+  const node = selectedDraftNode.value
+  if (!node || (node.type !== 'source' && node.type !== 'target')) return
+  node.ref_id = value && value > 0 ? value : undefined
 }
 
 function updateSelectedFilterIds(value: number[] | null) {
@@ -1121,6 +1142,13 @@ onBeforeUnmount(() => {
           @update:value="onFlowSelect"
         />
         <NButton size="small" secondary @click="newFlow">新建</NButton>
+        <NDropdown
+          trigger="click"
+          :options="FLOW_TEMPLATES.map((t) => ({ label: t.name, key: t.id, props: { title: t.description } }))"
+          @select="(key: string | number) => applyTemplate(String(key) as FlowTemplateId)"
+        >
+          <NButton size="small" secondary>从模板创建</NButton>
+        </NDropdown>
         <NButton size="small" type="primary" :disabled="!flowDraftDirty || flowSaving" :loading="flowSaving" @click="saveFlow()">保存</NButton>
         <NButton v-if="flowDraft?.id" size="small" type="error" secondary @click="deleteFlow">删除</NButton>
         <NButton size="small" text type="primary" @click="closeFocusedEditor">退出聚焦</NButton>
@@ -1245,6 +1273,9 @@ onBeforeUnmount(() => {
         <NAlert v-if="flowError" type="error" :show-icon="false" class="editor-alert">
           {{ flowError }}
         </NAlert>
+        <n-text v-if="flowDraft" depth="3" class="template-hint">
+          新建默认带线性骨架；也可用「从模板创建」一键生成关键词/模板投递/多源合并。未绑定的来源/渠道会显示占位提示。
+        </n-text>
 
         <section class="editor-section">
           <div class="section-title">加入资源节点</div>
@@ -1272,6 +1303,34 @@ onBeforeUnmount(() => {
             <span>类型</span>
             <strong>{{ selectedDraftNode.type }}</strong>
           </div>
+          <NFormItem
+            v-if="selectedDraftNode.type === 'source'"
+            label="绑定监听源"
+            :show-feedback="false"
+          >
+            <NSelect
+              :value="selectedDraftNode.ref_id ?? null"
+              :options="sourceOptions"
+              filterable
+              clearable
+              placeholder="请选择来源（占位节点保存前必选）"
+              @update:value="updateSelectedNodeRef"
+            />
+          </NFormItem>
+          <NFormItem
+            v-if="selectedDraftNode.type === 'target'"
+            label="绑定目标渠道"
+            :show-feedback="false"
+          >
+            <NSelect
+              :value="selectedDraftNode.ref_id ?? null"
+              :options="sinkOptions"
+              filterable
+              clearable
+              placeholder="请选择渠道（占位节点保存前必选）"
+              @update:value="updateSelectedNodeRef"
+            />
+          </NFormItem>
           <template v-if="selectedDraftNode.type === 'filter'">
             <NFormItem label="共享过滤器" :show-feedback="false">
               <NSelect
