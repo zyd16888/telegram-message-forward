@@ -1,5 +1,15 @@
 # Telegram Message Forward 产品需求与架构定稿 v1
 
+> ## 现状勘误（以代码与 `docs/roadmap-next-sprint.md` 为准）
+>
+> 本文档保留 v1 定稿历史叙述；以下与**当前实现**不一致处，以本勘误为准：
+>
+> 1. **Rule 引擎已下线**：实时转发不再走独立 Rule 主链路；`rules` 相关能力已迁移为 Flow 图编排。
+> 2. **始终 Flow-only**：主链路为 **Source → Flow → Queue → Sink**。配置项 `flow_engine.mode`（off/shadow/primary）已废弃，运行时忽略。
+> 3. **AI 整理为独立旁路**：与 Flow 实时转发是两条产品线——独立配置、调度与投递 origin；**禁止**把 AI 塞进 Flow 节点或统一成一条编排。
+> 4. 过滤器/处理器仍可在 Flow 节点中复用（`ruleengine` 包作为节点能力库），但不再以「规则列表」作为用户主路径。
+> 5. 管理端配置类渠道凭证可回显编辑；Telegram session、验证码、2FA、encryption_key 等仍不回显。
+
 ## 1. 背景与目标
 
 Telegram 的频道、群组和机器人生态成熟，很多信息源会优先发布在 Telegram。但在中国大陆网络环境下，普通用户无法稳定访问 Telegram，导致高价值消息无法被及时消费。

@@ -31,11 +31,11 @@
 
 **目标**：消除 Rule / shadow 引擎残留误导。
 
-- [ ] 更新 `configs/config.example.yaml`：删除或标注废弃 `flow_engine.mode`；注释写明当前始终走 Flow 引擎。
-- [ ] 清理 `internal/config` 中无用默认值/注释，避免新装用户以为还要配 shadow。
-- [ ] 在 `README.md` 与本文件对齐：主链路描述为 Source → Flow → Queue → Sink；AI 为旁路。
-- [ ] 在 `docs/product-architecture-v1.md` 顶部加「现状勘误」短节（不必全文重写）：Rule 已下线、Flow-only、AI 独立。
-- [ ] 统一协作文档口径：配置类凭证可回显编辑（`AGENTS.md`）；session/2FA/主密钥仍不回显。
+- [x] 更新 `configs/config.example.yaml`：删除或标注废弃 `flow_engine.mode`；注释写明当前始终走 Flow 引擎。
+- [x] 清理 `internal/config` 中无用默认值/注释，避免新装用户以为还要配 shadow。
+- [x] 在 `README.md` 与本文件对齐：主链路描述为 Source → Flow → Queue → Sink；AI 为旁路。
+- [x] 在 `docs/product-architecture-v1.md` 顶部加「现状勘误」短节（不必全文重写）：Rule 已下线、Flow-only、AI 独立。
+- [x] 统一协作文档口径：配置类凭证可回显编辑（`AGENTS.md`）；session/2FA/主密钥仍不回显。
 
 **验收**：新用户读 example 配置与 README 不会再配置 `flow_engine.mode` 期望切换旧引擎。
 
@@ -267,7 +267,7 @@ cd web && npm run build
 
 | ID | 状态 | 备注 |
 |----|------|------|
-| A1 | [ ] | |
+| A1 | [x] | Flow-only 文档与配置收敛 |
 | A2 | [ ] | |
 | A3 | [ ] | |
 | A4 | [ ] | 默认关 |

@@ -56,7 +56,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("dispatch.poll_interval", "2s")
 	v.SetDefault("dispatch.visibility_timeout", "5m")
 	v.SetDefault("dispatch.max_attempts", 3)
-	v.SetDefault("flow_engine.mode", "off")
+	// flow_engine.mode 已废弃，不再设置默认值；运行时始终走 Flow 引擎。
 	v.SetDefault("media.dir", "data/media")
 	v.SetDefault("media.url_ttl", "24h")
 	v.SetDefault("media.retention", "168h")

@@ -35,6 +35,6 @@ dispatch:
   visibility_timeout: "5m"
   max_attempts: 3
 
-flow_engine:
-  # off: 旧 Rule 引擎主跑；shadow: 旧链路主跑并旁路比对 Flow；primary: Flow 引擎主跑。
-  mode: "shadow"
+# 主链路始终为 Source → Flow → Queue → Sink（Flow-only）。
+# 旧 Rule 引擎与 flow_engine.mode（off/shadow/primary）已下线，无需再配置。
+# AI 整理是独立旁路产品线，不走 Flow 节点。

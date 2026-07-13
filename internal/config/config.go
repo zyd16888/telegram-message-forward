@@ -9,8 +9,9 @@ type Config struct {
 	Log        LogConfig        `mapstructure:"log"`
 	Database   DatabaseConfig   `mapstructure:"database"`
 	Security   SecurityConfig   `mapstructure:"security"`
-	Dispatch   DispatchConfig   `mapstructure:"dispatch"`
-	Media      MediaConfig      `mapstructure:"media"`
+	Dispatch DispatchConfig `mapstructure:"dispatch"`
+	Media    MediaConfig    `mapstructure:"media"`
+	// FlowEngine 已废弃：运行时始终走 Flow 引擎，字段仅兼容旧配置文件中的 flow_engine 段。
 	FlowEngine FlowEngineConfig `mapstructure:"flow_engine"`
 }
 
@@ -98,8 +99,9 @@ type DispatchConfig struct {
 	MaxAttempts       int           `mapstructure:"max_attempts"`
 }
 
-// FlowEngineConfig 控制 Flow 图引擎切换模式。
+// FlowEngineConfig 是已废弃的 Flow 引擎切换配置。
+// 历史上曾支持 off/shadow/primary；当前始终走 Flow 引擎，Mode 读入后忽略。
 type FlowEngineConfig struct {
-	// Mode 已在 Flow-only 阶段保留为兼容字段，运行时始终走 Flow 引擎。
+	// Mode 已废弃，忽略。保留字段仅为兼容仍含 flow_engine.mode 的旧 yaml。
 	Mode string `mapstructure:"mode"`
 }

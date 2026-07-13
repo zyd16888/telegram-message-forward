@@ -1,8 +1,11 @@
 # Telegram Message Forward
 
-把 Telegram 频道/群组/私聊消息（以及 RSS、Webhook 输入）按规则转发到企业微信、钉钉、飞书、Bark、ntfy、Gotify、邮件、Webhook 等下游渠道的自托管消息转发服务。
+把 Telegram 频道/群组/私聊消息（以及 RSS、Webhook 输入）经 Flow 编排转发到企业微信、钉钉、飞书、Bark、ntfy、Gotify、邮件、Webhook 等下游渠道的自托管消息转发服务。
 
 单二进制部署：Go 后端内嵌 Vue 管理后台，除 PostgreSQL 外无其他依赖。
+
+**主链路（始终 Flow-only）**：Source → Flow → Queue → Sink。旧 Rule 引擎与 `flow_engine.mode` 切换已下线。  
+**AI 整理**是独立旁路产品线（定时批处理、独立投递 origin），不进入 Flow 节点，也不与实时转发共用编排模型。
 
 ## 功能特性
 
@@ -10,13 +13,14 @@
   - Telegram 用户账号监听（基于 [gotd/td](https://github.com/gotd/td) MTProto，非 Bot API，可监听任意已加入的频道/群组/私聊；同账号多源复用一条连接）
   - RSS / Atom 订阅轮询
   - Webhook 被动接收（每源独立 token 鉴权）
-- **Flow 图引擎**：在画布中把来源、过滤器、处理器和目标渠道连成实时转发链路，一条消息可分发到多个渠道
+- **Flow 图引擎**：在画布中把来源、过滤器、处理器和目标渠道连成实时转发链路，一条消息可分发到多个渠道（主路径，始终启用）
+- **AI 整理（旁路）**：独立配置与调度的消息整理/摘要，与 Flow 实时转发分离
 - **模板渲染**：自定义转发文本，支持 Text / Markdown / HTML，管理后台可实时预览
 - **目标渠道（Sink）**：企业微信群机器人、企业微信应用消息、钉钉自定义机器人、飞书自定义机器人、Bark、ntfy、Gotify、SMTP 邮件、通用 Webhook；每个渠道声明媒体能力矩阵，不支持的媒体自动降级为可读文本
 - **图片/媒体转发**：Telegram 图片自动下载并统一存储，支持本地目录（带 HMAC 签名 URL 端点）和 S3 兼容对象存储（AWS S3 / Cloudflare R2 / MinIO / OSS / COS），按保留期自动清理
 - **投递保障**：数据库队列 + 多 worker、失败退避重试、死信批量重试、投递记录与渠道成功率观测
-- **管理后台**：Vue 3 + Naive UI。账号登录（验证码/扫码）、源/渠道/Flow/模板管理、转发编排画布、投递记录、系统设置（媒体存储等设置页面保存后热生效）
-- **安全**：Bearer Token 鉴权、敏感字段（session、secret、密码）AES 加密落库、API 返回脱敏
+- **管理后台**：Vue 3 + Naive UI。账号登录（验证码/扫码）、源/渠道/Flow/模板管理、转发编排画布、AI 整理、投递记录、系统设置（媒体存储等设置页面保存后热生效）
+- **安全**：Bearer Token 鉴权、敏感字段（session、secret、密码）AES 加密落库；渠道类配置凭证可在管理端回显编辑，Telegram session / 验证码 / 2FA / 主密钥等不回显
 
 ## 快速开始
 
@@ -89,8 +93,9 @@ go run ./cmd/server
 3. **账号** 页添加 Telegram 账号，页面上完成验证码或扫码登录
 4. **监听源** 页添加要监听的频道/群组（或 RSS、Webhook 源）
 5. **目标渠道** 页添加下游渠道并测试连通性
-6. **Flow** 页把来源、过滤条件、处理器、模板和目标渠道串起来
-7. （可选）**设置** 页配置媒体存储的公网访问地址或 S3，让钉钉/Bark/Gotify 等只认公网 URL 的渠道也能收到图片
+6. **转发编排（Flow）** 页把来源、过滤条件、处理器、模板和目标渠道串起来（实时转发主路径）
+7. （可选）**AI 整理** 页配置旁路批处理整理（与 Flow 独立，非必须）
+8. （可选）**设置** 页配置媒体存储的公网访问地址或 S3，让钉钉/Bark/Gotify 等只认公网 URL 的渠道也能收到图片
 
 ## 配置说明
 
@@ -149,10 +154,11 @@ go run ./cmd/login   -config ./configs/config.yaml -account-id 1           # 命
 cmd/                 server / migrate / login / token 入口
 internal/
   api/               HTTP 路由、handler、DTO
-  app/               应用服务（账号、源、渠道、规则、设置…）
+  app/               应用服务（账号、源、渠道、Flow、设置…）
   domain/            领域模型与仓储接口
   dispatch/          投递队列与 worker
-  ruleengine/        规则匹配
+  flowengine/        Flow 图编译与执行（实时转发主路径）
+  ruleengine/        过滤器与处理器（供 Flow 节点复用）
   template/          模板渲染
   plugin/source/     telegram / rss / webhook 源插件
   plugin/sink/       九个内置渠道插件

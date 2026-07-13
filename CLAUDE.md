@@ -54,4 +54,4 @@ docs: 补充 AI 协作规范
 
 - 不打印、不提交 Telegram session、手机号、企业微信 secret、Webhook token、数据库密码等敏感信息。
 - 配置示例使用占位符。
-- UI 和 API 返回敏感配置时需要脱敏。
+- 管理后台配置类渠道凭证可回显编辑；Telegram session、验证码、2FA、encryption_key、运行日志中的 token/secret 仍不得明文输出。
