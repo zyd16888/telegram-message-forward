@@ -196,15 +196,15 @@
 
 #### 代理
 
-- [ ] `internal/infra/telegram/proxy.go` 实现 http/https 代理（含可选账号密码）。
-- [ ] 共享代理配置 UI/校验接受 `http`/`https`/`socks5`。
-- [ ] 单测或表驱动校验 dial 配置（可用 mock transport / 单元级构造检查）。
+- [x] `internal/infra/telegram/proxy.go` 实现 http/https 代理（含可选账号密码）。
+- [x] 共享代理配置 UI/校验接受 `http`/`https`/`socks5`。
+- [x] 单测或表驱动校验 dial 配置（可用 mock transport / 单元级构造检查）。
 
 #### 降级透出
 
-- [ ] worker 在媒体因 capability/无公网 URL/超限/本地文件缺失而降级时，将原因写入 attempt 结果或 task 可读字段（避免只剩最终成功文本、看不出降级）。
-- [ ] 投递详情 UI 展示降级说明（如「渠道不支持图片且无公网 URL，已降级为文本」）。
-- [ ] Sink 测试连通性若依赖媒体，可提示公网 URL 未配置（最小：设置页与 Sink 能力提示联动）。
+- [x] worker 在媒体因 capability/无公网 URL/超限/本地文件缺失而降级时，将原因写入 attempt 结果或 task 可读字段（避免只剩最终成功文本、看不出降级）。
+- [x] 投递详情 UI 展示降级说明（如「渠道不支持图片且无公网 URL，已降级为文本」）。
+- [x] Sink 测试连通性若依赖媒体，可提示公网 URL 未配置（最小：设置页与 Sink 能力提示联动）。
 
 **建议 commits**：
 
@@ -274,4 +274,4 @@ cd web && npm run build
 | B1 | [x] | 复用 dashboard summary setup |
 | B2 | [ ] | |
 | B3 | [x] | 聚合 API + 失败可读 |
-| B4 | [ ] | |
+| B4 | [x] | HTTP(S) 代理 + 媒体降级透出 |

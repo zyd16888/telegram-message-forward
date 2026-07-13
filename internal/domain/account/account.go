@@ -19,7 +19,7 @@ const (
 
 // ProxyConfig 是代理配置。凭据字段在存储层加密。
 type ProxyConfig struct {
-	Type     string `json:"type,omitempty"` // socks5 | http
+	Type     string `json:"type,omitempty"` // socks5 | http | https
 	Addr     string `json:"addr,omitempty"`
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`

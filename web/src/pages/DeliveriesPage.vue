@@ -398,6 +398,12 @@ onMounted(() => {
             <div><span>引擎</span><strong>{{ engineLabel(detail) }}</strong></div>
             <div><span>触发对象</span><strong>{{ deliveryOriginLabel(detail) || '-' }}</strong></div>
           </div>
+          <section v-if="detail.last_error_readable || detail.last_error">
+            <div class="section-title">失败/降级说明</div>
+            <n-alert type="warning" :bordered="false" :show-icon="true">
+              {{ detail.last_error_readable || detail.last_error }}
+            </n-alert>
+          </section>
           <section>
             <div class="section-title">消息快照</div>
             <div class="detail-text">{{ messageText(detail) }}</div>

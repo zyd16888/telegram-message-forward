@@ -12,6 +12,7 @@ import (
 
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
+	pluginsink "telegram-message-forward/internal/plugin/sink"
 )
 
 type fakeMediaStore struct {
@@ -123,6 +124,39 @@ func TestLocalUploadMediaMaterializesStorageKey(t *testing.T) {
 	cleanup()
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("投递后应清理临时文件，stat err=%v", err)
+	}
+}
+
+func TestMediaDegradeReasonsWithoutPublicURL(t *testing.T) {
+	caps := domainsink.Capabilities{
+		SupportsImage: true,
+		Media: []domainsink.MediaCapability{
+			// 钉钉类：仅公网 URL，不支持二进制直传。
+			{Type: "image", Supported: true, SupportsPublicURL: true, SupportsBinary: false, RequiresUpload: false},
+		},
+	}
+	media := []domainmessage.Media{{
+		Type: "photo",
+		Size: 1024,
+		// 无本地文件、无 URL、无 RemoteURL。
+	}}
+	if supportsAllMedia(caps, media) {
+		t.Fatal("无公网 URL 时不应判定为可投递媒体")
+	}
+	reasons := mediaDegradeReasons(caps, media, false)
+	if len(reasons) == 0 {
+		t.Fatal("无公网 URL 且无本地文件时应给出降级原因")
+	}
+	joined := strings.Join(reasons, " ")
+	if !strings.Contains(joined, "公网") && !strings.Contains(joined, "降级") {
+		t.Fatalf("降级原因应说明公网/降级: %v", reasons)
+	}
+	note := attachDegradeNote(&pluginsink.Result{Success: true}, reasons)
+	if note == nil || !strings.Contains(string(note.ResponseSummary), "媒体降级") {
+		t.Fatalf("成功投递也应写入降级说明: %+v", note)
+	}
+	if got := degradeNoteFromSummary(note.ResponseSummary); got == "" {
+		t.Fatal("degradeNoteFromSummary 应解析出说明")
 	}
 }
 

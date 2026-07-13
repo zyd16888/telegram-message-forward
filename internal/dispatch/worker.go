@@ -134,7 +134,15 @@ func (w *Worker) process(ctx context.Context, task *domaindelivery.Task) {
 		attempt.Status = domaindelivery.AttemptSuccess
 		attempt.ResponseSummary = result.ResponseSummary
 		task.Status = domaindelivery.StatusSuccess
-		task.LastError = ""
+		// 成功但发生媒体降级时，保留可读说明到 LastError，便于列表/详情发现「静默变文本」。
+		if note := degradeNoteFromSummary(result.ResponseSummary); note != "" {
+			task.LastError = note
+			if attempt.Error == "" {
+				attempt.Error = note
+			}
+		} else {
+			task.LastError = ""
+		}
 	} else {
 		attempt.Status = domaindelivery.AttemptFailed
 		attempt.Error = errString(err, result)
@@ -205,11 +213,16 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 		Media:        media,
 		FallbackText: fallbackText,
 	}
+	degradeReasons := mediaDegradeReasons(caps, media, w.media != nil)
 	if len(media) > 0 && !supportsAllMedia(caps, media) {
 		payload.Format = string(domaintemplate.FormatText)
 		payload.Text = fallbackText
+		if len(degradeReasons) == 0 {
+			degradeReasons = []string{"渠道不支持当前媒体形态，已降级为文本"}
+		}
 	}
 	parts := splitPayload(payload, caps)
+	var last *pluginsink.Result
 	for i, part := range parts {
 		result, sendErr := plugin.Send(ctx, s, part, pluginsink.Options{})
 		if sendErr != nil {
@@ -222,14 +235,119 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 			result.Error = fmt.Sprintf("第 %d/%d 段发送失败: %s", i+1, len(parts), result.Error)
 			return result, nil
 		}
+		last = result
 		if len(parts) == 1 {
-			return result, nil
+			return attachDegradeNote(result, degradeReasons), nil
 		}
 	}
-	return &pluginsink.Result{
+	out := &pluginsink.Result{
 		Success:         true,
 		ResponseSummary: []byte(fmt.Sprintf("已分 %d 段发送", len(parts))),
-	}, nil
+	}
+	if last != nil && len(last.ResponseSummary) > 0 {
+		out.ResponseSummary = last.ResponseSummary
+	}
+	return attachDegradeNote(out, degradeReasons), nil
+}
+
+// mediaDegradeReasons 解释为何媒体会（或已经）降级为文本，供 attempt/详情展示。
+func mediaDegradeReasons(c domainsink.Capabilities, media []domainmessage.Media, mediaStoreConfigured bool) []string {
+	if len(media) == 0 {
+		return nil
+	}
+	var reasons []string
+	seen := map[string]struct{}{}
+	add := func(s string) {
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		reasons = append(reasons, s)
+	}
+	for _, item := range media {
+		if supportsMediaItem(c, item) {
+			continue
+		}
+		// 细粒度 capability 说明。
+		for _, candidate := range mediaCapabilityCandidates(c, item.Type) {
+			mc, ok := findMediaCapability(c.Media, candidate.kind)
+			if !ok {
+				if !candidate.coarse {
+					add(fmt.Sprintf("渠道未声明支持 %s，已降级为文本", mediaTypeLabel(item.Type)))
+				}
+				continue
+			}
+			if !mc.Supported {
+				add(fmt.Sprintf("渠道不支持%s，已降级为文本", mediaTypeLabel(item.Type)))
+				continue
+			}
+			if mc.MaxSizeMB > 0 && item.Size > int64(mc.MaxSizeMB)*1024*1024 {
+				add(fmt.Sprintf("%s超过渠道上限 %dMB，已降级为文本", mediaTypeLabel(item.Type), mc.MaxSizeMB))
+				continue
+			}
+			if !mc.SupportsPublicURL && !hasReadableLocalFile(item.LocalPath) && item.RemoteURL == "" {
+				if item.URL == "" && !mediaStoreConfigured {
+					add(fmt.Sprintf("渠道不支持直传%s且未配置媒体公网 URL，已降级为文本", mediaTypeLabel(item.Type)))
+				} else if item.URL == "" {
+					add(fmt.Sprintf("渠道不支持直传%s且无可用公网 URL/本地文件，已降级为文本", mediaTypeLabel(item.Type)))
+				} else if !mc.SupportsPublicURL {
+					// 有 URL 但渠道不认公网 URL，仍无本地文件。
+					add(fmt.Sprintf("渠道仅支持二进制上传%s，本地文件不可用，已降级为文本", mediaTypeLabel(item.Type)))
+				}
+				continue
+			}
+			if mc.Fallback != "" {
+				add(mc.Fallback)
+			}
+		}
+		if !supportsMediaItem(c, item) && len(reasons) == 0 {
+			add(fmt.Sprintf("%s无法按渠道能力投递，已降级为文本", mediaTypeLabel(item.Type)))
+		}
+	}
+	return reasons
+}
+
+func mediaTypeLabel(t string) string {
+	switch t {
+	case "photo", "image":
+		return "图片"
+	case "audio", "voice":
+		return "音频"
+	case "video":
+		return "视频"
+	case "file", "document":
+		return "文件"
+	default:
+		if t == "" {
+			return "媒体"
+		}
+		return t
+	}
+}
+
+func attachDegradeNote(result *pluginsink.Result, reasons []string) *pluginsink.Result {
+	if result == nil || len(reasons) == 0 {
+		return result
+	}
+	note := "媒体降级：" + strings.Join(reasons, "；")
+	if len(result.ResponseSummary) == 0 {
+		result.ResponseSummary = []byte(note)
+	} else {
+		result.ResponseSummary = append(result.ResponseSummary, []byte(" | "+note)...)
+	}
+	// 成功路径也把降级说明写入 Error 字段的可读旁路：process 成功时会清空 LastError，
+	// 故额外把说明放进 ResponseSummary；若失败则拼到 Error。
+	if !result.Success {
+		if result.Error == "" {
+			result.Error = note
+		} else if !strings.Contains(result.Error, "媒体降级") {
+			result.Error = result.Error + "；" + note
+		}
+	}
+	return result
 }
 
 func supportsFormat(c domainsink.Capabilities, f domaintemplate.Format) bool {
@@ -412,9 +530,18 @@ func mediaCapabilitySupports(mc domainsink.MediaCapability, item domainmessage.M
 	if mc.MaxSizeMB > 0 && item.Size > int64(mc.MaxSizeMB)*1024*1024 {
 		return false
 	}
-	// 只认二进制/上传的渠道（不支持公网 URL），媒体没有可读本地文件时无法真实发送，
-	// 提前降级为可读文本，避免 Sink 侧静默丢弃媒体。
-	if !mc.SupportsPublicURL && !hasReadableLocalFile(item.LocalPath) && item.RemoteURL == "" {
+	hasLocal := hasReadableLocalFile(item.LocalPath)
+	hasURL := item.URL != "" || item.RemoteURL != ""
+	// 只认二进制/上传的渠道：无本地文件时无法真实发送（公网 URL 也不认）。
+	if !mc.SupportsPublicURL && !hasLocal {
+		return false
+	}
+	// 只认公网 URL 的渠道：既无 URL 也无本地文件时必须降级。
+	if mc.SupportsPublicURL && !mc.SupportsBinary && !mc.RequiresUpload && !hasURL && !hasLocal {
+		return false
+	}
+	// 支持公网 URL 但当前也无 URL、且无本地文件时同样无法投递媒体本体。
+	if !hasLocal && !hasURL {
 		return false
 	}
 	return true
@@ -469,6 +596,17 @@ func mediaFallbackText(text string, media []domainmessage.Media, originalURL str
 		}
 	}
 	return out
+}
+
+func degradeNoteFromSummary(summary []byte) string {
+	if len(summary) == 0 {
+		return ""
+	}
+	s := string(summary)
+	if idx := strings.Index(s, "媒体降级："); idx >= 0 {
+		return strings.TrimSpace(s[idx:])
+	}
+	return ""
 }
 
 func humanBytes(n int64) string {

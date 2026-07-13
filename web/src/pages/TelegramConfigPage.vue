@@ -263,7 +263,14 @@ onMounted(load)
       <n-form label-placement="left" label-width="90">
         <n-form-item label="名称"><n-input v-model:value="proxyForm.name" /></n-form-item>
         <n-form-item label="类型">
-          <n-select v-model:value="proxyForm.type" :options="[{ label: 'socks5', value: 'socks5' }]" />
+          <n-select
+            v-model:value="proxyForm.type"
+            :options="[
+              { label: 'SOCKS5', value: 'socks5' },
+              { label: 'HTTP', value: 'http' },
+              { label: 'HTTPS', value: 'https' },
+            ]"
+          />
         </n-form-item>
         <n-form-item label="地址"><n-input v-model:value="proxyForm.addr" placeholder="host:port" /></n-form-item>
         <n-form-item label="用户名"><n-input v-model:value="proxyForm.username" /></n-form-item>
