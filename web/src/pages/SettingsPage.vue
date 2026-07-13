@@ -108,6 +108,53 @@ const mediaLoading = ref(false)
 const mediaSaving = ref(false)
 const s3Testing = ref(false)
 
+// --- 消息与投递记录归档 ---
+
+const retentionForm = ref({
+  messages_retention_days: 90,
+  delivery_tasks_retention_days: 90,
+})
+const retentionSource = ref<'database' | 'file'>('file')
+const retentionLoading = ref(false)
+const retentionSaving = ref(false)
+
+async function loadRetention() {
+  retentionLoading.value = true
+  try {
+    const dr = await settingsApi.dataRetention.get()
+    retentionForm.value = {
+      messages_retention_days: dr.messages_retention_days,
+      delivery_tasks_retention_days: dr.delivery_tasks_retention_days,
+    }
+    retentionSource.value = dr.source
+  } catch (e) {
+    message.error('加载归档设置失败：' + errText(e))
+  } finally {
+    retentionLoading.value = false
+  }
+}
+
+async function saveRetention() {
+  if (retentionForm.value.messages_retention_days < 0 || retentionForm.value.delivery_tasks_retention_days < 0) {
+    message.warning('保留天数不能为负数')
+    return
+  }
+  retentionSaving.value = true
+  try {
+    const dr = await settingsApi.dataRetention.update({ ...retentionForm.value })
+    retentionForm.value = {
+      messages_retention_days: dr.messages_retention_days,
+      delivery_tasks_retention_days: dr.delivery_tasks_retention_days,
+    }
+    retentionSource.value = dr.source
+    message.success('归档设置已保存，将在下次定时清理时生效')
+  } catch (e) {
+    message.error('保存归档设置失败：' + errText(e))
+  } finally {
+    retentionSaving.value = false
+  }
+}
+
 async function loadMedia() {
   mediaLoading.value = true
   try {
@@ -192,12 +239,52 @@ async function testS3() {
 onMounted(() => {
   loadTokens()
   loadMedia()
+  loadRetention()
 })
 </script>
 
 <template>
   <n-space vertical size="large">
     <PageHeader title="设置" desc="管理 API 鉴权与访问凭证" icon="settings" />
+
+    <n-card title="消息与投递记录归档">
+      <template #header-extra>
+        <n-tag size="small" :type="retentionSource === 'database' ? 'success' : 'default'" :bordered="false">
+          {{ retentionSource === 'database' ? '页面配置生效中' : '使用内置默认值' }}
+        </n-tag>
+      </template>
+      <n-spin :show="retentionLoading">
+        <n-space vertical size="large">
+          <n-text depth="3">
+            按保留天数自动清理历史消息与终态投递任务，避免长期运行后数据库无限膨胀。
+            仅影响历史数据，不影响实时监听与进行中的投递。0 表示不清理。保存后热生效。
+          </n-text>
+          <n-form label-placement="left" label-width="160" :show-feedback="false">
+            <n-form-item label="消息保留(天)">
+              <n-space align="center">
+                <n-input-number
+                  v-model:value="retentionForm.messages_retention_days"
+                  :min="0"
+                  style="width: 160px"
+                />
+                <n-text depth="3">按 received_at；删除消息时关联投递任务一并级联删除</n-text>
+              </n-space>
+            </n-form-item>
+            <n-form-item label="投递记录保留(天)">
+              <n-space align="center">
+                <n-input-number
+                  v-model:value="retentionForm.delivery_tasks_retention_days"
+                  :min="0"
+                  style="width: 160px"
+                />
+                <n-text depth="3">仅清理 success/failed/dead/cancelled；排队中任务保留</n-text>
+              </n-space>
+            </n-form-item>
+          </n-form>
+          <n-button type="primary" :loading="retentionSaving" @click="saveRetention">保存归档设置</n-button>
+        </n-space>
+      </n-spin>
+    </n-card>
 
     <n-card title="媒体存储">
       <template #header-extra>

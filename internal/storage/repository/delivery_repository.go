@@ -443,6 +443,34 @@ func toAttemptDomain(m *model.DeliveryAttempt) *domaindelivery.Attempt {
 	}
 }
 
+// DeleteTerminalBefore 分批删除 created_at < before 的终态投递任务。
+// attempts 经 FK ON DELETE CASCADE 一并删除；pending/processing/retrying 保留。
+func (r *DeliveryRepository) DeleteTerminalBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var ids []int64
+	if err := r.db.WithContext(ctx).
+		Model(&model.DeliveryTask{}).
+		Select("id").
+		Where("created_at < ? AND status IN ?", before, []string{
+			string(domaindelivery.StatusSuccess),
+			string(domaindelivery.StatusFailed),
+			string(domaindelivery.StatusDead),
+			string(domaindelivery.StatusCancelled),
+		}).
+		Order("id ASC").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := r.db.WithContext(ctx).Where("id IN ?", ids).Delete(&model.DeliveryTask{})
+	return res.RowsAffected, res.Error
+}
+
 func marshalMessageSnapshot(m *domainmessage.NormalizedMessage) (datatypes.JSON, error) {
 	if m == nil {
 		return nil, nil

@@ -109,3 +109,33 @@ func (r MediaSettingsRequest) ToSettings() appsettings.MediaSettings {
 		},
 	}
 }
+
+// DataRetentionDTO 是消息/投递记录保留策略响应。
+type DataRetentionDTO struct {
+	MessagesRetentionDays      int    `json:"messages_retention_days"`
+	DeliveryTasksRetentionDays int    `json:"delivery_tasks_retention_days"`
+	Source                     string `json:"source"`
+}
+
+// NewDataRetentionDTO 构造归档设置响应。
+func NewDataRetentionDTO(dr appsettings.DataRetentionSettings, source string) DataRetentionDTO {
+	return DataRetentionDTO{
+		MessagesRetentionDays:      dr.MessagesRetentionDays,
+		DeliveryTasksRetentionDays: dr.DeliveryTasksRetentionDays,
+		Source:                     source,
+	}
+}
+
+// DataRetentionRequest 是保存归档保留策略的请求体。
+type DataRetentionRequest struct {
+	MessagesRetentionDays      int `json:"messages_retention_days"`
+	DeliveryTasksRetentionDays int `json:"delivery_tasks_retention_days"`
+}
+
+// ToSettings 转换为应用层结构。
+func (r DataRetentionRequest) ToSettings() appsettings.DataRetentionSettings {
+	return appsettings.DataRetentionSettings{
+		MessagesRetentionDays:      r.MessagesRetentionDays,
+		DeliveryTasksRetentionDays: r.DeliveryTasksRetentionDays,
+	}
+}

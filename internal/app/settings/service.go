@@ -82,6 +82,39 @@ type MediaReloader func(ms MediaSettings, s3SecretKey string) error
 // MediaTester 校验一组 S3 设置的连通性（bootstrap 注入，底层走 mediastore）。
 type MediaTester func(ctx context.Context, ms MediaSettings, s3SecretKey string) error
 
+// DefaultMessagesRetentionDays 是消息保留天数默认值（0=不清理）。
+const DefaultMessagesRetentionDays = 90
+
+// DefaultDeliveryTasksRetentionDays 是投递任务保留天数默认值（0=不清理）。
+const DefaultDeliveryTasksRetentionDays = 90
+
+// archiveBatchSize 是单次分批删除上限，避免长锁。
+const archiveBatchSize = 500
+
+// maxArchiveRounds 是单次归档任务最多循环批次数。
+const maxArchiveRounds = 100
+
+// DataRetentionSettings 是消息与投递记录保留策略。
+// 0 表示不清理；单位为天，保存后热生效。
+type DataRetentionSettings struct {
+	MessagesRetentionDays      int `json:"messages_retention_days"`
+	DeliveryTasksRetentionDays int `json:"delivery_tasks_retention_days"`
+}
+
+// ArchiveResult 汇总一次归档清理的删除计数。
+type ArchiveResult struct {
+	DeletedMessages      int64 `json:"deleted_messages"`
+	DeletedDeliveryTasks int64 `json:"deleted_delivery_tasks"`
+}
+
+// ArchiveStore 负责按时间窗口分批删除历史消息与终态投递任务。
+type ArchiveStore interface {
+	// DeleteTerminalDeliveryTasksBefore 删除 created_at < before 的终态投递任务（含 attempts 级联）。
+	DeleteTerminalDeliveryTasksBefore(ctx context.Context, before time.Time, limit int) (int64, error)
+	// DeleteMessagesBefore 删除 received_at < before 的消息（delivery_tasks 经 FK CASCADE）。
+	DeleteMessagesBefore(ctx context.Context, before time.Time, limit int) (int64, error)
+}
+
 // Service 是系统设置应用服务。
 type Service struct {
 	repo         domainsettings.Repository
@@ -89,6 +122,8 @@ type Service struct {
 	fileSecret   string
 	reload       MediaReloader
 	testS3       MediaTester
+	archive      ArchiveStore
+	now          func() time.Time
 }
 
 // NewService 创建设置服务，配置文件的 media 段作为默认值。
@@ -97,6 +132,7 @@ func NewService(repo domainsettings.Repository, fileCfg config.MediaConfig) *Ser
 		repo:         repo,
 		fileDefaults: fromConfig(fileCfg),
 		fileSecret:   fileCfg.S3.SecretKey,
+		now:          time.Now,
 	}
 }
 
@@ -105,6 +141,9 @@ func (s *Service) SetMediaReloader(fn MediaReloader) { s.reload = fn }
 
 // SetMediaTester 注入 S3 连通性测试实现。
 func (s *Service) SetMediaTester(fn MediaTester) { s.testS3 = fn }
+
+// SetArchiveStore 注入消息/投递归档存储。
+func (s *Service) SetArchiveStore(store ArchiveStore) { s.archive = store }
 
 // EffectiveMedia 返回当前生效的媒体设置、S3 secret 明文与来源。
 // 仅供 bootstrap 装配与内部重载使用，不得直接返回给 API。
@@ -199,6 +238,131 @@ func (s *Service) TestS3(ctx context.Context, in MediaSettings, s3SecretKey *str
 		return err
 	}
 	return s.testS3(ctx, in, secret)
+}
+
+// GetDataRetention 返回当前生效的归档保留策略。
+func (s *Service) GetDataRetention(ctx context.Context) (DataRetentionSettings, string, error) {
+	row, err := s.repo.Get(ctx, domainsettings.KeyDataRetention)
+	if err != nil {
+		return DataRetentionSettings{}, "", err
+	}
+	if row == nil {
+		return defaultDataRetention(), SourceFile, nil
+	}
+	dr, err := decodeDataRetention(row.Value)
+	if err != nil {
+		return DataRetentionSettings{}, "", err
+	}
+	return dr, SourceDatabase, nil
+}
+
+// UpdateDataRetention 校验并保存归档保留策略（热生效，下次定时清理读取新值）。
+func (s *Service) UpdateDataRetention(ctx context.Context, in DataRetentionSettings) (DataRetentionSettings, error) {
+	if err := validateDataRetention(in); err != nil {
+		return DataRetentionSettings{}, err
+	}
+	value, err := encodeDataRetention(in)
+	if err != nil {
+		return DataRetentionSettings{}, err
+	}
+	if err := s.repo.Upsert(ctx, &domainsettings.Setting{
+		Key:   domainsettings.KeyDataRetention,
+		Value: value,
+	}); err != nil {
+		return DataRetentionSettings{}, err
+	}
+	return in, nil
+}
+
+// RunArchiveCleanup 按当前保留策略分批清理过期消息与终态投递任务。
+// 保留天数为 0 时对应类型不清理。先清投递再清消息，避免无用的长事务。
+func (s *Service) RunArchiveCleanup(ctx context.Context) (ArchiveResult, error) {
+	var out ArchiveResult
+	if s.archive == nil {
+		return out, nil
+	}
+	dr, _, err := s.GetDataRetention(ctx)
+	if err != nil {
+		return out, err
+	}
+	now := s.now()
+	if dr.DeliveryTasksRetentionDays > 0 {
+		before := now.Add(-time.Duration(dr.DeliveryTasksRetentionDays) * 24 * time.Hour)
+		n, err := deleteInBatches(ctx, archiveBatchSize, maxArchiveRounds, func(limit int) (int64, error) {
+			return s.archive.DeleteTerminalDeliveryTasksBefore(ctx, before, limit)
+		})
+		if err != nil {
+			return out, fmt.Errorf("清理过期投递任务失败: %w", err)
+		}
+		out.DeletedDeliveryTasks = n
+	}
+	if dr.MessagesRetentionDays > 0 {
+		before := now.Add(-time.Duration(dr.MessagesRetentionDays) * 24 * time.Hour)
+		n, err := deleteInBatches(ctx, archiveBatchSize, maxArchiveRounds, func(limit int) (int64, error) {
+			return s.archive.DeleteMessagesBefore(ctx, before, limit)
+		})
+		if err != nil {
+			return out, fmt.Errorf("清理过期消息失败: %w", err)
+		}
+		out.DeletedMessages = n
+	}
+	return out, nil
+}
+
+func deleteInBatches(ctx context.Context, batch, maxRounds int, fn func(limit int) (int64, error)) (int64, error) {
+	var total int64
+	for i := 0; i < maxRounds; i++ {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		n, err := fn(batch)
+		if err != nil {
+			return total, err
+		}
+		total += n
+		if n < int64(batch) {
+			break
+		}
+	}
+	return total, nil
+}
+
+func defaultDataRetention() DataRetentionSettings {
+	return DataRetentionSettings{
+		MessagesRetentionDays:      DefaultMessagesRetentionDays,
+		DeliveryTasksRetentionDays: DefaultDeliveryTasksRetentionDays,
+	}
+}
+
+func validateDataRetention(in DataRetentionSettings) error {
+	if in.MessagesRetentionDays < 0 || in.DeliveryTasksRetentionDays < 0 {
+		return fmt.Errorf("保留天数不能为负数（0 表示不清理）")
+	}
+	return nil
+}
+
+func encodeDataRetention(in DataRetentionSettings) (map[string]any, error) {
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return nil, fmt.Errorf("序列化归档设置失败: %w", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("序列化归档设置失败: %w", err)
+	}
+	return out, nil
+}
+
+func decodeDataRetention(value map[string]any) (DataRetentionSettings, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return DataRetentionSettings{}, fmt.Errorf("解析归档设置失败: %w", err)
+	}
+	var dr DataRetentionSettings
+	if err := json.Unmarshal(raw, &dr); err != nil {
+		return DataRetentionSettings{}, fmt.Errorf("解析归档设置失败: %w", err)
+	}
+	return dr, nil
 }
 
 // resolveSecret 处理「留空不修改」：入参非 nil 用入参，否则沿用当前生效 secret。

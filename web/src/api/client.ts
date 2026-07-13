@@ -29,6 +29,8 @@ import type {
   MediaSettings,
   MediaSettingsRequest,
   MediaS3TestResult,
+  DataRetentionSettings,
+  DataRetentionRequest,
   AIProvider,
   AIProviderRequest,
   AIProviderTestResult,
@@ -388,6 +390,12 @@ export const settingsApi = {
       http.put<ApiItem<MediaSettings>>('/settings/media', body).then((r) => r.data.data),
     testS3: (body: MediaSettingsRequest) =>
       http.post<ApiItem<MediaS3TestResult>>('/settings/media/test-s3', body).then((r) => r.data.data),
+  },
+  dataRetention: {
+    get: () =>
+      http.get<ApiItem<DataRetentionSettings>>('/settings/data-retention').then((r) => r.data.data),
+    update: (body: DataRetentionRequest) =>
+      http.put<ApiItem<DataRetentionSettings>>('/settings/data-retention', body).then((r) => r.data.data),
   },
   backups: {
     export: (password: string, includeSessions: boolean) =>

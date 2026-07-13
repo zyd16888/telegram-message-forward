@@ -62,16 +62,17 @@ import (
 
 // App 持有已装配的运行时依赖。
 type App struct {
-	cfg        *config.Config
-	log        *slog.Logger
-	server     *http.Server
-	workers    []*dispatch.Worker
-	srcManager *appsource.Manager
-	tgLogin    *apptelegramlogin.Service
-	aiSched    *appaidigest.Scheduler
-	mediaStore *mediastore.Manager
-	db         *sql.DB
-	deps       *Deps
+	cfg         *config.Config
+	log         *slog.Logger
+	server      *http.Server
+	workers     []*dispatch.Worker
+	srcManager  *appsource.Manager
+	tgLogin     *apptelegramlogin.Service
+	aiSched     *appaidigest.Scheduler
+	mediaStore  *mediastore.Manager
+	settingsSvc *appsettings.Service
+	db          *sql.DB
+	deps        *Deps
 }
 
 // Deps 汇总各层已装配的依赖，供 API、CLI 等复用。
@@ -154,6 +155,10 @@ func Build(cfg *config.Config) (*App, error) {
 	// Manager 支持设置保存后热重载，无需重启。
 	settingsRepo := repository.NewSettingRepository(db, cipher)
 	settingsSvc := appsettings.NewService(settingsRepo, cfg.Media)
+	settingsSvc.SetArchiveStore(appsettings.RepoArchiveStore{
+		Deliveries: deliveries,
+		Messages:   messages,
+	})
 	mediaStore := mediastore.NewManager()
 	mediaSignKey := []byte(cfg.Security.EncryptionKey)
 	// Telegram 下载策略随媒体设置一起热更新：reloadMedia 时刷新，插件通过闭包读取。
@@ -344,7 +349,11 @@ func Build(cfg *config.Config) (*App, error) {
 		AIDigest:     aiDigestSvc,
 	}
 
-	return &App{cfg: cfg, log: log, server: server, workers: workers, srcManager: srcManager, tgLogin: tgLoginSvc, aiSched: aiScheduler, mediaStore: mediaStore, db: sqlDB, deps: deps}, nil
+	return &App{
+		cfg: cfg, log: log, server: server, workers: workers,
+		srcManager: srcManager, tgLogin: tgLoginSvc, aiSched: aiScheduler,
+		mediaStore: mediaStore, settingsSvc: settingsSvc, db: sqlDB, deps: deps,
+	}, nil
 }
 
 // Handler 返回已装配的 HTTP handler，供集成测试使用。
@@ -418,6 +427,39 @@ func (a *App) runMediaCleanup(ctx context.Context) {
 	}
 }
 
+// runDataArchiveCleanup 启动时与每小时按保留天数分批清理消息与终态投递任务。
+// 保留策略热读取；0 表示不清理。
+func (a *App) runDataArchiveCleanup(ctx context.Context) {
+	if a.settingsSvc == nil {
+		return
+	}
+	cleanup := func() {
+		res, err := a.settingsSvc.RunArchiveCleanup(ctx)
+		if err != nil {
+			a.log.Warn("归档清理失败", "err", err)
+			return
+		}
+		if res.DeletedMessages > 0 || res.DeletedDeliveryTasks > 0 {
+			a.log.Info("已清理过期消息与投递记录",
+				"messages", res.DeletedMessages,
+				"delivery_tasks", res.DeletedDeliveryTasks,
+			)
+		}
+	}
+	cleanup()
+
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cleanup()
+		}
+	}
+}
+
 // Run 启动投递 worker 与 HTTP 服务，阻塞直到 ctx 取消后优雅关闭。
 func (a *App) Run(ctx context.Context) error {
 	runtimeLock, acquired, err := storage.TryAcquireRuntimeLock(ctx, a.db)
@@ -458,6 +500,13 @@ func (a *App) Run(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		a.runMediaCleanup(ctx)
+	}()
+
+	// 按保留天数分批清理消息与终态投递任务（设置页热生效）。
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		a.runDataArchiveCleanup(ctx)
 	}()
 
 	wg.Add(1)

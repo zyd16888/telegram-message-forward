@@ -483,6 +483,18 @@ export interface MediaS3TestResult {
   error?: string
 }
 
+export interface DataRetentionSettings {
+  messages_retention_days: number
+  delivery_tasks_retention_days: number
+  // database：页面已保存；file：使用内置默认值。
+  source: 'database' | 'file'
+}
+
+export interface DataRetentionRequest {
+  messages_retention_days: number
+  delivery_tasks_retention_days: number
+}
+
 export type BackupCounts = Record<string, number>
 
 export interface BackupManifest {

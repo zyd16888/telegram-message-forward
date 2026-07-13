@@ -63,3 +63,27 @@ func (h *SettingsHandler) TestMediaS3(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"success": true}})
 }
+
+// GetDataRetention 返回消息与投递记录保留策略。
+func (h *SettingsHandler) GetDataRetention(c *gin.Context) {
+	dr, source, err := h.svc.GetDataRetention(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewDataRetentionDTO(dr, source)})
+}
+
+// UpdateDataRetention 保存归档保留策略（热生效）。
+func (h *SettingsHandler) UpdateDataRetention(c *gin.Context) {
+	var req dto.DataRetentionRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	dr, err := h.svc.UpdateDataRetention(c.Request.Context(), req.ToSettings())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewDataRetentionDTO(dr, appsettings.SourceDatabase)})
+}

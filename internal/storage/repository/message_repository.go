@@ -321,6 +321,29 @@ func toMessageModel(m *domainmessage.NormalizedMessage) (*model.Message, error) 
 	}, nil
 }
 
+// DeleteBefore 分批删除 received_at < before 的消息。
+// 关联 delivery_tasks / attempts 经 FK ON DELETE CASCADE 一并删除。
+func (r *MessageRepository) DeleteBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var ids []int64
+	if err := r.db.WithContext(ctx).
+		Model(&model.Message{}).
+		Select("id").
+		Where("received_at < ?", before).
+		Order("id ASC").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := r.db.WithContext(ctx).Where("id IN ?", ids).Delete(&model.Message{})
+	return res.RowsAffected, res.Error
+}
+
 func toMessageDomain(m *model.Message) (*domainmessage.NormalizedMessage, error) {
 	var media []domainmessage.Media
 	if len(m.Media) > 0 {

@@ -124,3 +124,120 @@ func TestUpdateMediaValidation(t *testing.T) {
 		t.Fatal("公网地址缺少协议应报错")
 	}
 }
+
+type fakeArchive struct {
+	msgBefore  time.Time
+	msgLimit   int
+	taskBefore time.Time
+	taskLimit  int
+	msgDeleted int64
+	taskDeleted int64
+	// expiredMsg / expiredTask 模拟「过期可删」计数；0 表示库中没有过期行。
+	expiredMsg  int64
+	expiredTask int64
+}
+
+func (f *fakeArchive) DeleteTerminalDeliveryTasksBefore(_ context.Context, before time.Time, limit int) (int64, error) {
+	f.taskBefore = before
+	f.taskLimit = limit
+	if f.expiredTask <= 0 {
+		return 0, nil
+	}
+	n := f.expiredTask
+	if int64(limit) < n {
+		n = int64(limit)
+	}
+	f.expiredTask -= n
+	f.taskDeleted += n
+	return n, nil
+}
+
+func (f *fakeArchive) DeleteMessagesBefore(_ context.Context, before time.Time, limit int) (int64, error) {
+	f.msgBefore = before
+	f.msgLimit = limit
+	if f.expiredMsg <= 0 {
+		return 0, nil
+	}
+	n := f.expiredMsg
+	if int64(limit) < n {
+		n = int64(limit)
+	}
+	f.expiredMsg -= n
+	f.msgDeleted += n
+	return n, nil
+}
+
+func TestRunArchiveCleanupZeroRetentionSkipsDelete(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, fileCfg())
+	arch := &fakeArchive{expiredMsg: 10, expiredTask: 10}
+	svc.SetArchiveStore(arch)
+	fixed := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return fixed }
+
+	if _, err := svc.UpdateDataRetention(context.Background(), DataRetentionSettings{
+		MessagesRetentionDays:      0,
+		DeliveryTasksRetentionDays: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.RunArchiveCleanup(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DeletedMessages != 0 || res.DeletedDeliveryTasks != 0 {
+		t.Fatalf("保留天数 0 不应删除: %+v", res)
+	}
+	if arch.msgDeleted != 0 || arch.taskDeleted != 0 {
+		t.Fatalf("fake 不应被调用删除: msg=%d task=%d", arch.msgDeleted, arch.taskDeleted)
+	}
+}
+
+func TestRunArchiveCleanupDeletesExpiredKeepsFresh(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, fileCfg())
+	arch := &fakeArchive{expiredMsg: 3, expiredTask: 2}
+	svc.SetArchiveStore(arch)
+	fixed := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return fixed }
+
+	if _, err := svc.UpdateDataRetention(context.Background(), DataRetentionSettings{
+		MessagesRetentionDays:      1,
+		DeliveryTasksRetentionDays: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.RunArchiveCleanup(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DeletedMessages != 3 || res.DeletedDeliveryTasks != 2 {
+		t.Fatalf("应删除过期行: %+v", res)
+	}
+	wantMsgCutoff := fixed.Add(-24 * time.Hour)
+	wantTaskCutoff := fixed.Add(-48 * time.Hour)
+	if !arch.msgBefore.Equal(wantMsgCutoff) {
+		t.Fatalf("消息 cutoff = %v, want %v", arch.msgBefore, wantMsgCutoff)
+	}
+	if !arch.taskBefore.Equal(wantTaskCutoff) {
+		t.Fatalf("投递 cutoff = %v, want %v", arch.taskBefore, wantTaskCutoff)
+	}
+
+	// 未过期：expired 计数为 0 时不删。
+	arch2 := &fakeArchive{expiredMsg: 0, expiredTask: 0}
+	svc.SetArchiveStore(arch2)
+	res2, err := svc.RunArchiveCleanup(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.DeletedMessages != 0 || res2.DeletedDeliveryTasks != 0 {
+		t.Fatalf("无过期行不应删除: %+v", res2)
+	}
+}
+
+func TestUpdateDataRetentionValidation(t *testing.T) {
+	svc := NewService(newFakeRepo(), fileCfg())
+	if _, err := svc.UpdateDataRetention(context.Background(), DataRetentionSettings{MessagesRetentionDays: -1}); err == nil {
+		t.Fatal("负数保留天数应报错")
+	}
+}
