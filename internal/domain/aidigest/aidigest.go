@@ -40,8 +40,10 @@ type Profile struct {
 	Name      string
 	Enabled   bool
 	SourceIDs []int64
-	// FilterID 引用共享过滤器；为 0 表示使用内联 Conditions。
-	FilterID       int64
+	// FilterID 兼容旧单过滤器字段；优先使用 FilterIDs。
+	FilterID int64
+	// FilterIDs 引用多个共享过滤器，全部命中（AND）才纳入；为空时回退 FilterID 或内联 Conditions。
+	FilterIDs      []int64
 	Conditions     []domainflow.ConditionConfig
 	Schedule       ScheduleConfig
 	Window         WindowConfig
@@ -58,6 +60,17 @@ type Profile struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	RecentRun        *Run
+	// Stats 是近窗统计（列表接口填充，不落库）。
+	Stats *ProfileStats
+}
+
+// ProfileStats 是 Profile 近窗运行统计。
+type ProfileStats struct {
+	SinceHours int   `json:"since_hours"`
+	Runs       int64 `json:"runs"`
+	Success    int64 `json:"success"`
+	Failed     int64 `json:"failed"`
+	Tokens     int64 `json:"tokens"`
 }
 
 // OutputTemplate 是可被多个 Profile 复用的输出结构模板。
@@ -185,11 +198,12 @@ type Run struct {
 }
 
 type DeliveryTaskSummary struct {
-	ID           int64  `json:"id"`
-	SinkID       int64  `json:"sink_id"`
-	Status       string `json:"status"`
-	AttemptCount int    `json:"attempt_count"`
-	LastError    string `json:"last_error,omitempty"`
+	ID                int64  `json:"id"`
+	SinkID            int64  `json:"sink_id"`
+	Status            string `json:"status"`
+	AttemptCount      int    `json:"attempt_count"`
+	LastError         string `json:"last_error,omitempty"`
+	LastErrorReadable string `json:"last_error_readable,omitempty"`
 }
 
 type RunItem struct {
@@ -335,4 +349,8 @@ type Repository interface {
 	GetOutputByRunID(ctx context.Context, runID int64) (*Output, error)
 	CleanupRuns(ctx context.Context, before time.Time) (int64, error)
 	RecoverStaleRuns(ctx context.Context, before, finishedAt time.Time) (int64, error)
+	// AggregateStatsSince 汇总 since 之后各 Profile 的运行计数与 token。
+	AggregateStatsSince(ctx context.Context, since time.Time) (map[int64]ProfileStats, error)
+	// AggregateGlobalStatsSince 汇总 since 之后全局 AI 运行统计。
+	AggregateGlobalStatsSince(ctx context.Context, since time.Time) (ProfileStats, error)
 }

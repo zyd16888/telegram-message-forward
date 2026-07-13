@@ -238,6 +238,17 @@ function openRunsDrawer(profile: AIDigestProfile): void {
   showRunsDrawer.value = true
 }
 
+async function cloneFromRunDetail(runId: number): Promise<void> {
+  try {
+    const profile = await aiApi.runs.cloneProfile(runId)
+    message.success(`已创建禁用的 Profile「${profile.name}」`)
+    showDetail.value = false
+    openClonedProfile(profile)
+  } catch (e) {
+    message.error('复制 Profile 失败：' + errText(e))
+  }
+}
+
 async function openRunDetail(id: number, timeZone?: string): Promise<void> {
   detailLoading.value = true
   selectedDetail.value = null
@@ -355,7 +366,12 @@ onBeforeUnmount(() => {
       title="AI 运行详情"
       :style="{ width: 'min(1000px, calc(100vw - 32px))' }"
     >
-      <AIDigestRunDetail :detail="selectedDetail" :loading="detailLoading" :time-zone="detailTimeZone" />
+      <AIDigestRunDetail
+        :detail="selectedDetail"
+        :loading="detailLoading"
+        :time-zone="detailTimeZone"
+        @clone-profile="cloneFromRunDetail"
+      />
     </NModal>
   </NSpace>
 </template>

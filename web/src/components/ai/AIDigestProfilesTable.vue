@@ -38,16 +38,31 @@ const columns: DataTableColumns<AIDigestProfile> = [
   },
   { title: '调度', key: 'schedule', width: 240, render: (row) => h(AIDigestScheduleStatus, { schedule: row.schedule, enabled: row.enabled, now: props.now }) },
   {
-    title: '最近运行', key: 'recent_run', minWidth: 210,
+    title: '近 7 天', key: 'stats', width: 130,
+    render: (row) => {
+      const st = row.stats
+      if (!st || !st.runs) return h(NText, { depth: 3 }, { default: () => '—' })
+      return h('div', { class: 'stats-cell', title: `成功 ${st.success} / 失败 ${st.failed}` }, [
+        h('span', `${st.runs} 次`),
+        h('small', `${st.tokens || 0} tok`),
+        st.failed ? h('small', { class: 'stats-fail' }, `${st.failed} 失败`) : null,
+      ])
+    },
+  },
+  {
+    title: '最近运行', key: 'recent_run', minWidth: 230,
     render: (row) => {
       const run = row.recent_run
       if (!run) return h(NText, { depth: 3 }, { default: () => '—' })
       const value = runDisplayTime(run)
+      const err = run.error_readable || run.error
       return h('div', { class: 'recent-run', title: formatDateTimeTitle(value, row.schedule.timezone) }, [
         h(NTag, { size: 'small', type: statusType(run.status), bordered: false }, { default: () => statusLabel(run.status) }),
         h('span', formatDateTime(value, { timeZone: row.schedule.timezone, seconds: false })),
-        run.finished_at ? h('small', `耗时 ${formatDuration(run.started_at, run.finished_at)}`) : null,
-        run.error ? h('small', { class: 'recent-error', title: run.error }, run.error) : null,
+        run.finished_at
+          ? h('small', `耗时 ${formatDuration(run.started_at, run.finished_at)} · ${run.token_usage?.total_tokens ?? 0} tok`)
+          : null,
+        err ? h('small', { class: 'recent-error', title: err }, err) : null,
       ])
     },
   },
@@ -73,7 +88,7 @@ function statusType(status: string): 'success' | 'error' | 'info' | 'warning' | 
 </script>
 
 <template>
-  <NDataTable :loading="loading" :columns="columns" :data="profiles" :bordered="false" :scroll-x="1120" :row-key="(row: AIDigestProfile) => row.id">
+  <NDataTable :loading="loading" :columns="columns" :data="profiles" :bordered="false" :scroll-x="1280" :row-key="(row: AIDigestProfile) => row.id">
     <template #empty>
       <div class="empty-state">
         <p>还没有 AI 整理任务。</p>
@@ -89,5 +104,8 @@ function statusType(status: string): 'success' | 'error' | 'info' | 'warning' | 
 :deep(.recent-run) { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 8px; align-items: center; min-width: 190px; }
 :deep(.recent-run small) { grid-column: 2; color: var(--clay-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :deep(.recent-run .recent-error) { color: var(--clay-error); }
+:deep(.stats-cell) { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+:deep(.stats-cell small) { color: var(--clay-text-3); }
+:deep(.stats-cell .stats-fail) { color: var(--clay-error); }
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 0; color: var(--clay-text-3); }
 </style>

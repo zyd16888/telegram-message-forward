@@ -355,6 +355,13 @@ export interface DashboardSummary {
     source: DashboardFailureBucket[]
   }
   setup: DashboardSetupStatus
+  ai?: {
+    profiles: number
+    runs: number
+    success: number
+    failed: number
+    tokens: number
+  }
 }
 
 export interface MessageDeliveryCounts {
@@ -527,6 +534,7 @@ export interface MediaS3TestResult {
 export interface DataRetentionSettings {
   messages_retention_days: number
   delivery_tasks_retention_days: number
+  ai_runs_retention_days: number
   // database：页面已保存；file：使用内置默认值。
   source: 'database' | 'file'
 }
@@ -534,6 +542,7 @@ export interface DataRetentionSettings {
 export interface DataRetentionRequest {
   messages_retention_days: number
   delivery_tasks_retention_days: number
+  ai_runs_retention_days: number
 }
 
 export type BackupCounts = Record<string, number>
@@ -643,12 +652,21 @@ export interface AIDigestMediaAudit {
   reason?: string
 }
 
+export interface AIDigestProfileStats {
+  since_hours: number
+  runs: number
+  success: number
+  failed: number
+  tokens: number
+}
+
 export interface AIDigestProfile {
   id: number
   name: string
   enabled: boolean
   source_ids: number[]
   filter_id: number
+  filter_ids: number[]
   conditions: ConditionConfig[]
   schedule: AIDigestSchedule
   window: AIDigestWindow
@@ -662,6 +680,7 @@ export interface AIDigestProfile {
   limits: AIDigestLimits
   multimodal: AIDigestMultimodalConfig
   recent_run?: AIDigestRun
+  stats?: AIDigestProfileStats
   created_at: string
   updated_at: string
 }
@@ -705,6 +724,7 @@ export interface AIDigestRun {
   }
   media_audit?: AIDigestMediaAudit[]
   error?: string
+  error_readable?: string
   started_at?: string
   finished_at?: string
   created_at: string
@@ -714,6 +734,7 @@ export interface AIDigestRun {
     status: string
     attempt_count: number
     last_error?: string
+    last_error_readable?: string
   }>
 }
 

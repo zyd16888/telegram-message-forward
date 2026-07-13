@@ -113,6 +113,7 @@ const s3Testing = ref(false)
 const retentionForm = ref({
   messages_retention_days: 90,
   delivery_tasks_retention_days: 90,
+  ai_runs_retention_days: 30,
 })
 const retentionSource = ref<'database' | 'file'>('file')
 const retentionLoading = ref(false)
@@ -125,6 +126,7 @@ async function loadRetention() {
     retentionForm.value = {
       messages_retention_days: dr.messages_retention_days,
       delivery_tasks_retention_days: dr.delivery_tasks_retention_days,
+      ai_runs_retention_days: dr.ai_runs_retention_days ?? 30,
     }
     retentionSource.value = dr.source
   } catch (e) {
@@ -135,7 +137,11 @@ async function loadRetention() {
 }
 
 async function saveRetention() {
-  if (retentionForm.value.messages_retention_days < 0 || retentionForm.value.delivery_tasks_retention_days < 0) {
+  if (
+    retentionForm.value.messages_retention_days < 0 ||
+    retentionForm.value.delivery_tasks_retention_days < 0 ||
+    retentionForm.value.ai_runs_retention_days < 0
+  ) {
     message.warning('保留天数不能为负数')
     return
   }
@@ -145,6 +151,7 @@ async function saveRetention() {
     retentionForm.value = {
       messages_retention_days: dr.messages_retention_days,
       delivery_tasks_retention_days: dr.delivery_tasks_retention_days,
+      ai_runs_retention_days: dr.ai_runs_retention_days ?? 30,
     }
     retentionSource.value = dr.source
     message.success('归档设置已保存，将在下次定时清理时生效')
@@ -278,6 +285,16 @@ onMounted(() => {
                   style="width: 160px"
                 />
                 <n-text depth="3">仅清理 success/failed/dead/cancelled；排队中任务保留</n-text>
+              </n-space>
+            </n-form-item>
+            <n-form-item label="AI 运行保留(天)">
+              <n-space align="center">
+                <n-input-number
+                  v-model:value="retentionForm.ai_runs_retention_days"
+                  :min="0"
+                  style="width: 160px"
+                />
+                <n-text depth="3">AI 整理 Run/明细/输出；0 表示不清理，默认 30</n-text>
               </n-space>
             </n-form-item>
           </n-form>

@@ -88,6 +88,9 @@ const DefaultMessagesRetentionDays = 90
 // DefaultDeliveryTasksRetentionDays 是投递任务保留天数默认值（0=不清理）。
 const DefaultDeliveryTasksRetentionDays = 90
 
+// DefaultAIRunsRetentionDays 是 AI 运行记录保留天数默认值。
+const DefaultAIRunsRetentionDays = 30
+
 // archiveBatchSize 是单次分批删除上限，避免长锁。
 const archiveBatchSize = 500
 
@@ -99,6 +102,8 @@ const maxArchiveRounds = 100
 type DataRetentionSettings struct {
 	MessagesRetentionDays      int `json:"messages_retention_days"`
 	DeliveryTasksRetentionDays int `json:"delivery_tasks_retention_days"`
+	// AIRunsRetentionDays 是 AI 整理 run 保留天数；0=不清理。
+	AIRunsRetentionDays int `json:"ai_runs_retention_days"`
 }
 
 // ArchiveResult 汇总一次归档清理的删除计数。
@@ -331,14 +336,31 @@ func defaultDataRetention() DataRetentionSettings {
 	return DataRetentionSettings{
 		MessagesRetentionDays:      DefaultMessagesRetentionDays,
 		DeliveryTasksRetentionDays: DefaultDeliveryTasksRetentionDays,
+		AIRunsRetentionDays:        DefaultAIRunsRetentionDays,
 	}
 }
 
 func validateDataRetention(in DataRetentionSettings) error {
-	if in.MessagesRetentionDays < 0 || in.DeliveryTasksRetentionDays < 0 {
+	if in.MessagesRetentionDays < 0 || in.DeliveryTasksRetentionDays < 0 || in.AIRunsRetentionDays < 0 {
 		return fmt.Errorf("保留天数不能为负数（0 表示不清理）")
 	}
 	return nil
+}
+
+func decodeDataRetention(value map[string]any) (DataRetentionSettings, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return DataRetentionSettings{}, fmt.Errorf("解析归档设置失败: %w", err)
+	}
+	var dr DataRetentionSettings
+	if err := json.Unmarshal(raw, &dr); err != nil {
+		return DataRetentionSettings{}, fmt.Errorf("解析归档设置失败: %w", err)
+	}
+	// 历史记录无 ai 字段时回落默认 30 天，避免「字段缺失=0 永不清理」的意外。
+	if _, ok := value["ai_runs_retention_days"]; !ok && dr.AIRunsRetentionDays == 0 {
+		dr.AIRunsRetentionDays = DefaultAIRunsRetentionDays
+	}
+	return dr, nil
 }
 
 func encodeDataRetention(in DataRetentionSettings) (map[string]any, error) {
@@ -351,18 +373,6 @@ func encodeDataRetention(in DataRetentionSettings) (map[string]any, error) {
 		return nil, fmt.Errorf("序列化归档设置失败: %w", err)
 	}
 	return out, nil
-}
-
-func decodeDataRetention(value map[string]any) (DataRetentionSettings, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return DataRetentionSettings{}, fmt.Errorf("解析归档设置失败: %w", err)
-	}
-	var dr DataRetentionSettings
-	if err := json.Unmarshal(raw, &dr); err != nil {
-		return DataRetentionSettings{}, fmt.Errorf("解析归档设置失败: %w", err)
-	}
-	return dr, nil
 }
 
 // resolveSecret 处理「留空不修改」：入参非 nil 用入参，否则沿用当前生效 secret。

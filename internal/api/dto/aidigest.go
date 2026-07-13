@@ -5,6 +5,7 @@ import (
 	"time"
 
 	appaidigest "telegram-message-forward/internal/app/aidigest"
+	appdelivery "telegram-message-forward/internal/app/delivery"
 	domainaidigest "telegram-message-forward/internal/domain/aidigest"
 	domainflow "telegram-message-forward/internal/domain/flow"
 	domainmessage "telegram-message-forward/internal/domain/message"
@@ -128,6 +129,7 @@ type AIDigestProfileDTO struct {
 	Enabled          bool                            `json:"enabled"`
 	SourceIDs        []int64                         `json:"source_ids"`
 	FilterID         int64                           `json:"filter_id"`
+	FilterIDs        []int64                         `json:"filter_ids"`
 	Conditions       []domainflow.ConditionConfig    `json:"conditions"`
 	Schedule         domainaidigest.ScheduleConfig   `json:"schedule"`
 	Window           domainaidigest.WindowConfig     `json:"window"`
@@ -141,6 +143,7 @@ type AIDigestProfileDTO struct {
 	Limits           domainaidigest.LimitsConfig     `json:"limits"`
 	Multimodal       domainaidigest.MultimodalConfig `json:"multimodal"`
 	RecentRun        *AIDigestRunDTO                 `json:"recent_run,omitempty"`
+	Stats            *domainaidigest.ProfileStats    `json:"stats,omitempty"`
 	CreatedAt        time.Time                       `json:"created_at"`
 	UpdatedAt        time.Time                       `json:"updated_at"`
 }
@@ -150,6 +153,7 @@ type AIDigestProfileRequest struct {
 	Enabled          bool                            `json:"enabled"`
 	SourceIDs        []int64                         `json:"source_ids"`
 	FilterID         int64                           `json:"filter_id"`
+	FilterIDs        []int64                         `json:"filter_ids"`
 	Conditions       []domainflow.ConditionConfig    `json:"conditions"`
 	Schedule         domainaidigest.ScheduleConfig   `json:"schedule"`
 	Window           domainaidigest.WindowConfig     `json:"window"`
@@ -170,12 +174,17 @@ func NewAIDigestProfileDTO(p *domainaidigest.Profile) AIDigestProfileDTO {
 		dto := NewAIDigestRunDTO(p.RecentRun)
 		recent = &dto
 	}
+	filterIDs := p.FilterIDs
+	if len(filterIDs) == 0 && p.FilterID > 0 {
+		filterIDs = []int64{p.FilterID}
+	}
 	return AIDigestProfileDTO{
 		ID:               p.ID,
 		Name:             p.Name,
 		Enabled:          p.Enabled,
 		SourceIDs:        p.SourceIDs,
 		FilterID:         p.FilterID,
+		FilterIDs:        filterIDs,
 		Conditions:       p.Conditions,
 		Schedule:         p.Schedule,
 		Window:           p.Window,
@@ -189,6 +198,7 @@ func NewAIDigestProfileDTO(p *domainaidigest.Profile) AIDigestProfileDTO {
 		Limits:           p.Limits,
 		Multimodal:       p.Multimodal,
 		RecentRun:        recent,
+		Stats:            p.Stats,
 		CreatedAt:        p.CreatedAt,
 		UpdatedAt:        p.UpdatedAt,
 	}
@@ -200,6 +210,7 @@ func (r AIDigestProfileRequest) ToInput() appaidigest.ProfileInput {
 		Enabled:          r.Enabled,
 		SourceIDs:        r.SourceIDs,
 		FilterID:         r.FilterID,
+		FilterIDs:        r.FilterIDs,
 		Conditions:       r.Conditions,
 		Schedule:         r.Schedule,
 		Window:           r.Window,
@@ -235,6 +246,7 @@ type AIDigestRunDTO struct {
 	TokenUsage         domainaidigest.TokenUsage            `json:"token_usage"`
 	MediaAudit         []domainaidigest.MediaAudit          `json:"media_audit,omitempty"`
 	Error              string                               `json:"error,omitempty"`
+	ErrorReadable      string                               `json:"error_readable,omitempty"`
 	StartedAt          *time.Time                           `json:"started_at,omitempty"`
 	FinishedAt         *time.Time                           `json:"finished_at,omitempty"`
 	CreatedAt          time.Time                            `json:"created_at"`
@@ -262,6 +274,7 @@ func NewAIDigestRunDTO(r *domainaidigest.Run) AIDigestRunDTO {
 		TokenUsage:         r.TokenUsage,
 		MediaAudit:         r.MediaAudit,
 		Error:              r.Error,
+		ErrorReadable:      appdelivery.HumanizeError(r.Error),
 		StartedAt:          r.StartedAt,
 		FinishedAt:         r.FinishedAt,
 		CreatedAt:          r.CreatedAt,

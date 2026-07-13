@@ -13,6 +13,9 @@ const props = defineProps<{
   loading?: boolean
   timeZone?: string
 }>()
+const emit = defineEmits<{
+  cloneProfile: [runId: number]
+}>()
 
 const message = useMessage()
 
@@ -101,7 +104,7 @@ function deliveryStatusLabel(status: string): string {
         </div>
 
         <NAlert v-if="detail.run.error" type="error" title="本次 AI 运行失败">
-          {{ detail.run.error }}
+          {{ detail.run.error_readable || detail.run.error }}
         </NAlert>
         <NAlert v-else-if="detail.run.prompt_omitted_count" type="warning" title="部分消息未进入 Prompt">
           因 Prompt 字符上限省略 {{ detail.run.prompt_omitted_count }} 条；本次实际提交 {{ detail.run.prompt_message_count }} 条。
@@ -112,10 +115,13 @@ function deliveryStatusLabel(status: string): string {
 
         <NTabs type="line" animated>
           <NTabPane name="output" tab="AI 输出">
-            <div v-if="outputContent" class="output-toolbar">
-              <NButton size="small" secondary @click="copyOutput">
+            <div v-if="outputContent || detail.run.id" class="output-toolbar">
+              <NButton v-if="outputContent" size="small" secondary @click="copyOutput">
                 <template #icon><ClayIcon name="copy" :size="15" /></template>
                 复制输出
+              </NButton>
+              <NButton size="small" secondary @click="emit('cloneProfile', detail.run.id)">
+                从本次运行复制 Profile
               </NButton>
             </div>
             <NInput
@@ -169,7 +175,9 @@ function deliveryStatusLabel(status: string): string {
                   <NTag size="small" :type="task.status === 'success' ? 'success' : task.status === 'dead' || task.status === 'failed' ? 'error' : 'warning'">
                     {{ deliveryStatusLabel(task.status) }} · {{ task.attempt_count }} 次
                   </NTag>
-                  <small v-if="task.last_error" :title="task.last_error">{{ task.last_error }}</small>
+                  <small v-if="task.last_error_readable || task.last_error" :title="task.last_error">
+                    {{ task.last_error_readable || task.last_error }}
+                  </small>
                 </div>
               </div>
             </NCard>

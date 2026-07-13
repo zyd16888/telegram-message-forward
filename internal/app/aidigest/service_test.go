@@ -423,6 +423,31 @@ func (r *memoryDigestRepo) GetOutputByRunID(context.Context, int64) (*domainaidi
 	return nil, nil
 }
 func (r *memoryDigestRepo) CleanupRuns(context.Context, time.Time) (int64, error) { return 0, nil }
+func (r *memoryDigestRepo) AggregateStatsSince(context.Context, time.Time) (map[int64]domainaidigest.ProfileStats, error) {
+	return map[int64]domainaidigest.ProfileStats{}, nil
+}
+func (r *memoryDigestRepo) AggregateGlobalStatsSince(context.Context, time.Time) (domainaidigest.ProfileStats, error) {
+	return domainaidigest.ProfileStats{}, nil
+}
+
+func TestNormalizeProfileFilterIDs(t *testing.T) {
+	got := normalizeProfileFilterIDs(&domainaidigest.Profile{FilterID: 3, FilterIDs: []int64{1, 0, 1, 2}})
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("应去重且忽略 0，不追加 legacy: %v", got)
+	}
+	legacy := normalizeProfileFilterIDs(&domainaidigest.Profile{FilterID: 9})
+	if len(legacy) != 1 || legacy[0] != 9 {
+		t.Fatalf("仅 legacy filter_id 时应回落: %v", legacy)
+	}
+}
+
+func TestCleanupRunsZeroSkips(t *testing.T) {
+	svc := NewService(Deps{Repo: &memoryDigestRepo{}, Clock: fixedClock{now: time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)}})
+	n, err := svc.CleanupRuns(context.Background(), 0)
+	if err != nil || n != 0 {
+		t.Fatalf("0 retention should skip: n=%d err=%v", n, err)
+	}
+}
 
 func strPtr(v string) *string { return &v }
 

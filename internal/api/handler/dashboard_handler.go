@@ -76,5 +76,12 @@ func toDashboardSummaryDTO(s *appdashboard.Summary) gin.H {
 			"has_media_public_url":   s.Setup.HasMediaPublicURL,
 			"media_url_recommended":  s.Setup.MediaURLRecommended,
 		},
+		"ai": gin.H{
+			"profiles": s.AI.Profiles,
+			"runs":     s.AI.Runs,
+			"success":  s.AI.Success,
+			"failed":   s.AI.Failed,
+			"tokens":   s.AI.Tokens,
+		},
 	}
 }

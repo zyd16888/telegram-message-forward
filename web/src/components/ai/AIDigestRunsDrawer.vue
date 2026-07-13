@@ -45,9 +45,12 @@ const columns: DataTableColumns<AIDigestRun> = [
   },
   {
     title: '错误', key: 'error', minWidth: 150,
-    render: (row) => row.error
-      ? h(NText, { type: 'error', class: 'run-error', title: row.error }, { default: () => row.error })
-      : h(NText, { depth: 3 }, { default: () => '—' }),
+    render: (row) => {
+      const err = row.error_readable || row.error
+      return err
+        ? h(NText, { type: 'error', class: 'run-error', title: err }, { default: () => err })
+        : h(NText, { depth: 3 }, { default: () => '—' })
+    },
   },
   {
     title: '操作', key: 'actions', width: 246, fixed: 'right',
@@ -112,7 +115,7 @@ async function cloneProfile(run: AIDigestRun): Promise<void> {
 function cleanup(): void {
   dialog.warning({
     title: '清理运行记录',
-    content: '系统每天会自动清理 30 天前记录。是否立即执行一次清理？',
+    content: '将按系统设置中的 AI 运行保留天数清理过期记录（默认 30 天）。是否立即执行一次？',
     positiveText: '立即清理',
     negativeText: '取消',
     onPositiveClick: async () => {

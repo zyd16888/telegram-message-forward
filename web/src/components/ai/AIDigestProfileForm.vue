@@ -46,6 +46,7 @@ const form = reactive<AIDigestProfileRequest>({
   enabled: false,
   source_ids: [],
   filter_id: 0,
+  filter_ids: [],
   conditions: [],
   schedule: { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai', cron: '0 9 * * *' },
   window: { type: 'last_duration', duration_minutes: 60 },
@@ -134,13 +135,27 @@ const templateSelectOptions = computed(() => [
 const selectedTemplate = computed(() => props.templates.find((t) => t.id === form.output_template_id) ?? null)
 const usingSharedTemplate = computed(() => form.output_template_id > 0)
 
-// 过滤条件：0 = 自定义内联；否则引用共享过滤器 id。
-const usingFilter = computed(() => form.filter_id > 0)
-const selectedFilter = computed(() => props.filters.find((f) => f.id === form.filter_id) ?? null)
-const conditionSourceOptions = computed(() => [
-  { label: '自定义条件（本 Profile 专用）', value: 0 },
-  ...props.filters.map((f) => ({ label: f.description ? `${f.name} — ${f.description}` : f.name, value: f.id })),
-])
+// 过滤：filter_ids 非空 = 引用共享过滤器（多选 AND）；否则自定义内联。
+const usingFilter = computed(() => (form.filter_ids?.length ?? 0) > 0 || form.filter_id > 0)
+const selectedFilters = computed(() => {
+  const ids = form.filter_ids?.length ? form.filter_ids : form.filter_id > 0 ? [form.filter_id] : []
+  return ids.map((id) => props.filters.find((f) => f.id === id)).filter(Boolean)
+})
+const filterOptions = computed(() =>
+  props.filters.map((f) => ({ label: f.description ? `${f.name} — ${f.description}` : f.name, value: f.id })),
+)
+const conditionMode = computed({
+  get: (): 'shared' | 'inline' => (usingFilter.value ? 'shared' : 'inline'),
+  set: (mode: 'shared' | 'inline') => {
+    if (mode === 'inline') {
+      form.filter_ids = []
+      form.filter_id = 0
+    } else if (!form.filter_ids?.length && props.filters[0]) {
+      form.filter_ids = [props.filters[0].id]
+      form.filter_id = props.filters[0].id
+    }
+  },
+})
 
 const promptSelection = reactive({ start: -1, end: -1 })
 
@@ -160,6 +175,7 @@ function reset(): void {
     form.enabled = false
     form.source_ids = []
     form.filter_id = 0
+    form.filter_ids = []
     form.conditions = []
     form.schedule = { type: 'manual', interval_minutes: 60, time: '09:00', timezone: 'Asia/Shanghai', cron: '0 9 * * *' }
     form.window = { type: 'last_duration', duration_minutes: 60 }
@@ -182,11 +198,18 @@ function reset(): void {
     }
     return
   }
+  const filterIds =
+    props.profile.filter_ids?.length
+      ? [...props.profile.filter_ids]
+      : props.profile.filter_id
+        ? [props.profile.filter_id]
+        : []
   Object.assign(form, {
     name: props.profile.name,
     enabled: props.profile.enabled,
     source_ids: [...props.profile.source_ids],
-    filter_id: props.profile.filter_id ?? 0,
+    filter_id: filterIds[0] ?? 0,
+    filter_ids: filterIds,
     conditions: props.profile.conditions.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } })),
     schedule: { ...props.profile.schedule },
     window: { ...props.profile.window },
@@ -293,11 +316,13 @@ function rememberPromptSelection(event: Event): void {
 }
 
 function payload(): AIDigestProfileRequest {
+  const filterIds = usingFilter.value ? [...(form.filter_ids ?? [])].filter((id) => id > 0) : []
   return {
     name: form.name.trim(),
     enabled: form.enabled,
     source_ids: [...form.source_ids],
-    filter_id: form.filter_id,
+    filter_id: filterIds[0] ?? 0,
+    filter_ids: filterIds,
     conditions: usingFilter.value ? [] : form.conditions.map((item) => ({ type: item.type, config: { ...(item.config ?? {}) } })),
     schedule: { ...form.schedule },
     window: { ...form.window },
@@ -385,22 +410,41 @@ function defaultOutputTemplate(): string {
               <div class="field-label">输入来源与过滤</div>
               <NButton size="tiny" text type="primary" @click="emit('manageFilters'); show = false">管理过滤器</NButton>
             </div>
-            <div class="field-hint">过滤只影响 AI 输入，不影响原始消息实时转发。可引用共享过滤器，或写本 Profile 专用条件。</div>
+            <div class="field-hint">过滤只影响 AI 输入，不影响原始消息实时转发。可多选共享过滤器（AND），或写本 Profile 专用条件。</div>
             <NFormItem label="Source">
               <NSelect v-model:value="form.source_ids" multiple filterable :options="sourceOptions" />
             </NFormItem>
             <NFormItem label="过滤条件来源">
-              <NSelect v-model:value="form.filter_id" :options="conditionSourceOptions" />
+              <NSelect
+                :value="conditionMode"
+                :options="[
+                  { label: '自定义条件（本 Profile 专用）', value: 'inline' },
+                  { label: '共享过滤器（可多选，AND）', value: 'shared' },
+                ]"
+                @update:value="(v: 'shared' | 'inline') => (conditionMode = v)"
+              />
             </NFormItem>
 
             <template v-if="usingFilter">
+              <NFormItem label="共享过滤器">
+                <NSelect
+                  v-model:value="form.filter_ids"
+                  multiple
+                  filterable
+                  :options="filterOptions"
+                  placeholder="选择一个或多个过滤器，全部命中才纳入"
+                  @update:value="(ids: number[]) => { form.filter_ids = ids; form.filter_id = ids[0] ?? 0 }"
+                />
+              </NFormItem>
               <NAlert type="info" :show-icon="false" class="filter-note">
-                使用共享过滤器「{{ selectedFilter?.name }}」的 {{ selectedFilter?.conditions.length ?? 0 }} 个条件。修改该过滤器会联动所有引用它的地方。
+                已选 {{ selectedFilters.length }} 个共享过滤器，条件按 AND 合并。修改过滤器会联动所有引用处。
               </NAlert>
-              <div v-if="selectedFilter?.conditions.length" class="filter-cond-list">
-                <NTag v-for="(c, i) in selectedFilter?.conditions" :key="i" size="small" :bordered="false" type="info">
-                  {{ conditionDescriptor(c.type)?.label ?? c.type }}
-                </NTag>
+              <div class="filter-cond-list">
+                <template v-for="f in selectedFilters" :key="f!.id">
+                  <NTag v-for="(c, i) in f!.conditions" :key="`${f!.id}-${i}`" size="small" :bordered="false" type="info">
+                    {{ f!.name }} · {{ conditionDescriptor(c.type)?.label ?? c.type }}
+                  </NTag>
+                </template>
               </div>
             </template>
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 
+	appdelivery "telegram-message-forward/internal/app/delivery"
 	domainaidigest "telegram-message-forward/internal/domain/aidigest"
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
 	domainfilter "telegram-message-forward/internal/domain/filter"
@@ -442,14 +443,45 @@ func validateOutputTemplate(t *domainaidigest.OutputTemplate) error {
 	return nil
 }
 
-// resolveConditions 优先返回引用的共享过滤器条件，否则回退内联条件。
+// resolveConditions 合并共享过滤器条件（多过滤器 AND：条件列表拼接后全部求值），否则回退内联条件。
 func (s *Service) resolveConditions(ctx context.Context, p *domainaidigest.Profile) []domainflow.ConditionConfig {
-	if p.FilterID > 0 && s.filters != nil {
-		if f, err := s.filters.GetByID(ctx, p.FilterID); err == nil && f != nil {
-			return f.Conditions
+	ids := normalizeProfileFilterIDs(p)
+	if len(ids) > 0 && s.filters != nil {
+		var out []domainflow.ConditionConfig
+		for _, id := range ids {
+			f, err := s.filters.GetByID(ctx, id)
+			if err != nil || f == nil {
+				continue
+			}
+			out = append(out, f.Conditions...)
+		}
+		if len(out) > 0 {
+			return out
 		}
 	}
 	return p.Conditions
+}
+
+func normalizeProfileFilterIDs(p *domainaidigest.Profile) []int64 {
+	if p == nil {
+		return nil
+	}
+	ids := make([]int64, 0, len(p.FilterIDs)+1)
+	seen := map[int64]struct{}{}
+	for _, id := range p.FilterIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 && p.FilterID > 0 {
+		ids = append(ids, p.FilterID)
+	}
+	return ids
 }
 
 // resolveOutputTemplate 优先返回引用的共享模板内容，否则回退内联自定义，最后回退内置默认。
@@ -472,6 +504,7 @@ type ProfileInput struct {
 	Enabled          bool
 	SourceIDs        []int64
 	FilterID         int64
+	FilterIDs        []int64
 	Conditions       []domainflow.ConditionConfig
 	Schedule         domainaidigest.ScheduleConfig
 	Window           domainaidigest.WindowConfig
@@ -518,11 +551,32 @@ func (s *Service) ListProfiles(ctx context.Context) ([]*domainaidigest.Profile, 
 	if err != nil {
 		return nil, err
 	}
+	statsByID, _ := s.repo.AggregateStatsSince(ctx, s.clk.Now().Add(-7*24*time.Hour))
 	for _, p := range profiles {
 		normalizeProfileDefaults(p)
 		s.withNextRun(ctx, p)
+		if st, ok := statsByID[p.ID]; ok {
+			st.SinceHours = 7 * 24
+			cp := st
+			p.Stats = &cp
+		} else {
+			p.Stats = &domainaidigest.ProfileStats{SinceHours: 7 * 24}
+		}
 	}
 	return profiles, nil
+}
+
+// GlobalStats 返回近 sinceHours 小时 AI 运行聚合（Dashboard 用）。
+func (s *Service) GlobalStats(ctx context.Context, sinceHours int) (domainaidigest.ProfileStats, error) {
+	if sinceHours <= 0 {
+		sinceHours = 24
+	}
+	st, err := s.repo.AggregateGlobalStatsSince(ctx, s.clk.Now().Add(-time.Duration(sinceHours)*time.Hour))
+	if err != nil {
+		return domainaidigest.ProfileStats{}, err
+	}
+	st.SinceHours = sinceHours
+	return st, nil
 }
 
 func (s *Service) GetProfile(ctx context.Context, id int64) (*domainaidigest.Profile, error) {
@@ -618,6 +672,7 @@ func (s *Service) GetRunDetail(ctx context.Context, id int64) (*domainaidigest.R
 		run.DeliveryTasks = append(run.DeliveryTasks, domainaidigest.DeliveryTaskSummary{
 			ID: task.ID, SinkID: task.SinkID, Status: string(task.Status),
 			AttemptCount: task.AttemptCount, LastError: task.LastError,
+			LastErrorReadable: appdelivery.HumanizeError(task.LastError),
 		})
 	}
 	return &domainaidigest.RunDetail{Run: run, Items: items, Output: out}, nil
@@ -672,8 +727,11 @@ func (s *Service) CancelRun(ctx context.Context, id int64) error {
 }
 
 func (s *Service) CleanupRuns(ctx context.Context, retentionDays int) (int64, error) {
-	if retentionDays <= 0 {
-		retentionDays = 30
+	if retentionDays < 0 {
+		return 0, errors.New("保留天数不能为负")
+	}
+	if retentionDays == 0 {
+		return 0, nil // 0 = 不清理
 	}
 	return s.repo.CleanupRuns(ctx, s.clk.Now().Add(-time.Duration(retentionDays)*24*time.Hour))
 }
@@ -871,9 +929,6 @@ func (s *Service) createDeliveryTasks(ctx context.Context, p *domainaidigest.Pro
 		if err != nil {
 			return nil, err
 		}
-		if !sk.Enabled {
-			continue
-		}
 		msg := &domainmessage.NormalizedMessage{
 			SourceID:       0,
 			MessageType:    "text",
@@ -894,6 +949,12 @@ func (s *Service) createDeliveryTasks(ctx context.Context, p *domainaidigest.Pro
 			Status:          domaindelivery.StatusPending,
 			MaxAttempts:     3,
 			MessageSnapshot: msg,
+		}
+		// 禁用渠道仍生成 cancelled 任务，便于审计「为何没投出去」。
+		if !sk.Enabled {
+			task.Status = domaindelivery.StatusCancelled
+			task.LastError = "目标渠道已禁用，任务已取消"
+			task.MaxAttempts = 0
 		}
 		if err := s.tasks.Create(ctx, task); err != nil {
 			return nil, err
@@ -1248,9 +1309,17 @@ func (s *Service) validateProfile(ctx context.Context, p *domainaidigest.Profile
 			return fmt.Errorf("引用的输出模板不存在 (id=%d): %w", p.OutputTemplateID, err)
 		}
 	}
-	if p.FilterID > 0 && s.filters != nil {
-		if _, err := s.filters.GetByID(ctx, p.FilterID); err != nil {
-			return fmt.Errorf("引用的过滤器不存在 (id=%d): %w", p.FilterID, err)
+	p.FilterIDs = normalizeProfileFilterIDs(p)
+	if len(p.FilterIDs) > 0 {
+		p.FilterID = p.FilterIDs[0]
+	} else {
+		p.FilterID = 0
+	}
+	if len(p.FilterIDs) > 0 && s.filters != nil {
+		for _, id := range p.FilterIDs {
+			if _, err := s.filters.GetByID(ctx, id); err != nil {
+				return fmt.Errorf("引用的过滤器不存在 (id=%d): %w", id, err)
+			}
 		}
 	}
 	p.Dedupe.Enabled = true
@@ -1437,12 +1506,13 @@ func providerFromInput(in ProviderInput) domainaidigest.ProviderConfig {
 }
 
 func profileFromInput(id int64, in ProfileInput) *domainaidigest.Profile {
-	return &domainaidigest.Profile{
+	p := &domainaidigest.Profile{
 		ID:               id,
 		Name:             in.Name,
 		Enabled:          in.Enabled,
 		SourceIDs:        in.SourceIDs,
 		FilterID:         in.FilterID,
+		FilterIDs:        in.FilterIDs,
 		Conditions:       in.Conditions,
 		Schedule:         in.Schedule,
 		Window:           in.Window,
@@ -1456,6 +1526,11 @@ func profileFromInput(id int64, in ProfileInput) *domainaidigest.Profile {
 		Limits:           in.Limits,
 		Multimodal:       in.Multimodal,
 	}
+	p.FilterIDs = normalizeProfileFilterIDs(p)
+	if len(p.FilterIDs) > 0 {
+		p.FilterID = p.FilterIDs[0]
+	}
+	return p
 }
 
 func normalizeProfileDefaults(p *domainaidigest.Profile) {

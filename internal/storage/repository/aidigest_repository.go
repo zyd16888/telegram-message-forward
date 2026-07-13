@@ -66,6 +66,7 @@ func (r *AIDigestRepository) UpdateProfile(ctx context.Context, p *domainaidiges
 			"output_template_id": m.OutputTemplateID,
 			"output_template":    m.OutputTemplate,
 			"filter_id":          m.FilterID,
+			"filter_ids":         m.FilterIDs,
 			"target_sink_ids":    m.TargetSinkIDs,
 			"model_config":       m.ModelConfig,
 			"limits":             m.Limits,
@@ -420,6 +421,70 @@ func (r *AIDigestRepository) RecoverStaleRuns(ctx context.Context, before, finis
 	return res.RowsAffected, res.Error
 }
 
+func (r *AIDigestRepository) AggregateStatsSince(ctx context.Context, since time.Time) (map[int64]domainaidigest.ProfileStats, error) {
+	type row struct {
+		ProfileID int64
+		Runs      int64
+		Success   int64
+		Failed    int64
+		Tokens    int64
+	}
+	var rows []row
+	// token_usage 为 jsonb，total_tokens 可能缺失。
+	err := r.db.WithContext(ctx).Raw(`
+SELECT
+  profile_id,
+  COUNT(*) AS runs,
+  COUNT(*) FILTER (WHERE status = 'success') AS success,
+  COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+  COALESCE(SUM(COALESCE((token_usage->>'total_tokens')::bigint, 0)), 0) AS tokens
+FROM ai_digest_runs
+WHERE created_at >= ? AND profile_id IS NOT NULL AND trigger_type <> 'preview'
+GROUP BY profile_id
+`, since).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]domainaidigest.ProfileStats, len(rows))
+	for _, row := range rows {
+		out[row.ProfileID] = domainaidigest.ProfileStats{
+			Runs:    row.Runs,
+			Success: row.Success,
+			Failed:  row.Failed,
+			Tokens:  row.Tokens,
+		}
+	}
+	return out, nil
+}
+
+func (r *AIDigestRepository) AggregateGlobalStatsSince(ctx context.Context, since time.Time) (domainaidigest.ProfileStats, error) {
+	type row struct {
+		Runs    int64
+		Success int64
+		Failed  int64
+		Tokens  int64
+	}
+	var one row
+	err := r.db.WithContext(ctx).Raw(`
+SELECT
+  COUNT(*) AS runs,
+  COUNT(*) FILTER (WHERE status = 'success') AS success,
+  COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+  COALESCE(SUM(COALESCE((token_usage->>'total_tokens')::bigint, 0)), 0) AS tokens
+FROM ai_digest_runs
+WHERE created_at >= ? AND trigger_type <> 'preview'
+`, since).Scan(&one).Error
+	if err != nil {
+		return domainaidigest.ProfileStats{}, err
+	}
+	return domainaidigest.ProfileStats{
+		Runs:    one.Runs,
+		Success: one.Success,
+		Failed:  one.Failed,
+		Tokens:  one.Tokens,
+	}, nil
+}
+
 func (r *AIDigestRepository) latestRun(ctx context.Context, profileID int64) (*domainaidigest.Run, error) {
 	var m model.AIDigestRun
 	if err := r.db.WithContext(ctx).
@@ -468,6 +533,15 @@ func toAIDigestProfileModel(p *domainaidigest.Profile) (*model.AIDigestProfile, 
 	if err != nil {
 		return nil, err
 	}
+	filterIDs := normalizeFilterIDs(p.FilterIDs, p.FilterID)
+	filterIDsJSON, err := marshalJSON(filterIDs)
+	if err != nil {
+		return nil, err
+	}
+	primaryFilter := int64(0)
+	if len(filterIDs) > 0 {
+		primaryFilter = filterIDs[0]
+	}
 	return &model.AIDigestProfile{
 		ID:               p.ID,
 		Name:             p.Name,
@@ -481,7 +555,8 @@ func toAIDigestProfileModel(p *domainaidigest.Profile) (*model.AIDigestProfile, 
 		OutputFormat:     p.OutputFormat,
 		OutputTemplateID: nullablePositive(p.OutputTemplateID),
 		OutputTemplate:   p.OutputTemplate,
-		FilterID:         nullablePositive(p.FilterID),
+		FilterID:         nullablePositive(primaryFilter),
+		FilterIDs:        filterIDsJSON,
 		TargetSinkIDs:    targets,
 		ModelConfig:      modelCfg,
 		Limits:           limits,
@@ -489,6 +564,25 @@ func toAIDigestProfileModel(p *domainaidigest.Profile) (*model.AIDigestProfile, 
 		CreatedAt:        p.CreatedAt,
 		UpdatedAt:        p.UpdatedAt,
 	}, nil
+}
+
+func normalizeFilterIDs(ids []int64, legacy int64) []int64 {
+	out := make([]int64, 0, len(ids))
+	seen := map[int64]struct{}{}
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 && legacy > 0 {
+		out = append(out, legacy)
+	}
+	return out
 }
 
 func toAIDigestProfileDomain(m *model.AIDigestProfile) (*domainaidigest.Profile, error) {
@@ -507,6 +601,15 @@ func toAIDigestProfileDomain(m *model.AIDigestProfile) (*domainaidigest.Profile,
 	}
 	p.CreatedAt = m.CreatedAt
 	p.UpdatedAt = m.UpdatedAt
+	if len(m.FilterIDs) > 0 {
+		if err := unmarshalJSON(m.FilterIDs, &p.FilterIDs); err != nil {
+			return nil, err
+		}
+	}
+	p.FilterIDs = normalizeFilterIDs(p.FilterIDs, p.FilterID)
+	if p.FilterID == 0 && len(p.FilterIDs) > 0 {
+		p.FilterID = p.FilterIDs[0]
+	}
 	if err := unmarshalJSON(m.SourceIDs, &p.SourceIDs); err != nil {
 		return nil, err
 	}

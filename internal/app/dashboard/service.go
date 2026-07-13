@@ -16,13 +16,29 @@ import (
 
 // Summary 是 Dashboard 一次请求返回的聚合数据。
 type Summary struct {
-	SinceHours int
-	Resources  ResourceCounts
-	Status     map[string]int64
+	SinceHours  int
+	Resources   ResourceCounts
+	Status      map[string]int64
 	WindowTotal int64
-	Queue      QueueSummary
+	Queue       QueueSummary
 	TopFailures TopFailures
-	Setup      SetupStatus
+	Setup       SetupStatus
+	AI          AIStats
+}
+
+// AIStats 是近窗 AI 整理概况。
+type AIStats struct {
+	Profiles int64 `json:"profiles"`
+	Runs     int64 `json:"runs"`
+	Success  int64 `json:"success"`
+	Failed   int64 `json:"failed"`
+	Tokens   int64 `json:"tokens"`
+}
+
+// AIStatsProvider 提供 AI 运行聚合。
+type AIStatsProvider interface {
+	GlobalStats(ctx context.Context, sinceHours int) (runs, success, failed, tokens int64, err error)
+	CountProfiles(ctx context.Context) (int64, error)
 }
 
 // ResourceCounts 是资源实体计数。
@@ -119,6 +135,7 @@ type Deps struct {
 	Flows        FlowLister
 	TelegramApps TelegramAppCounter
 	MediaURL     MediaPublicURL
+	AI           AIStatsProvider
 	Now          func() time.Time
 }
 
@@ -166,6 +183,19 @@ func (s *Service) Summary(ctx context.Context, sinceHours int) (*Summary, error)
 		return nil, err
 	}
 
+	aiStats := AIStats{}
+	if s.deps.AI != nil {
+		runs, success, failed, tokens, aerr := s.deps.AI.GlobalStats(ctx, sinceHours)
+		if aerr != nil {
+			return nil, fmt.Errorf("统计 AI 运行失败: %w", aerr)
+		}
+		profiles, perr := s.deps.AI.CountProfiles(ctx)
+		if perr != nil {
+			return nil, fmt.Errorf("统计 AI Profile 失败: %w", perr)
+		}
+		aiStats = AIStats{Profiles: profiles, Runs: runs, Success: success, Failed: failed, Tokens: tokens}
+	}
+
 	return &Summary{
 		SinceHours:  sinceHours,
 		Resources:   resources,
@@ -182,6 +212,7 @@ func (s *Service) Summary(ctx context.Context, sinceHours int) (*Summary, error)
 			Source: sourceTop,
 		},
 		Setup: setup,
+		AI:    aiStats,
 	}, nil
 }
 

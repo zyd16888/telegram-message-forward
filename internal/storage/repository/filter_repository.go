@@ -94,7 +94,10 @@ func (r *FilterRepository) CountReferences(ctx context.Context, id int64) (int64
 		return 0, err
 	}
 	var profileCount int64
-	if err := r.db.WithContext(ctx).Model(&model.AIDigestProfile{}).Where("filter_id = ?", id).Count(&profileCount).Error; err != nil {
+	// 兼容旧 filter_id 与新 filter_ids jsonb 数组。
+	if err := r.db.WithContext(ctx).Model(&model.AIDigestProfile{}).
+		Where("filter_id = ? OR COALESCE(filter_ids, '[]'::jsonb) @> jsonb_build_array(?)", id, id).
+		Count(&profileCount).Error; err != nil {
 		return 0, err
 	}
 	return flowCount + profileCount, nil

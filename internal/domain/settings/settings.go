@@ -22,6 +22,8 @@ const KeyAIProviders = "ai.providers"
 // KeyDataRetention 是消息与投递记录保留策略设置组。
 const KeyDataRetention = "data_retention"
 
+// Data retention 字段中的 AI run 天数键名见 app/settings.DataRetentionSettings.
+
 // Setting 是一组系统设置。
 type Setting struct {
 	Key       string

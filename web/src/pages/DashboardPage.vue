@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import { aiApi, dashboardApi } from '@/api/client'
+import { dashboardApi } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import type { DashboardFailureBucket, DashboardSetupStatus, DashboardSummary } from '@/types'
 import { errText } from '@/utils/error'
@@ -13,10 +13,16 @@ const auth = useAuthStore()
 const router = useRouter()
 
 const summary = ref<DashboardSummary | null>(null)
-const aiStats = ref({ total: 0, success: 0, failed: 0, tokens: 0 })
 const loading = ref(false)
 const windowHours = 24
 const checklistCollapsed = ref(false)
+const aiStats = computed(() => ({
+  total: summary.value?.ai?.runs ?? 0,
+  profiles: summary.value?.ai?.profiles ?? 0,
+  success: summary.value?.ai?.success ?? 0,
+  failed: summary.value?.ai?.failed ?? 0,
+  tokens: summary.value?.ai?.tokens ?? 0,
+}))
 
 const counts = computed(() => summary.value?.resources ?? { accounts: 0, sources: 0, sinks: 0, flows: 0 })
 const statusCount = computed(() => summary.value?.status ?? {})
@@ -108,21 +114,11 @@ async function load() {
   }
   loading.value = true
   try {
-    const [sum, aiProfiles] = await Promise.all([
-      dashboardApi.summary(windowHours),
-      aiApi.profiles.list().catch(() => []),
-    ])
+    const sum = await dashboardApi.summary(windowHours)
     summary.value = sum
     if (sum.setup && checklistAllDone.value) {
       // 全部完成后默认折叠，用户仍可展开。
       checklistCollapsed.value = true
-    }
-    const recentRuns = aiProfiles.map((item) => item.recent_run).filter(Boolean)
-    aiStats.value = {
-      total: recentRuns.length,
-      success: recentRuns.filter((item) => item?.status === 'success').length,
-      failed: recentRuns.filter((item) => item?.status === 'failed').length,
-      tokens: recentRuns.reduce((sum, item) => sum + (item?.token_usage.total_tokens ?? 0), 0),
     }
   } catch (e) {
     message.error('加载失败：' + errText(e))
@@ -257,20 +253,20 @@ onMounted(load)
       </n-card>
     </div>
 
-    <n-card class="panel" title="AI 整理概况">
+    <n-card class="panel" :title="`AI 整理概况（近 ${windowHours} 小时）`">
       <div class="status-grid compact-ai">
         <div class="status-pill tone-blue">
           <span class="status-dot" />
           <span class="status-body">
-            <span class="status-num">{{ aiStats.total }}</span>
-            <span class="status-name">最近运行 Profile</span>
+            <span class="status-num">{{ aiStats.profiles }}</span>
+            <span class="status-name">Profile 数</span>
           </span>
         </div>
         <div class="status-pill tone-mint">
           <span class="status-dot" />
           <span class="status-body">
             <span class="status-num">{{ aiStats.success }}</span>
-            <span class="status-name">成功</span>
+            <span class="status-name">成功运行</span>
           </span>
         </div>
         <div class="status-pill tone-coral">
@@ -284,10 +280,13 @@ onMounted(load)
           <span class="status-dot" />
           <span class="status-body">
             <span class="status-num">{{ aiStats.tokens }}</span>
-            <span class="status-name">Token</span>
+            <span class="status-name">Token 合计</span>
           </span>
         </div>
       </div>
+      <n-text depth="3" style="display: block; margin-top: 10px">
+        近窗共 {{ aiStats.total }} 次运行（不含预览）。调度下次执行时间见「AI 整理」任务列表。
+      </n-text>
     </n-card>
   </n-spin>
 </template>

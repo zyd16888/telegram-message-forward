@@ -114,6 +114,7 @@ func (r MediaSettingsRequest) ToSettings() appsettings.MediaSettings {
 type DataRetentionDTO struct {
 	MessagesRetentionDays      int    `json:"messages_retention_days"`
 	DeliveryTasksRetentionDays int    `json:"delivery_tasks_retention_days"`
+	AIRunsRetentionDays        int    `json:"ai_runs_retention_days"`
 	Source                     string `json:"source"`
 }
 
@@ -122,6 +123,7 @@ func NewDataRetentionDTO(dr appsettings.DataRetentionSettings, source string) Da
 	return DataRetentionDTO{
 		MessagesRetentionDays:      dr.MessagesRetentionDays,
 		DeliveryTasksRetentionDays: dr.DeliveryTasksRetentionDays,
+		AIRunsRetentionDays:        dr.AIRunsRetentionDays,
 		Source:                     source,
 	}
 }
@@ -130,6 +132,7 @@ func NewDataRetentionDTO(dr appsettings.DataRetentionSettings, source string) Da
 type DataRetentionRequest struct {
 	MessagesRetentionDays      int `json:"messages_retention_days"`
 	DeliveryTasksRetentionDays int `json:"delivery_tasks_retention_days"`
+	AIRunsRetentionDays        int `json:"ai_runs_retention_days"`
 }
 
 // ToSettings 转换为应用层结构。
@@ -137,5 +140,6 @@ func (r DataRetentionRequest) ToSettings() appsettings.DataRetentionSettings {
 	return appsettings.DataRetentionSettings{
 		MessagesRetentionDays:      r.MessagesRetentionDays,
 		DeliveryTasksRetentionDays: r.DeliveryTasksRetentionDays,
+		AIRunsRetentionDays:        r.AIRunsRetentionDays,
 	}
 }

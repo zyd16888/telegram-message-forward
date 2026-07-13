@@ -274,6 +274,7 @@ type AIDigestProfile struct {
 	OutputTemplateID *int64
 	OutputTemplate   string
 	FilterID         *int64
+	FilterIDs        datatypes.JSON
 	TargetSinkIDs    datatypes.JSON
 	ModelConfig      datatypes.JSON
 	Limits           datatypes.JSON

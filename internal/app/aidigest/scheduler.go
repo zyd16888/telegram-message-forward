@@ -12,18 +12,25 @@ import (
 type Scheduler struct {
 	svc             *Service
 	log             *slog.Logger
+	// retentionDays 返回 AI run 保留天数；nil 或返回值 <=0 时使用默认 30（0 表示不清理需显式通过 GetRetention 返回 0）。
+	retentionDays   func(ctx context.Context) int
 	maintenanceMu   sync.Mutex
 	lastMaintenance time.Time
 }
 
 const (
-	runRetentionDays    = 30
-	maintenanceInterval = 24 * time.Hour
-	staleRunTimeout     = 2 * time.Hour
+	defaultRunRetentionDays = 30
+	maintenanceInterval     = 24 * time.Hour
+	staleRunTimeout         = 2 * time.Hour
 )
 
 func NewScheduler(svc *Service, log *slog.Logger) *Scheduler {
 	return &Scheduler{svc: svc, log: log}
+}
+
+// SetRetentionDaysFunc 注入热读的 AI run 保留天数（设置页配置）。
+func (s *Scheduler) SetRetentionDaysFunc(fn func(ctx context.Context) int) {
+	s.retentionDays = fn
 }
 
 func (s *Scheduler) Run(ctx context.Context) {
@@ -82,12 +89,19 @@ func (s *Scheduler) maintain(ctx context.Context) {
 		return
 	}
 	s.lastMaintenance = now
-	deleted, err := s.svc.CleanupRuns(ctx, runRetentionDays)
+	days := defaultRunRetentionDays
+	if s.retentionDays != nil {
+		days = s.retentionDays(ctx)
+	}
+	if days <= 0 {
+		return // 0 = 不清理
+	}
+	deleted, err := s.svc.CleanupRuns(ctx, days)
 	if err != nil {
 		s.log.Warn("清理过期 AI 运行记录失败", "err", err)
 		return
 	}
 	if deleted > 0 {
-		s.log.Info("已清理过期 AI 运行记录", "deleted", deleted, "retention_days", runRetentionDays)
+		s.log.Info("已清理过期 AI 运行记录", "deleted", deleted, "retention_days", days)
 	}
 }

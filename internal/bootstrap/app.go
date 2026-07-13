@@ -221,6 +221,13 @@ func Build(cfg *config.Config) (*App, error) {
 		Media:    mediaStore,
 	})
 	aiScheduler := appaidigest.NewScheduler(aiDigestSvc, log)
+	aiScheduler.SetRetentionDaysFunc(func(ctx context.Context) int {
+		dr, _, err := settingsSvc.GetDataRetention(ctx)
+		if err != nil {
+			return appsettings.DefaultAIRunsRetentionDays
+		}
+		return dr.AIRunsRetentionDays
+	})
 
 	// Telegram Source 插件（deps 注入，避免 plugin 直连存储层）。
 	tgPlugin := tgsource.NewPlugin(tgsource.Deps{
@@ -308,6 +315,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Sinks:        sinks,
 		Flows:        flows,
 		TelegramApps: telegramApps,
+		AI:           appdashboard.AIDigestStats{Svc: aiDigestSvc},
 		MediaURL: func(ctx context.Context) (bool, error) {
 			ms, _, _, err := settingsSvc.EffectiveMedia(ctx)
 			if err != nil {
