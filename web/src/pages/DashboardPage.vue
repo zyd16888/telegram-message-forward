@@ -1,26 +1,27 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import { accountsApi, aiApi, deliveriesApi, flowsApi, sinksApi, sourcesApi } from '@/api/client'
+import { aiApi, dashboardApi } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
-import type { Delivery } from '@/types'
+import type { DashboardFailureBucket, DashboardSetupStatus, DashboardSummary } from '@/types'
 import { errText } from '@/utils/error'
 import ClayIcon from '@/components/ClayIcon.vue'
 
 const message = useMessage()
 const auth = useAuthStore()
+const router = useRouter()
 
-const counts = ref({ accounts: 0, sources: 0, sinks: 0, flows: 0 })
-const deliveries = ref<Delivery[]>([])
+const summary = ref<DashboardSummary | null>(null)
 const aiStats = ref({ total: 0, success: 0, failed: 0, tokens: 0 })
-const statusTotals = ref<Record<string, number>>({})
-const windowTotal = ref(0)
 const loading = ref(false)
 const windowHours = 24
+const checklistCollapsed = ref(false)
 
-const statusCount = computed(() => {
-  return statusTotals.value
-})
+const counts = computed(() => summary.value?.resources ?? { accounts: 0, sources: 0, sinks: 0, flows: 0 })
+const statusCount = computed(() => summary.value?.status ?? {})
+const windowTotal = computed(() => summary.value?.window_total ?? 0)
+const setup = computed<DashboardSetupStatus | null>(() => summary.value?.setup ?? null)
 
 const successRate = computed(() => {
   const total = windowTotal.value
@@ -30,7 +31,6 @@ const successRate = computed(() => {
   return ok === total ? '100%' : `${rate.toFixed(1)}%`
 })
 
-// 顶部四张主统计瓷砖，各配一个点缀色。
 const tiles = computed(() => [
   { key: 'accounts', label: '账号', value: counts.value.accounts, icon: 'accounts', tone: 'blue' },
   { key: 'sources', label: '监听源', value: counts.value.sources, icon: 'sources', tone: 'mint' },
@@ -38,7 +38,6 @@ const tiles = computed(() => [
   { key: 'flows', label: 'Flow', value: counts.value.flows, icon: 'flow', tone: 'coral' },
 ])
 
-// 投递状态点缀。
 const statusItems = computed(() => [
   { label: '成功', value: statusCount.value['success'] ?? 0, tone: 'mint' },
   { label: '重试中', value: statusCount.value['retrying'] ?? 0, tone: 'peach' },
@@ -47,34 +46,60 @@ const statusItems = computed(() => [
 ])
 
 const queueItems = computed(() => [
-  { label: '待领取', value: statusCount.value['pending'] ?? 0, tone: 'blue' },
-  { label: '处理中', value: statusCount.value['processing'] ?? 0, tone: 'peach' },
-  { label: '等待重试', value: statusCount.value['retrying'] ?? 0, tone: 'coral' },
+  { label: '待领取', value: summary.value?.queue.pending ?? 0, tone: 'blue' },
+  { label: '处理中', value: summary.value?.queue.processing ?? 0, tone: 'peach' },
+  { label: '等待重试', value: summary.value?.queue.retrying ?? 0, tone: 'coral' },
 ])
 
 const topFailures = computed(() => ({
-  sink: topBy(deliveries.value, (item) => item.sink_name || item.sink_type || `Sink #${item.sink_id}`),
-  rule: topBy(deliveries.value, deliveryOriginLabel),
-  source: topBy(deliveries.value, (item) => item.source_name || `Source #${item.message_id}`),
+  sink: mapTop(summary.value?.top_failures.sink),
+  flow: mapTop(summary.value?.top_failures.flow),
+  source: mapTop(summary.value?.top_failures.source),
 }))
 
-function deliveryOriginLabel(item: Delivery): string {
-  if (item.origin_type === 'flow') return item.flow_name || `Flow #${item.origin_id || 0}`
-  if (item.origin_type === 'ai_digest') return item.origin_id ? `AI整理 #${item.origin_id}` : 'AI整理'
-  return item.flow_name || (item.origin_id ? `Flow #${item.origin_id}` : 'Flow')
+function mapTop(items?: DashboardFailureBucket[]) {
+  return (items ?? []).map((item) => ({ label: item.label, value: item.count }))
 }
 
-function topBy(items: Delivery[], keyFn: (item: Delivery) => string) {
-  const counts = new Map<string, number>()
-  for (const item of items) {
-    const key = keyFn(item)
-    counts.set(key, (counts.get(key) ?? 0) + 1)
-  }
-  return [...counts.entries()]
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5)
+type ChecklistItem = {
+  key: string
+  done: boolean
+  label: string
+  route: string
+  optional?: boolean
 }
+
+const checklistItems = computed<ChecklistItem[]>(() => {
+  const s = setup.value
+  if (!s) return []
+  const items: ChecklistItem[] = [
+    { key: 'app', done: s.has_telegram_app, label: '已配置 Telegram App ID/Hash', route: '/telegram-config' },
+    { key: 'account', done: s.has_active_account, label: '至少一个 active Telegram 账号', route: '/accounts' },
+    { key: 'source', done: s.has_enabled_source, label: '至少一个启用中的监听源', route: '/sources' },
+    { key: 'sink', done: s.has_enabled_sink, label: '至少一个启用中的目标渠道', route: '/sinks' },
+    { key: 'flow', done: s.has_enabled_flow, label: '至少一条启用中的 Flow', route: '/flows' },
+  ]
+  if (s.media_url_recommended) {
+    items.push({
+      key: 'media',
+      done: s.has_media_public_url,
+      label: '媒体公网地址/S3（钉钉/Bark 等渠道需要）',
+      route: '/settings',
+      optional: true,
+    })
+  }
+  return items
+})
+
+const checklistDoneCount = computed(() => checklistItems.value.filter((i) => i.done).length)
+const checklistAllDone = computed(
+  () => checklistItems.value.length > 0 && checklistItems.value.every((i) => i.done || i.optional),
+)
+const showChecklist = computed(() => {
+  if (!checklistItems.value.length) return false
+  if (checklistAllDone.value && checklistCollapsed.value) return false
+  return true
+})
 
 async function load() {
   if (!auth.hasToken) {
@@ -83,31 +108,15 @@ async function load() {
   }
   loading.value = true
   try {
-    const [accs, srcs, snks, fls, all, success, retrying, pending, processing, dead, failed] = await Promise.all([
-      accountsApi.list(),
-      sourcesApi.list(),
-      sinksApi.list(),
-      flowsApi.list(),
-      deliveriesApi.page('', 1, 0, { since_hours: windowHours }),
-      deliveriesApi.page('success', 1, 0, { since_hours: windowHours }),
-      deliveriesApi.page('retrying', 1, 0, { since_hours: windowHours }),
-      deliveriesApi.page('pending', 1, 0, { since_hours: windowHours }),
-      deliveriesApi.page('processing', 1, 0, { since_hours: windowHours }),
-      deliveriesApi.page('dead', 250, 0, { since_hours: windowHours }),
-      deliveriesApi.page('failed', 250, 0, { since_hours: windowHours }),
+    const [sum, aiProfiles] = await Promise.all([
+      dashboardApi.summary(windowHours),
+      aiApi.profiles.list().catch(() => []),
     ])
-    const aiProfiles = await aiApi.profiles.list()
-    counts.value = { accounts: accs.length, sources: srcs.length, sinks: snks.length, flows: fls.length }
-    windowTotal.value = all.total
-    statusTotals.value = {
-      success: success.total,
-      retrying: retrying.total,
-      pending: pending.total,
-      processing: processing.total,
-      dead: dead.total,
-      failed: failed.total,
+    summary.value = sum
+    if (sum.setup && checklistAllDone.value) {
+      // 全部完成后默认折叠，用户仍可展开。
+      checklistCollapsed.value = true
     }
-    deliveries.value = [...dead.data, ...failed.data]
     const recentRuns = aiProfiles.map((item) => item.recent_run).filter(Boolean)
     aiStats.value = {
       total: recentRuns.length,
@@ -127,6 +136,52 @@ onMounted(load)
 
 <template>
   <n-spin :show="loading">
+    <n-card v-if="showChecklist" class="panel checklist-card" title="首次配置检查清单">
+      <template #header-extra>
+        <n-space size="small">
+          <n-tag size="small" :bordered="false" type="info">
+            {{ checklistDoneCount }}/{{ checklistItems.length }}
+          </n-tag>
+          <n-button
+            v-if="checklistAllDone"
+            size="tiny"
+            quaternary
+            @click="checklistCollapsed = true"
+          >
+            收起
+          </n-button>
+        </n-space>
+      </template>
+      <n-text depth="3" class="checklist-hint">
+        非阻断引导：完成下列项即可跑通 Source → Flow → 渠道 的实时转发。可随时跳过。
+      </n-text>
+      <div class="checklist">
+        <div
+          v-for="item in checklistItems"
+          :key="item.key"
+          class="checklist-item"
+          :class="{ done: item.done }"
+          @click="router.push(item.route)"
+        >
+          <span class="check-mark">{{ item.done ? '✓' : '○' }}</span>
+          <span class="check-label">
+            {{ item.label }}
+            <n-tag v-if="item.optional && !item.done" size="tiny" :bordered="false">建议</n-tag>
+          </span>
+          <span class="check-link">去配置 →</span>
+        </div>
+      </div>
+    </n-card>
+    <n-alert
+      v-else-if="checklistAllDone && checklistCollapsed"
+      type="success"
+      class="panel checklist-done"
+      :bordered="false"
+      title="首次配置已完成"
+    >
+      <n-button size="tiny" text type="primary" @click="checklistCollapsed = false">展开检查清单</n-button>
+    </n-alert>
+
     <!-- 主统计瓷砖 -->
     <div class="tiles">
       <div v-for="t in tiles" :key="t.key" class="tile" :class="`tone-${t.tone}`">
@@ -191,7 +246,7 @@ onMounted(load)
       <n-card class="panel" title="失败 Top">
         <div class="top-grid">
           <div v-for="(items, key) in topFailures" :key="key" class="top-list">
-            <div class="top-title">{{ key === 'sink' ? 'Sink' : key === 'rule' ? 'Flow' : 'Source' }}</div>
+            <div class="top-title">{{ key === 'sink' ? 'Sink' : key === 'flow' ? 'Flow' : 'Source' }}</div>
             <n-empty v-if="!items.length" size="small" description="暂无失败" />
             <div v-for="item in items" :key="item.label" class="top-item">
               <span>{{ item.label }}</span>
@@ -287,183 +342,207 @@ onMounted(load)
   width: 48px;
   height: 48px;
   border-radius: 14px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--tone);
   background: var(--tone-soft);
-  box-shadow: var(--clay-inset-sm);
   flex-shrink: 0;
-  transition: transform 0.3s ease-out;
 }
-.tile:hover .tile-icon {
-  transform: none;
+.tile-body {
+  min-width: 0;
 }
 .tile-value {
-  font-size: 30px;
-  font-weight: 900;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  color: var(--n-text-color, #22364a);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--clay-text);
 }
 .tile-label {
-  margin-top: 6px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #8399ad;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--clay-text-muted);
 }
 
-/* ---------- 概览面板 ---------- */
 .panel {
   margin-top: 20px;
+  border-radius: 8px;
 }
 
-.ops-grid {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.8fr) minmax(320px, 1.2fr);
-  gap: 20px;
+.checklist-card {
+  margin-top: 0;
+  margin-bottom: 4px;
 }
-.overview {
-  display: flex;
-  align-items: stretch;
-  gap: 20px;
-  flex-wrap: wrap;
+.checklist-hint {
+  display: block;
+  margin-bottom: 12px;
 }
-.rate-badge {
-  flex-shrink: 0;
-  width: 150px;
-  border-radius: 8px;
-  padding: 22px;
+.checklist {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  gap: 8px;
+}
+.checklist-item {
+  display: flex;
   align-items: center;
-  color: #fff;
-  background: #2f8fd6;
-  box-shadow: 0 4px 12px rgba(32, 117, 179, 0.18);
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--clay-border);
+  background: var(--clay-surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.checklist-item:hover {
+  border-color: var(--clay-primary);
+  transform: translateY(-1px);
+}
+.checklist-item.done {
+  opacity: 0.72;
+}
+.check-mark {
+  width: 22px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--clay-primary);
+}
+.check-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.check-link {
+  font-size: 12px;
+  color: var(--clay-primary);
+}
+.checklist-done {
+  margin-bottom: 12px;
+}
+
+.overview {
+  display: flex;
+  gap: 24px;
+  align-items: stretch;
+}
+@media (max-width: 720px) {
+  .overview {
+    flex-direction: column;
+  }
+}
+.rate-badge {
+  min-width: 120px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--clay-primary-soft);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 .rate-value {
-  font-size: 34px;
-  font-weight: 900;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--clay-primary);
 }
 .rate-label {
-  margin-top: 8px;
-  font-size: 13px;
-  font-weight: 700;
-  opacity: 0.9;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--clay-text-muted);
 }
 .status-grid {
   flex: 1;
-  min-width: 260px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
-
 .status-grid.compact {
   grid-template-columns: 1fr;
 }
-
 .status-grid.compact-ai {
-  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .status-grid.compact-ai {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .status-total {
   grid-column: 1 / -1;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 4px 4px 8px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--clay-inset-bg, rgba(15, 23, 42, 0.03));
 }
 .status-value {
-  font-size: 28px;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 700;
 }
 .status-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: #8399ad;
+  font-size: 12px;
+  color: var(--clay-text-muted);
 }
 .status-pill {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 76px;
-  padding: 14px 16px;
-  border: 0;
-  border-radius: 12px;
-  background: var(--clay-surface-2);
-  box-shadow: var(--clay-inset-sm);
-  transition: box-shadow 0.18s ease, transform 0.18s ease;
-}
-
-.status-pill:hover {
-  box-shadow: var(--clay-inset-deep);
-  transform: translateY(-1px);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--clay-border);
+  background: var(--clay-surface);
 }
 .status-dot {
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--tone);
-  box-shadow: 0 0 0 4px var(--tone-soft), 0 2px 5px var(--tone-soft);
   flex-shrink: 0;
 }
 .status-body {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 .status-num {
-  font-size: 22px;
-  font-weight: 900;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 16px;
 }
 .status-name {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.25;
-  color: #8399ad;
+  font-size: 12px;
+  color: var(--clay-text-muted);
 }
-
+.ops-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 20px;
+}
+@media (max-width: 900px) {
+  .ops-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .top-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
 }
-
+@media (max-width: 900px) {
+  .top-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .top-title {
+  font-weight: 600;
   margin-bottom: 8px;
-  color: var(--clay-text);
-  font-size: 13px;
-  font-weight: 800;
 }
-
 .top-item {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
-  padding: 9px 10px;
-  border-top: 0;
-  border-radius: 10px;
-  background: var(--clay-surface-2);
-  box-shadow: var(--clay-inset-sm);
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--clay-border);
+  font-size: 13px;
 }
-
-.top-item span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@media (max-width: 900px) {
-  .ops-grid,
-  .top-grid,
-  .status-grid.compact-ai {
-    grid-template-columns: 1fr;
-  }
+.top-item strong {
+  color: var(--clay-primary);
 }
 </style>

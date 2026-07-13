@@ -288,6 +288,7 @@ export interface Delivery {
   max_attempts: number
   next_retry_at?: string
   last_error?: string
+  last_error_readable?: string
   message_text?: string
   message_type?: string
   sender_name?: string
@@ -311,9 +312,49 @@ export interface DeliveryAttempt {
   request_summary?: unknown
   response_summary?: unknown
   error?: string
+  error_readable?: string
   started_at?: string
   finished_at?: string
   created_at: string
+}
+
+export interface DashboardFailureBucket {
+  key: string
+  label: string
+  count: number
+}
+
+export interface DashboardSetupStatus {
+  has_telegram_app: boolean
+  has_active_account: boolean
+  has_enabled_source: boolean
+  has_enabled_sink: boolean
+  has_enabled_flow: boolean
+  has_media_public_url: boolean
+  media_url_recommended: boolean
+}
+
+export interface DashboardSummary {
+  since_hours: number
+  window_total: number
+  resources: {
+    accounts: number
+    sources: number
+    sinks: number
+    flows: number
+  }
+  status: Record<string, number>
+  queue: {
+    pending: number
+    processing: number
+    retrying: number
+  }
+  top_failures: {
+    sink: DashboardFailureBucket[]
+    flow: DashboardFailureBucket[]
+    source: DashboardFailureBucket[]
+  }
+  setup: DashboardSetupStatus
 }
 
 export interface MessageDeliveryCounts {

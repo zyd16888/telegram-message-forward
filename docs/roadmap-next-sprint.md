@@ -138,16 +138,16 @@
 
 **目标**：新装用户知道下一步做什么。
 
-- [ ] 后端可选：`GET /api/v1/setup/status` 聚合布尔项；或前端用现有 list API 计算（优先少接口，但避免 Dashboard 过多请求——可与 B3 一并设计）。
-- [ ] Checklist 项：
+- [x] 后端可选：`GET /api/v1/setup/status` 聚合布尔项；或前端用现有 list API 计算（优先少接口，但避免 Dashboard 过多请求——可与 B3 一并设计）。
+- [x] Checklist 项：
   1. 已配置 Telegram App ID/Hash  
   2. 至少一个 active TG 账号  
   3. 至少一个启用中的监听源  
   4. 至少一个启用中的目标渠道  
   5. 至少一条启用中的 Flow  
   6. 若已选 Sink 需要公网媒体 URL，则提示配置媒体公网地址/S3  
-- [ ] 每项可跳转到对应页面；全部完成可折叠/收起。
-- [ ] **不要**做成强制 wizard 阻断使用；Dashboard 顶部卡片即可。
+- [x] 每项可跳转到对应页面；全部完成可折叠/收起。
+- [x] **不要**做成强制 wizard 阻断使用；Dashboard 顶部卡片即可。
 
 **建议 commit**：`feat: Dashboard 增加首次配置检查清单`
 
@@ -173,15 +173,15 @@
 
 **目标**：统计准确、请求少、失败可懂。
 
-- [ ] 新增聚合 API，例如 `GET /api/v1/dashboard/summary?since_hours=24`：
+- [x] 新增聚合 API，例如 `GET /api/v1/dashboard/summary?since_hours=24`：
   - 资源计数（accounts/sources/sinks/flows）
   - 投递状态计数（pending/processing/success/retrying/dead/cancelled…）
   - 失败 Top（按 sink / flow / source）
   - 队列积压摘要
   - 可选：setup checklist 布尔
-- [ ] Dashboard 前端改为单次（或极少次）请求，删除「每个状态 page 一次 + 前端 250 条算 Top」。
-- [ ] 投递详情/列表：对媒体降级、Sink 禁用取消、配置错误等，展示**人类可读原因**（可复用 `last_error` 规范化）。
-- [ ] 单测：聚合计数与筛选时间窗。
+- [x] Dashboard 前端改为单次（或极少次）请求，删除「每个状态 page 一次 + 前端 250 条算 Top」。
+- [x] 投递详情/列表：对媒体降级、Sink 禁用取消、配置错误等，展示**人类可读原因**（可复用 `last_error` 规范化）。
+- [x] 单测：聚合计数与筛选时间窗。
 
 **建议 commits**：
 
@@ -271,7 +271,7 @@ cd web && npm run build
 | A2 | [x] | Capability/处理器展示诚实 |
 | A3 | [x] | 消息/投递按保留天数归档 |
 | A4 | [ ] | 默认关 |
-| B1 | [ ] | |
+| B1 | [x] | 复用 dashboard summary setup |
 | B2 | [ ] | |
-| B3 | [ ] | |
+| B3 | [x] | 聚合 API + 失败可读 |
 | B4 | [ ] | |

@@ -46,6 +46,7 @@ import type {
   MessageItem,
   BackupPreview,
   BackupRestoreResult,
+  DashboardSummary,
 } from '@/types'
 
 const TOKEN_KEY = 'tmf_api_token'
@@ -330,6 +331,14 @@ export const filtersApi = {
   update: (id: number, body: FilterRequest) =>
     http.put<ApiItem<Filter>>(`/filters/${id}`, body).then((r) => r.data.data),
   remove: (id: number) => http.delete(`/filters/${id}`),
+}
+
+// --- Dashboard ---
+export const dashboardApi = {
+  summary: (sinceHours = 24) =>
+    http
+      .get<ApiItem<DashboardSummary>>('/dashboard/summary', { params: { since_hours: sinceHours } })
+      .then((r) => r.data.data),
 }
 
 // --- Deliveries ---

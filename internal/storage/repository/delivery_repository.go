@@ -280,6 +280,137 @@ func (r *DeliveryRepository) CountByQuery(ctx context.Context, q domaindelivery.
 	return count, err
 }
 
+// CountByStatusSince 按状态统计投递任务；since 为 nil 时不限时间。
+// 默认排除 cancelled，与列表接口一致。
+func (r *DeliveryRepository) CountByStatusSince(ctx context.Context, since *time.Time) (map[string]int64, error) {
+	type row struct {
+		Status string
+		Count  int64
+	}
+	db := r.db.WithContext(ctx).Model(&model.DeliveryTask{}).
+		Select("status, COUNT(*) AS count").
+		Where("status <> ?", string(domaindelivery.StatusCancelled))
+	if since != nil {
+		db = db.Where("created_at >= ?", *since)
+	}
+	var rows []row
+	if err := db.Group("status").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[row.Status] = row.Count
+	}
+	return out, nil
+}
+
+// CountQueue 统计当前队列积压（pending/processing/retrying，不限时间窗）。
+func (r *DeliveryRepository) CountQueue(ctx context.Context) (pending, processing, retrying int64, err error) {
+	type row struct {
+		Status string
+		Count  int64
+	}
+	var rows []row
+	err = r.db.WithContext(ctx).Model(&model.DeliveryTask{}).
+		Select("status, COUNT(*) AS count").
+		Where("status IN ?", []string{
+			string(domaindelivery.StatusPending),
+			string(domaindelivery.StatusProcessing),
+			string(domaindelivery.StatusRetrying),
+		}).
+		Group("status").
+		Scan(&rows).Error
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	for _, row := range rows {
+		switch domaindelivery.Status(row.Status) {
+		case domaindelivery.StatusPending:
+			pending = row.Count
+		case domaindelivery.StatusProcessing:
+			processing = row.Count
+		case domaindelivery.StatusRetrying:
+			retrying = row.Count
+		}
+	}
+	return pending, processing, retrying, nil
+}
+
+// FailureTopRow 是失败 Top 聚合的一行。
+type FailureTopRow struct {
+	Key   string
+	Label string
+	Count int64
+}
+
+// FailureTopSince 在时间窗内对 failed/dead 任务按 sink、flow(origin)、source 取 Top N。
+func (r *DeliveryRepository) FailureTopSince(ctx context.Context, since time.Time, limit int) (sinks, flows, sources []FailureTopRow, err error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	sinks, err = r.failureTopBy(ctx, since, limit, `
+SELECT
+  dt.sink_id::text AS key,
+  COALESCE(NULLIF(s.name, ''), 'Sink #' || dt.sink_id::text) AS label,
+  COUNT(*) AS count
+FROM delivery_tasks dt
+LEFT JOIN sinks s ON s.id = dt.sink_id
+WHERE dt.created_at >= ?
+  AND dt.status IN ('failed', 'dead')
+GROUP BY dt.sink_id, s.name
+ORDER BY count DESC, dt.sink_id ASC
+LIMIT ?`)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	flows, err = r.failureTopBy(ctx, since, limit, `
+SELECT
+  COALESCE(dt.origin_id, 0)::text AS key,
+  CASE
+    WHEN dt.origin_type = 'ai_digest' THEN COALESCE('AI整理 #' || dt.origin_id::text, 'AI整理')
+    ELSE COALESCE(NULLIF(f.name, ''), 'Flow #' || COALESCE(dt.origin_id, 0)::text)
+  END AS label,
+  COUNT(*) AS count
+FROM delivery_tasks dt
+LEFT JOIN flows f ON f.id = dt.origin_id AND dt.origin_type = 'flow'
+WHERE dt.created_at >= ?
+  AND dt.status IN ('failed', 'dead')
+GROUP BY dt.origin_type, dt.origin_id, f.name
+ORDER BY count DESC
+LIMIT ?`)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sources, err = r.failureTopBy(ctx, since, limit, `
+SELECT
+  COALESCE(m.source_id, 0)::text AS key,
+  COALESCE(NULLIF(src.name, ''), 'Source #' || COALESCE(m.source_id, 0)::text) AS label,
+  COUNT(*) AS count
+FROM delivery_tasks dt
+LEFT JOIN messages m ON m.id = dt.message_id
+LEFT JOIN sources src ON src.id = m.source_id
+WHERE dt.created_at >= ?
+  AND dt.status IN ('failed', 'dead')
+GROUP BY m.source_id, src.name
+ORDER BY count DESC
+LIMIT ?`)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return sinks, flows, sources, nil
+}
+
+func (r *DeliveryRepository) failureTopBy(ctx context.Context, since time.Time, limit int, sql string) ([]FailureTopRow, error) {
+	var rows []FailureTopRow
+	if err := r.db.WithContext(ctx).Raw(sql, since, limit).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []FailureTopRow{}
+	}
+	return rows, nil
+}
+
 // SinkStatsSince 汇总某时间点之后各 Sink 的投递状态。
 func (r *DeliveryRepository) SinkStatsSince(ctx context.Context, since time.Time) (map[int64]domainsink.DeliveryStats, error) {
 	type row struct {

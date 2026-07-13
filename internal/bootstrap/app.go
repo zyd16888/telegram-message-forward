@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,7 @@ import (
 	apptoken "telegram-message-forward/internal/app/apitoken"
 	appauth "telegram-message-forward/internal/app/auth"
 	appbackup "telegram-message-forward/internal/app/backup"
+	appdashboard "telegram-message-forward/internal/app/dashboard"
 	appdelivery "telegram-message-forward/internal/app/delivery"
 	appfilter "telegram-message-forward/internal/app/filter"
 	appflow "telegram-message-forward/internal/app/flow"
@@ -298,6 +300,28 @@ func Build(cfg *config.Config) (*App, error) {
 	tgLoginSvc := apptelegramlogin.NewService(accounts, loginFlows, tgLoginRunner, tgQRRunner, clk, log).
 		UseConnectionController(srcManager)
 
+	dashboardSvc := appdashboard.NewService(appdashboard.Deps{
+		Deliveries:   appdashboard.DeliveryRepoStats{Repo: deliveries},
+		Accounts:     accounts,
+		Sources:      sources,
+		Sinks:        sinks,
+		Flows:        flows,
+		TelegramApps: telegramApps,
+		MediaURL: func(ctx context.Context) (bool, error) {
+			ms, _, _, err := settingsSvc.EffectiveMedia(ctx)
+			if err != nil {
+				return false, err
+			}
+			if strings.TrimSpace(ms.PublicBaseURL) != "" {
+				return true, nil
+			}
+			if ms.S3.Enabled && strings.TrimSpace(ms.S3.PublicBaseURL) != "" {
+				return true, nil
+			}
+			return false, nil
+		},
+	})
+
 	router := api.NewRouter(api.Deps{
 		Logger:         log,
 		TokenValidator: validator,
@@ -318,6 +342,7 @@ func Build(cfg *config.Config) (*App, error) {
 		TelegramConfig: handler.NewTelegramConfigHandler(tgConfigSvc),
 		Settings:       handler.NewSettingsHandler(settingsSvc),
 		Backup:         handler.NewBackupHandler(backupSvc),
+		Dashboard:      handler.NewDashboardHandler(dashboardSvc),
 		Media:          handler.NewMediaHandler(mediaStore),
 	})
 

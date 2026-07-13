@@ -34,6 +34,7 @@ type Deps struct {
 	TelegramConfig *handler.TelegramConfigHandler
 	Settings       *handler.SettingsHandler
 	Backup         *handler.BackupHandler
+	Dashboard      *handler.DashboardHandler
 	// Media 为 nil 时不挂载 /media 端点。
 	Media *handler.MediaHandler
 }
@@ -237,6 +238,10 @@ func NewRouter(deps Deps) *gin.Engine {
 				settings.GET("/data-retention", deps.Settings.GetDataRetention)
 				settings.PUT("/data-retention", deps.Settings.UpdateDataRetention)
 			}
+		}
+
+		if deps.Dashboard != nil {
+			v1.GET("/dashboard/summary", deps.Dashboard.Summary)
 		}
 
 		if deps.Backup != nil {

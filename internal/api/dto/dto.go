@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"time"
 
+	appdelivery "telegram-message-forward/internal/app/delivery"
 	domainaccount "telegram-message-forward/internal/domain/account"
 	domainapitoken "telegram-message-forward/internal/domain/apitoken"
 	domaindelivery "telegram-message-forward/internal/domain/delivery"
@@ -547,8 +548,9 @@ type DeliveryDTO struct {
 	AttemptCount   int                  `json:"attempt_count"`
 	MaxAttempts    int                  `json:"max_attempts"`
 	NextRetryAt    *time.Time           `json:"next_retry_at,omitempty"`
-	LastError      string               `json:"last_error,omitempty"`
-	MessageText    string               `json:"message_text,omitempty"`
+	LastError          string               `json:"last_error,omitempty"`
+	LastErrorReadable  string               `json:"last_error_readable,omitempty"`
+	MessageText        string               `json:"message_text,omitempty"`
 	MessageType    string               `json:"message_type,omitempty"`
 	SenderName     string               `json:"sender_name,omitempty"`
 	SourceName     string               `json:"source_name,omitempty"`
@@ -571,6 +573,7 @@ type DeliveryAttemptDTO struct {
 	RequestSummary  json.RawMessage `json:"request_summary,omitempty"`
 	ResponseSummary json.RawMessage `json:"response_summary,omitempty"`
 	Error           string          `json:"error,omitempty"`
+	ErrorReadable   string          `json:"error_readable,omitempty"`
 	StartedAt       *time.Time      `json:"started_at,omitempty"`
 	FinishedAt      *time.Time      `json:"finished_at,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
@@ -579,21 +582,22 @@ type DeliveryAttemptDTO struct {
 // NewDeliveryDTO 从 domain 投递任务构造 DTO。
 func NewDeliveryDTO(t *domaindelivery.Task) DeliveryDTO {
 	return DeliveryDTO{
-		ID:           t.ID,
-		MessageID:    t.MessageID,
-		OriginType:   deliveryOriginType(t),
-		OriginID:     t.OriginID,
-		OriginNodeID: t.OriginNodeID,
-		EngineName:   deliveryEngineName(t),
-		SinkID:       t.SinkID,
-		TemplateID:   t.TemplateID,
-		Status:       string(t.Status),
-		AttemptCount: t.AttemptCount,
-		MaxAttempts:  t.MaxAttempts,
-		NextRetryAt:  t.NextRetryAt,
-		LastError:    t.LastError,
-		CreatedAt:    t.CreatedAt,
-		UpdatedAt:    t.UpdatedAt,
+		ID:                t.ID,
+		MessageID:         t.MessageID,
+		OriginType:        deliveryOriginType(t),
+		OriginID:          t.OriginID,
+		OriginNodeID:      t.OriginNodeID,
+		EngineName:        deliveryEngineName(t),
+		SinkID:            t.SinkID,
+		TemplateID:        t.TemplateID,
+		Status:            string(t.Status),
+		AttemptCount:      t.AttemptCount,
+		MaxAttempts:       t.MaxAttempts,
+		NextRetryAt:       t.NextRetryAt,
+		LastError:         t.LastError,
+		LastErrorReadable: appdelivery.HumanizeError(t.LastError),
+		CreatedAt:         t.CreatedAt,
+		UpdatedAt:         t.UpdatedAt,
 	}
 }
 
@@ -664,6 +668,7 @@ func NewDeliveryAttemptDTO(a *domaindelivery.Attempt) DeliveryAttemptDTO {
 		RequestSummary:  json.RawMessage(a.RequestSummary),
 		ResponseSummary: json.RawMessage(a.ResponseSummary),
 		Error:           a.Error,
+		ErrorReadable:   appdelivery.HumanizeError(a.Error),
 		StartedAt:       a.StartedAt,
 		FinishedAt:      a.FinishedAt,
 		CreatedAt:       a.CreatedAt,

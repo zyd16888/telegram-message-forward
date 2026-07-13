@@ -297,10 +297,11 @@ const columns: DataTableColumns<Delivery> = [
   { title: '尝试', key: 'attempt_count', width: 70, render: (r) => `${r.attempt_count}/${r.max_attempts}` },
   {
     title: '错误',
-    key: 'last_error',
-    width: 150,
+    key: 'last_error_readable',
+    width: 180,
     ellipsis: { tooltip: true },
-    render: (r) => r.last_error || h(NText, { depth: 3 }, { default: () => '无' }),
+    render: (r) =>
+      r.last_error_readable || r.last_error || h(NText, { depth: 3 }, { default: () => '无' }),
   },
   { title: '时间', key: 'created_at', width: 110, render: (r) => formatTime(r.created_at) },
   {
@@ -409,7 +410,9 @@ onMounted(() => {
                 <n-tag size="small" :type="attempt.status === 'success' ? 'success' : 'error'">#{{ attempt.attempt_no }} {{ attempt.status }}</n-tag>
                 <n-text depth="3">{{ formatTime(attempt.finished_at || attempt.created_at) }}</n-text>
               </div>
-              <n-text v-if="attempt.error" type="error">{{ attempt.error }}</n-text>
+              <n-text v-if="attempt.error_readable || attempt.error" type="error">
+                {{ attempt.error_readable || attempt.error }}
+              </n-text>
               <n-code v-if="jsonText(attempt.response_summary)" :code="jsonText(attempt.response_summary)" language="json" />
             </div>
           </section>

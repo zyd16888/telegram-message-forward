@@ -54,6 +54,13 @@ func (r *TelegramAppRepository) GetByID(ctx context.Context, id int64) (*domainc
 	return r.appToDomain(&m)
 }
 
+// Count 返回 Telegram App 配置数量。
+func (r *TelegramAppRepository) Count(ctx context.Context) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.TelegramApp{}).Count(&n).Error
+	return n, err
+}
+
 func (r *TelegramAppRepository) List(ctx context.Context) ([]*domainconfig.TelegramApp, error) {
 	var ms []model.TelegramApp
 	if err := r.db.WithContext(ctx).Order("id").Find(&ms).Error; err != nil {
