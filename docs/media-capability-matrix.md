@@ -11,10 +11,11 @@
 - `需要上传` 表示必须先调用渠道上传接口获得 `media_id`、`image_key` 或同类引用。
 - `公网 URL` 表示渠道可以直接引用外部 URL；本项目不会默认泄露本地临时文件路径。
 - 限制以官方文档或服务默认值为准；不同企业配置、服务端配置或私有部署可能更严格。
-- 截至 2026-07-04，本项目媒体实现覆盖图片与文件两条主线：
+- 截至 2026-07-13，本项目媒体实现覆盖图片与文件两条主线：
   - 图片：Telegram photo / image document 始终下载（大小上限见设置页「媒体下载策略」，默认 20 MB）、收编和投递。
   - 文件：PDF 等非图片 document 在监听源开启「文件下载」开关后下载，受设置页文件大小上限（默认 50 MB）与扩展名白名单约束；下载后按 Sink 能力投递（企业微信上传 media_id、邮件附件、ntfy 附件、Webhook 元数据）或降级为带公网 URL 的文本摘要。
-  - 音频、视频下载与原生投递仍属后续复杂媒体阶段。
+  - **音频、视频**：Telegram Source **不下载** audio/video 二进制；部分 Sink（邮件 MIME、ntfy 附件、企微按文件上传）在 capability 中声明「若有本地文件则可投递」，对无本地文件的音视频统一文本降级。原生音视频下载与专用投递形态属后续阶段，UI 不应理解为「已支持音视频原样转发」。
+  - **历史补拉**：Telegram Source 当前 `SupportsHistory=false`（历史预览/回捞 API 尚未实现）；实现前 UI 不得展示「支持历史回捞」。
 
 ## 能力矩阵
 
@@ -49,7 +50,8 @@
 
 - 当前运行时已实现 `image`：调用上传临时素材接口 `media/upload?type=image` 获取 `media_id`，再发送图片消息；不使用面向图片 URL 的 `media/uploadimg` 接口，避免触发该接口的配额语义。
 - 当前运行时已实现 `file`：先上传 `type=file` 临时素材，再按 `msgtype=file` 发送（上限 20 MB）。
-- `audio`、`video` 官方支持但当前内置实现未接入，capability 声明为不支持并按文本摘要降级。
+- `audio`：有本地文件时按普通文件上传发送（非 voice 原生形态）；无本地文件则文本降级。Telegram 当前不下载音频，故实际多为降级路径。
+- `video`：官方支持但当前内置实现未接入，capability 声明为不支持并按文本摘要降级。
 - access_token 缓存和刷新继续由 Sink 内部维护。
 
 ### 钉钉自定义机器人
@@ -59,6 +61,13 @@
 - 文件、音频、视频不走伪成功，统一文本降级。
 
 ## 当前内置 Source 契约
+
+### Telegram Source
+
+- `SupportsSync=true`：可同步账号可见 peer 列表。
+- `SupportsMedia=true`：图片始终尝试下载；非图片 document 受源级「文件下载」开关与下载策略约束。
+- `SupportsHistory=false`：历史补拉 / 断线追平接口尚未落地；仅处理实时 update。
+- 不下载 audio/video 原生媒体；消息可带元数据进入链路并按 Sink 降级。
 
 ### RSS Source
 
@@ -91,6 +100,16 @@
 - 公网 URL 在 worker 投递时按 `StorageKey` 现生成并回填 `Media.URL`，不落库，保证重试时 URL 未过期；钉钉、Bark、Gotify 等「仅公网 URL」渠道由此获得真实图片投递能力。
 - 本地媒体按 `media.retention` 定期清理（服务启动时清一次，之后每小时一次）；对象存储侧开启 `media.s3.auto_cleanup` 后按同一保留期由本服务删除过期对象，未开启时请配置桶生命周期规则。与其他数据共用桶时务必设置 `media.s3.key_prefix`，auto_cleanup 只清理该前缀下的对象。
 
+## Flow 处理器语义（当前实现）
+
+以下 type 字符串保持兼容，**展示名与实际行为**如下（避免误解为延迟投递或跨消息聚合）：
+
+| type | 展示名 | 实际行为 |
+|---|---|---|
+| `quiet_hours` | 静默时间标记 | 命中时段时在正文前追加标记；**不**抑制/延迟投递 |
+| `batch_digest` | 摘要样式格式化 | 对**当前单条**消息套摘要样式；**不**跨消息聚合 |
+| `dedupe` | 本条去重 | 仅去重当前消息正文行/链接；**不**做跨消息去重 |
+
 ## 后续实现要求
 
 - Telegram 下载产物不得直接通过 API 暴露本地路径。
@@ -98,6 +117,7 @@
 - 降级文本至少包含媒体类型、caption、文件名、大小和原始 Telegram URL 中能获取到的部分。
 - 每个新增 Sink 都必须同步更新本文件、插件 capability、descriptor、配置校验和测试。
 - UI 展示 capability 时应优先展示“当前项目已实现能力”；如果同时展示官方可支持能力，必须明确标注为后置或未接入，避免误导用户配置后期待可直接发送。
+- Source `SupportsHistory` 仅在历史接口真正可用后为 true。
 
 ## 参考资料
 

@@ -61,8 +61,8 @@ func init() {
 	})
 	RegisterWithDescriptor("dedupe", dedupe{}, Descriptor{
 		Type:        "dedupe",
-		Label:       "去重",
-		Description: "去除正文中的重复行，并去除重复链接。",
+		Label:       "本条去重",
+		Description: "仅对当前消息：去除正文中的重复行与重复链接。不做跨消息去重，也不会拦截已投递过的历史消息。",
 		Fields: []formschema.FieldSpec{
 			{Key: "dedupe_lines", Label: "去除重复行", Type: formschema.FieldBoolean, Default: true},
 			{Key: "dedupe_links", Label: "去除重复链接", Type: formschema.FieldBoolean, Default: true},
@@ -71,7 +71,7 @@ func init() {
 	RegisterWithDescriptor("quiet_hours", quietHours{}, Descriptor{
 		Type:        "quiet_hours",
 		Label:       "静默时间标记",
-		Description: "命中静默时间时在正文前追加标记；延迟/抑制投递需后续调度能力配合。",
+		Description: "命中配置时段时在正文前追加标记文本。不抑制、不延迟投递；真实静默调度尚未实现。",
 		Fields: []formschema.FieldSpec{
 			{Key: "start", Label: "开始时间", Type: formschema.FieldText, Required: true, Placeholder: "22:00"},
 			{Key: "end", Label: "结束时间", Type: formschema.FieldText, Required: true, Placeholder: "08:00"},
@@ -81,8 +81,8 @@ func init() {
 	})
 	RegisterWithDescriptor("batch_digest", batchDigest{}, Descriptor{
 		Type:        "batch_digest",
-		Label:       "摘要格式化",
-		Description: "把当前消息格式化为摘要条目；跨消息聚合由后续队列能力承接。",
+		Label:       "摘要样式格式化",
+		Description: "把当前单条消息格式化为摘要样式条目。不做跨消息聚合或批量汇总，type 字符串 batch_digest 仅兼容旧配置。",
 		Fields: []formschema.FieldSpec{
 			{Key: "title", Label: "摘要标题", Type: formschema.FieldText, Default: "消息摘要"},
 			{Key: "include_source", Label: "包含来源", Type: formschema.FieldBoolean, Default: true},

@@ -47,15 +47,15 @@
 
 **目标**：用户看到的能力 = 当前真能用的能力。
 
-- [ ] Source/Sink capability 契约区分或至少文档+UI 标明「当前实现」：
+- [x] Source/Sink capability 契约区分或至少文档+UI 标明「当前实现」：
   - Telegram `SupportsHistory`：仅在历史接口真正可用后为 true；或拆 `SupportsHistory`（协议）与实现状态，**UI 只展示已实现**。
   - 音视频等未实现路径不得在 UI 标为「支持发送」。
-- [ ] 处理器命名与描述诚实化（二选一，优先改名+兼容旧 type）：
+- [x] 处理器命名与描述诚实化（二选一，优先改名+兼容旧 type）：
   - `quiet_hours` → 展示名「静默时间标记」（描述写清：不抑制投递；真实静默本冲刺不做）。
   - `batch_digest` → 展示名「摘要样式格式化」（描述写清：单条格式化，非跨消息聚合）。
   - `dedupe` → 展示名「本条去重」（描述写清：仅当前消息正文/链接）。
-- [ ] 若保留旧 type 字符串，descriptor label/description 必须改；Flow 画布与过滤器编辑器走 descriptor 自动刷新。
-- [ ] 同步 `docs/media-capability-matrix.md` 中「当前内置实现」小节。
+- [x] 若保留旧 type 字符串，descriptor label/description 必须改；Flow 画布与过滤器编辑器走 descriptor 自动刷新。
+- [x] 同步 `docs/media-capability-matrix.md` 中「当前内置实现」小节。
 
 **验收**：UI 无「支持历史回捞」而实际无入口；静默/摘要处理器文案不会让用户以为已延迟投递或合并多条。
 
@@ -268,7 +268,7 @@ cd web && npm run build
 | ID | 状态 | 备注 |
 |----|------|------|
 | A1 | [x] | Flow-only 文档与配置收敛 |
-| A2 | [ ] | |
+| A2 | [x] | Capability/处理器展示诚实 |
 | A3 | [ ] | |
 | A4 | [ ] | 默认关 |
 | B1 | [ ] | |

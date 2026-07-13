@@ -109,3 +109,41 @@ func TestQuietHoursAndBatchDigest(t *testing.T) {
 		t.Fatalf("摘要格式错误: %q", m.Text)
 	}
 }
+
+func TestHonestProcessorDescriptors(t *testing.T) {
+	want := map[string]struct {
+		labelContains string
+		descContains  []string
+	}{
+		"quiet_hours": {
+			labelContains: "静默时间标记",
+			descContains:  []string{"不抑制", "不延迟"},
+		},
+		"batch_digest": {
+			labelContains: "摘要样式格式化",
+			descContains:  []string{"单条", "跨消息"},
+		},
+		"dedupe": {
+			labelContains: "本条去重",
+			descContains:  []string{"当前消息", "跨消息"},
+		},
+	}
+	byType := map[string]Descriptor{}
+	for _, d := range Descriptors() {
+		byType[d.Type] = d
+	}
+	for typ, spec := range want {
+		d, ok := byType[typ]
+		if !ok {
+			t.Fatalf("缺少处理器 descriptor: %s", typ)
+		}
+		if d.Label != spec.labelContains {
+			t.Fatalf("%s label = %q, want %q", typ, d.Label, spec.labelContains)
+		}
+		for _, part := range spec.descContains {
+			if !strings.Contains(d.Description, part) {
+				t.Fatalf("%s description 应包含 %q, got %q", typ, part, d.Description)
+			}
+		}
+	}
+}
