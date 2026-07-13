@@ -321,7 +321,15 @@ func (s *Service) startSource(ctx context.Context, src *domainsource.Source) err
 	if s.manager == nil || s.manager.ingest == nil {
 		return fmt.Errorf("source manager 未初始化")
 	}
-	return plugin.Start(ctx, acc, src, s.manager.ingest.Ingest)
+	if err := plugin.Start(ctx, acc, src, s.manager.ingest.Ingest); err != nil {
+		return err
+	}
+	// 启用/创建/POST start 与进程 StartAll 一致：开关开且 last_message_id>0 时做启动补漏。
+	if err := s.CatchUpSource(ctx, src); err != nil {
+		// 补漏失败不回滚已启动的监听，但必须可观测。
+		return fmt.Errorf("监听已启动，但历史补漏失败: %w", err)
+	}
+	return nil
 }
 
 // Stop 停止某监听源。

@@ -11,6 +11,7 @@ import (
 	domainaccount "telegram-message-forward/internal/domain/account"
 	domainsource "telegram-message-forward/internal/domain/source"
 	pluginsource "telegram-message-forward/internal/plugin/source"
+	tgsource "telegram-message-forward/internal/plugin/source/telegram"
 )
 
 func TestCreateEnabledSourceStartsRunner(t *testing.T) {
@@ -151,6 +152,9 @@ type fakeSourcePlugin struct {
 	started         []int64
 	stopped         []int64
 	stoppedAccounts []int64
+	// catchUpCalls 记录 CatchUpIfNeeded 被调用的 source ID（启动补漏路径）。
+	catchUpCalls []int64
+	catchUpErr   error
 }
 
 func (p *fakeSourcePlugin) StopAccount(_ context.Context, accountID int64) error {
@@ -193,6 +197,109 @@ func (p *fakeSourcePlugin) RunnerStatuses() []pluginsource.RunnerStatus {
 		Status:            "running",
 		SubscriptionCount: len(sourceIDs),
 	}}
+}
+
+// CatchUpIfNeeded 实现 historyPlugin，供 startSource 启动补漏调用。
+func (p *fakeSourcePlugin) CatchUpIfNeeded(_ context.Context, _ *domainaccount.Account, src *domainsource.Source, _ pluginsource.Handler) error {
+	if p.catchUpErr != nil {
+		return p.catchUpErr
+	}
+	if src != nil {
+		p.catchUpCalls = append(p.catchUpCalls, src.ID)
+	}
+	return nil
+}
+
+func (p *fakeSourcePlugin) PreviewHistory(context.Context, *domainaccount.Account, *domainsource.Source, int) (*tgsource.HistoryFetchResult, error) {
+	return nil, fmt.Errorf("not used in this test")
+}
+
+func (p *fakeSourcePlugin) ExecuteHistoryBackfill(context.Context, *domainaccount.Account, *domainsource.Source, int64, int, pluginsource.Handler) (*tgsource.HistoryFetchResult, error) {
+	return nil, fmt.Errorf("not used in this test")
+}
+
+func TestStartSourceRunsCatchUpWhenHistoryEnabledAndCursorSet(t *testing.T) {
+	svc, plugin, repo := newTestService()
+	// 注册为 telegram，使 CatchUpSource → telegramHistoryPlugin 命中 fake。
+	svc.RegisterPlugin("telegram", plugin)
+
+	src := &domainsource.Source{
+		Type:          "telegram",
+		AccountID:     1,
+		PeerType:      domainsource.PeerChannel,
+		PeerID:        100,
+		Name:          "chan",
+		Enabled:       false,
+		LastMessageID: 42,
+		Config:        map[string]any{"history_backfill_enabled": true},
+	}
+	if err := repo.Create(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1) 显式 Start：应 Start + CatchUp
+	if err := svc.Start(context.Background(), src.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if len(plugin.started) != 1 || plugin.started[0] != src.ID {
+		t.Fatalf("应启动 source，started=%v", plugin.started)
+	}
+	if len(plugin.catchUpCalls) != 1 || plugin.catchUpCalls[0] != src.ID {
+		t.Fatalf("Start 路径应调用 CatchUpIfNeeded，catchUp=%v", plugin.catchUpCalls)
+	}
+
+	// 2) 关闭后 Update 启用：同样应补漏
+	plugin.started = nil
+	plugin.catchUpCalls = nil
+	enabled := false
+	if _, err := svc.Update(context.Background(), src.ID, UpdateInput{Enabled: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	enabled = true
+	if _, err := svc.Update(context.Background(), src.ID, UpdateInput{Enabled: &enabled}); err != nil {
+		t.Fatalf("Update enable: %v", err)
+	}
+	if len(plugin.catchUpCalls) != 1 || plugin.catchUpCalls[0] != src.ID {
+		t.Fatalf("Update 启用路径应调用 CatchUpIfNeeded，catchUp=%v", plugin.catchUpCalls)
+	}
+}
+
+func TestStartSourceSkipsCatchUpWhenHistoryDisabledOrZeroCursor(t *testing.T) {
+	svc, plugin, repo := newTestService()
+	svc.RegisterPlugin("telegram", plugin)
+
+	// 开关关
+	srcOff := &domainsource.Source{
+		Type: "telegram", AccountID: 1, PeerType: domainsource.PeerChannel, PeerID: 1,
+		Name: "off", Enabled: true, LastMessageID: 99,
+		Config: map[string]any{"history_backfill_enabled": false},
+	}
+	if err := repo.Create(context.Background(), srcOff); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(context.Background(), srcOff.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(plugin.catchUpCalls) != 0 {
+		t.Fatalf("开关关闭时不应 CatchUp，got %v", plugin.catchUpCalls)
+	}
+
+	// 游标 0
+	plugin.catchUpCalls = nil
+	srcZero := &domainsource.Source{
+		Type: "telegram", AccountID: 1, PeerType: domainsource.PeerChannel, PeerID: 2,
+		Name: "zero", Enabled: true, LastMessageID: 0,
+		Config: map[string]any{"history_backfill_enabled": true},
+	}
+	if err := repo.Create(context.Background(), srcZero); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(context.Background(), srcZero.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(plugin.catchUpCalls) != 0 {
+		t.Fatalf("last_message_id=0 时不应 CatchUp，got %v", plugin.catchUpCalls)
+	}
 }
 
 type fakeSourceRepo struct {

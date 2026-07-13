@@ -15,7 +15,7 @@
   - 图片：Telegram photo / image document 始终下载（大小上限见设置页「媒体下载策略」，默认 20 MB）、收编和投递。
   - 文件：PDF 等非图片 document 在监听源开启「文件下载」开关后下载，受设置页文件大小上限（默认 50 MB）与扩展名白名单约束；下载后按 Sink 能力投递（企业微信上传 media_id、邮件附件、ntfy 附件、Webhook 元数据）或降级为带公网 URL 的文本摘要。
   - **音频、视频**：Telegram Source **不下载** audio/video 二进制；部分 Sink（邮件 MIME、ntfy 附件、企微按文件上传）在 capability 中声明「若有本地文件则可投递」，对无本地文件的音视频统一文本降级。原生音视频下载与专用投递形态属后续阶段，UI 不应理解为「已支持音视频原样转发」。
-  - **历史补拉**：Telegram Source 当前 `SupportsHistory=false`（历史预览/回捞 API 尚未实现）；实现前 UI 不得展示「支持历史回捞」。
+  - **历史补拉**：Telegram Source `SupportsHistory=true`；源级 `history_backfill_enabled` 默认 false。关闭时仅实时 update；开启后支持手动预览/确认回捞，且 `last_message_id>0` 时启动/启用/恢复路径会增量补漏（新源游标为 0 不灌历史）。
 
 ## 能力矩阵
 
