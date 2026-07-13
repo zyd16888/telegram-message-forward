@@ -84,6 +84,42 @@ func (h *SourceHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": newSourceDTOWithRuntime(s, h.svc.RuntimeStatusBySource())})
 }
 
+// PreviewHistory POST /sources/:id/history/preview
+func (h *SourceHandler) PreviewHistory(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Limit int `json:"limit"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	res, err := h.svc.HistoryPreview(c.Request.Context(), id, req.Limit)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": res})
+}
+
+// BackfillHistory POST /sources/:id/history/backfill
+func (h *SourceHandler) BackfillHistory(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Limit int `json:"limit"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	res, err := h.svc.HistoryBackfill(c.Request.Context(), id, req.Limit)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": res})
+}
+
 // Update PUT /sources/:id
 func (h *SourceHandler) Update(c *gin.Context) {
 	id, ok := parseID(c)

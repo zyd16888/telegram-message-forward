@@ -88,25 +88,25 @@
 
 #### 产品语义
 
-- **源级开关** `history_backfill_enabled`（或 config 字段，默认 `false`）。
+- [x] **源级开关** `history_backfill_enabled`（或 config 字段，默认 `false`）。
   - `false`：维持现状——只处理实时 update；断线/重启期间消息丢弃，**不**自动补拉。
   - `true`：启用下列补拉能力。
-- 可选上限：`history_backfill_limit`（单次最多条数，默认如 50/100，硬顶防止 FLOOD）。
-- 游标：复用/维护 `sources.last_message_id`（成功 ingest 后推进；仅实时路径与补拉成功路径更新）。
+- [x] 可选上限：`history_backfill_limit`（单次最多条数，默认如 50/100，硬顶防止 FLOOD）。
+- [x] 游标：复用/维护 `sources.last_message_id`（成功 ingest 后推进；仅实时路径与补拉成功路径更新）。
 
 #### 能力拆分
 
-1. **手动回捞**（开关开启才显示入口）  
+1. [x] **手动回捞**（开关开启才显示入口）  
    - API：预览最近 N 条（不投递）+ 确认执行（走标准 ingest，幂等防重）。  
    - UI：Sources 页操作「预览 / 确认回捞」。
-2. **启动补漏**（仅 `history_backfill_enabled=true` 的源）  
+2. [x] **启动补漏**（仅 `history_backfill_enabled=true` 的源）  
    - runner 启动后，若 `last_message_id>0`，增量拉取 `(last_message_id, head]` 再进入实时监听。  
    - `last_message_id=0` 的新源：**不**全量灌历史，只从「开启后」的实时消息开始（可文档说明）。
-3. **断线恢复追平**（同开关）  
+3. [x] **断线恢复追平**（同开关）  
    - 连接恢复后同样按游标增量追平，再恢复 update 流。
-4. **幂等**  
+4. [x] **幂等**  
    - 必须走 `messages` 唯一约束 + 既有 ingest；已投递消息不重复入队。
-5. **Capability**  
+5. [x] **Capability**  
    - 实现完成后才声明历史相关能力；UI 与 A2 一致。
 
 #### 实现注意
@@ -270,7 +270,7 @@ cd web && npm run build
 | A1 | [x] | Flow-only 文档与配置收敛 |
 | A2 | [x] | Capability/处理器展示诚实 |
 | A3 | [x] | 消息/投递按保留天数归档 |
-| A4 | [ ] | 默认关 |
+| A4 | [x] | 默认关；开关+预览/确认+启动补漏 |
 | B1 | [x] | 复用 dashboard summary setup |
 | B2 | [x] | 线性骨架 + 一键模板 |
 | B3 | [x] | 聚合 API + 失败可读 |

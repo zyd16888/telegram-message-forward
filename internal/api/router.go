@@ -124,6 +124,8 @@ func NewRouter(deps Deps) *gin.Engine {
 			sources.DELETE("/:id", deps.Source.Delete)
 			sources.POST("/:id/start", deps.Source.Start)
 			sources.POST("/:id/stop", deps.Source.Stop)
+			sources.POST("/:id/history/preview", deps.Source.PreviewHistory)
+			sources.POST("/:id/history/backfill", deps.Source.BackfillHistory)
 		}
 
 		templates := v1.Group("/templates")

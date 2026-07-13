@@ -66,7 +66,7 @@
 
 - `SupportsSync=true`：可同步账号可见 peer 列表。
 - `SupportsMedia=true`：图片始终尝试下载；非图片 document 受源级「文件下载」开关与下载策略约束。
-- `SupportsHistory=false`：历史补拉 / 断线追平接口尚未落地；仅处理实时 update。
+- `SupportsHistory=true`：源级 `history_backfill_enabled`（默认 false）。关闭时仅实时 update；开启后支持手动预览/确认回捞，且 `last_message_id>0` 时启动/恢复增量补漏（新源游标为 0 不灌历史）。
 - 不下载 audio/video 原生媒体；消息可带元数据进入链路并按 Sink 降级。
 
 ### RSS Source

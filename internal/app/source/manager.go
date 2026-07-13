@@ -24,6 +24,14 @@ type Manager struct {
 	log      *slog.Logger
 }
 
+// IngestHandler 返回标准消息 ingest 回调，供历史补拉等路径复用。
+func (m *Manager) IngestHandler() pluginsource.Handler {
+	if m == nil || m.ingest == nil {
+		return nil
+	}
+	return m.ingest.Ingest
+}
+
 // NewManager 创建 Source 生命周期管理器。
 func NewManager(
 	accounts domainaccount.Repository,
@@ -74,6 +82,14 @@ func (m *Manager) StartAll(ctx context.Context) error {
 			m.log.Error("启动 source 监听失败", "source", src.ID, "type", sourceType(src), "err", err)
 			continue
 		}
+		// 启动后对开启历史补拉且已有游标的源做增量追平（新源 last_message_id=0 跳过）。
+		if catcher, ok := plugin.(interface {
+			CatchUpIfNeeded(context.Context, *domainaccount.Account, *domainsource.Source, pluginsource.Handler) error
+		}); ok {
+			if err := catcher.CatchUpIfNeeded(ctx, acc, src, m.ingest.Ingest); err != nil {
+				m.log.Warn("启动历史补漏失败", "source", src.ID, "err", err)
+			}
+		}
 		started++
 	}
 	m.log.Info("Source 监听已启动", "count", started, "total", len(srcs))
@@ -109,6 +125,13 @@ func (m *Manager) StartAccount(ctx context.Context, accountID int64) error {
 			m.log.Error("恢复账号 Source 失败", "account", accountID, "source", src.ID, "err", err)
 			startErrs = append(startErrs, fmt.Errorf("source %d: %w", src.ID, err))
 			continue
+		}
+		if catcher, ok := plugin.(interface {
+			CatchUpIfNeeded(context.Context, *domainaccount.Account, *domainsource.Source, pluginsource.Handler) error
+		}); ok {
+			if err := catcher.CatchUpIfNeeded(ctx, acc, src, m.ingest.Ingest); err != nil {
+				m.log.Warn("恢复账号后历史补漏失败", "account", accountID, "source", src.ID, "err", err)
+			}
 		}
 		started++
 	}

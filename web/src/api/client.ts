@@ -183,6 +183,19 @@ export const sourcesApi = {
   update: (id: number, body: Record<string, unknown>) =>
     http.put<ApiItem<Source>>(`/sources/${id}`, body).then((r) => r.data.data),
   remove: (id: number) => http.delete(`/sources/${id}`),
+  previewHistory: (id: number, limit = 50) =>
+    http
+      .post<ApiItem<{ items: Array<Record<string, unknown>>; fetched: number; max_message_id: number }>>(
+        `/sources/${id}/history/preview`,
+        { limit },
+      )
+      .then((r) => r.data.data),
+  backfillHistory: (id: number, limit = 50) =>
+    http
+      .post<
+        ApiItem<{ items: Array<Record<string, unknown>>; fetched: number; ingested: number; max_message_id: number }>
+      >(`/sources/${id}/history/backfill`, { limit }, { timeout: 120000 })
+      .then((r) => r.data.data),
   sync: (accountId: number) =>
     http
       .post<ApiList<SyncedPeer>>(`/sources/sync?account_id=${accountId}`, undefined, { timeout: 120000 })

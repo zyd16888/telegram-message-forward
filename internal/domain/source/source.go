@@ -41,4 +41,6 @@ type Repository interface {
 	ListByAccount(ctx context.Context, accountID int64) ([]*Source, error)
 	ListEnabled(ctx context.Context) ([]*Source, error)
 	Delete(ctx context.Context, id int64) error
+	// AdvanceLastMessageID 仅当 messageID 大于当前游标时推进 last_message_id。
+	AdvanceLastMessageID(ctx context.Context, sourceID, messageID int64) error
 }

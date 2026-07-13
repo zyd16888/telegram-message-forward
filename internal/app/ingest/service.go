@@ -16,6 +16,11 @@ import (
 	"telegram-message-forward/internal/infra/mediastore"
 )
 
+// sourceCursor 在成功落库后推进监听源 last_message_id。
+type sourceCursor interface {
+	AdvanceLastMessageID(ctx context.Context, sourceID, messageID int64) error
+}
+
 // Service 是消息 ingest 应用服务。
 type Service struct {
 	messages   domainmessage.Repository
@@ -25,6 +30,7 @@ type Service struct {
 	clock      clock.Clock
 	log        *slog.Logger
 	media      mediastore.Store
+	cursors    sourceCursor
 }
 
 // NewService 创建 ingest 服务。
@@ -48,6 +54,12 @@ func (s *Service) UseMediaStore(store mediastore.Store) *Service {
 	return s
 }
 
+// UseSourceCursor 注入游标推进（Telegram 历史补拉/实时共用 last_message_id）。
+func (s *Service) UseSourceCursor(c sourceCursor) *Service {
+	s.cursors = c
+	return s
+}
+
 // Ingest 处理一条标准化消息：幂等落库 → 求值 Flow → 生成投递任务。
 //
 // 落库使用 (source_id, external_message_id) 幂等约束；重复消息不会重复投递。
@@ -63,6 +75,12 @@ func (s *Service) Ingest(ctx context.Context, msg *domainmessage.NormalizedMessa
 
 	if err := s.messages.Create(ctx, msg); err != nil {
 		return err
+	}
+	// 游标推进独立于是否命中 Flow：只要成功收到并落库就前进，避免重复补拉。
+	if s.cursors != nil && msg.ExternalMessageID > 0 {
+		if err := s.cursors.AdvanceLastMessageID(ctx, msg.SourceID, msg.ExternalMessageID); err != nil {
+			s.log.Warn("推进 last_message_id 失败", "source_id", msg.SourceID, "external_id", msg.ExternalMessageID, "err", err)
+		}
 	}
 
 	matches, err := s.evaluate(ctx, msg)

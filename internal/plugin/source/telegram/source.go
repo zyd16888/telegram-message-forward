@@ -58,9 +58,9 @@ var _ pluginsource.Plugin = (*Plugin)(nil)
 func (p *Plugin) Name() string { return "telegram" }
 
 // Capabilities 声明当前已实现能力。
-// SupportsHistory 仅在历史补拉接口真正可用后为 true；当前未实现，避免 UI 误导。
+// SupportsHistory 在源级 history_backfill_enabled 开启后可通过预览/确认与启动补漏使用。
 func (p *Plugin) Capabilities() pluginsource.Capabilities {
-	return pluginsource.Capabilities{SupportsSync: true, SupportsMedia: true, SupportsHistory: false}
+	return pluginsource.Capabilities{SupportsSync: true, SupportsMedia: true, SupportsHistory: true}
 }
 
 // ValidateConfig 目前无额外配置校验。

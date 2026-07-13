@@ -82,6 +82,17 @@ func (r *SourceRepository) ListEnabled(ctx context.Context) ([]*domainsource.Sou
 	return sourcesToDomain(ms)
 }
 
+// AdvanceLastMessageID 仅当 messageID 更大时推进 last_message_id（实时与补拉共用）。
+func (r *SourceRepository) AdvanceLastMessageID(ctx context.Context, sourceID, messageID int64) error {
+	if sourceID <= 0 || messageID <= 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Model(&model.Source{}).
+		Where("id = ? AND last_message_id < ?", sourceID, messageID).
+		Update("last_message_id", messageID).Error
+}
+
 // Delete 删除监听源。
 func (r *SourceRepository) Delete(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.Source{}, id).Error

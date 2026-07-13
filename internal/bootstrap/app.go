@@ -196,7 +196,8 @@ func Build(cfg *config.Config) (*App, error) {
 	}
 
 	ingestSvc := appingest.NewService(messages, flows, flowEngine, queue, clk, log).
-		UseMediaStore(mediaStore)
+		UseMediaStore(mediaStore).
+		UseSourceCursor(sources)
 	deliverySvc := appdelivery.NewService(deliveries, appdelivery.DisplayDeps{
 		Messages:  messages,
 		Sources:   sources,

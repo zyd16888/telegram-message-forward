@@ -262,6 +262,17 @@ func (r *fakeSourceRepo) Delete(_ context.Context, id int64) error {
 	return nil
 }
 
+func (r *fakeSourceRepo) AdvanceLastMessageID(_ context.Context, sourceID, messageID int64) error {
+	s, ok := r.items[sourceID]
+	if !ok {
+		return nil
+	}
+	if messageID > s.LastMessageID {
+		s.LastMessageID = messageID
+	}
+	return nil
+}
+
 func cloneSource(s *domainsource.Source) *domainsource.Source {
 	if s == nil {
 		return nil

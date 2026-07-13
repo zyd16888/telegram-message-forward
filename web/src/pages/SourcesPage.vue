@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, shallowRef } from 'vue'
+import { computed, h, onMounted, reactive, ref, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSwitch, NTag, NText, NTooltip, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import PeerSyncPanel from '@/components/sources/PeerSyncPanel.vue'
@@ -139,6 +139,50 @@ async function toggleDownloadFiles(row: Source, value: boolean) {
     sources.value = sources.value.map((s) => (s.id === row.id ? updated : s))
   } catch (e) {
     message.error('更新失败：' + errText(e))
+  }
+}
+
+async function toggleHistoryBackfill(row: Source, value: boolean) {
+  const config = {
+    ...(row.config ?? {}),
+    history_backfill_enabled: value,
+    history_backfill_limit: Number(row.config?.history_backfill_limit ?? 50) || 50,
+  }
+  try {
+    const updated = await sourcesApi.update(row.id, { config })
+    sources.value = sources.value.map((s) => (s.id === row.id ? updated : s))
+    message.success(value ? '已开启历史补拉（可手动回捞；启动时仅在有游标时补漏）' : '已关闭历史补拉')
+  } catch (e) {
+    message.error('更新失败：' + errText(e))
+  }
+}
+
+const historyBusyId = ref<number | null>(null)
+
+async function previewHistory(row: Source) {
+  historyBusyId.value = row.id
+  try {
+    const limit = Number(row.config?.history_backfill_limit ?? 50) || 50
+    const res = await sourcesApi.previewHistory(row.id, limit)
+    message.info(`预览到 ${res.fetched} 条（不投递）。最新 ID ${res.max_message_id || '-'}`)
+  } catch (e) {
+    message.error('预览失败：' + errText(e))
+  } finally {
+    historyBusyId.value = null
+  }
+}
+
+async function confirmBackfill(row: Source) {
+  historyBusyId.value = row.id
+  try {
+    const limit = Number(row.config?.history_backfill_limit ?? 50) || 50
+    const res = await sourcesApi.backfillHistory(row.id, limit)
+    message.success(`已回捞 ${res.ingested}/${res.fetched} 条（幂等，不会重复入队）`)
+    await load()
+  } catch (e) {
+    message.error('回捞失败：' + errText(e))
+  } finally {
+    historyBusyId.value = null
   }
 }
 
@@ -352,6 +396,49 @@ const telegramColumns: DataTableColumns<Source> = [
           default: () => '开启后下载该来源的 PDF 等文件（大小与类型限制见「设置 → 媒体存储」）；图片始终下载',
         },
       ),
+  },
+  {
+    title: '历史补拉',
+    key: 'history_backfill',
+    width: 100,
+    render: (row) =>
+      h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () =>
+            h(NSwitch, {
+              size: 'small',
+              value: row.config?.history_backfill_enabled === true,
+              onUpdateValue: (value: boolean) => toggleHistoryBackfill(row, value),
+            }),
+          default: () =>
+            '默认关闭：只收实时消息，断线/重启丢弃历史。开启后可手动回捞，且 last_message_id>0 时启动/恢复会增量补漏',
+        },
+      ),
+  },
+  {
+    title: '回捞',
+    key: 'history_actions',
+    width: 160,
+    render: (row) => {
+      if (row.config?.history_backfill_enabled !== true) {
+        return h(NText, { depth: 3 }, { default: () => '—' })
+      }
+      const busy = historyBusyId.value === row.id
+      return h('div', { class: 'action-row' }, [
+        h(
+          NButton,
+          { size: 'tiny', secondary: true, loading: busy, onClick: () => previewHistory(row) },
+          { default: () => '预览' },
+        ),
+        h(
+          NButton,
+          { size: 'tiny', type: 'primary', secondary: true, loading: busy, onClick: () => confirmBackfill(row) },
+          { default: () => '确认回捞' },
+        ),
+      ])
+    },
   },
   ...commonTailColumns(),
 ]
