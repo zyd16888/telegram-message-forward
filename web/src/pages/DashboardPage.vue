@@ -77,7 +77,7 @@ const checklistItems = computed<ChecklistItem[]>(() => {
     { key: 'account', done: s.has_active_account, label: '至少一个 active Telegram 账号', route: '/accounts' },
     { key: 'source', done: s.has_enabled_source, label: '至少一个启用中的监听源', route: '/sources' },
     { key: 'sink', done: s.has_enabled_sink, label: '至少一个启用中的目标渠道', route: '/sinks' },
-    { key: 'flow', done: s.has_enabled_flow, label: '至少一条启用中的 Flow', route: '/flows' },
+    { key: 'flow', done: s.has_enabled_flow, label: '至少一条启用中的 Flow', route: '/flow' },
   ]
   if (s.media_url_recommended) {
     items.push({
