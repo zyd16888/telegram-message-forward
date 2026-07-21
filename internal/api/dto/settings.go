@@ -1,6 +1,10 @@
 package dto
 
-import appsettings "telegram-message-forward/internal/app/settings"
+import (
+	"fmt"
+
+	appsettings "telegram-message-forward/internal/app/settings"
+)
 
 // MediaS3DTO 是媒体设置里的 S3 段（脱敏，不含 secret_key）。
 type MediaS3DTO struct {
@@ -142,4 +146,77 @@ func (r DataRetentionRequest) ToSettings() appsettings.DataRetentionSettings {
 		DeliveryTasksRetentionDays: r.DeliveryTasksRetentionDays,
 		AIRunsRetentionDays:        r.AIRunsRetentionDays,
 	}
+}
+
+// DataCleanupRequest 是手动数据清理请求。
+type DataCleanupRequest struct {
+	Targets []string `json:"targets"`
+}
+
+// ToTargets 校验并转换清理目标。
+func (r DataCleanupRequest) ToTargets() (appsettings.DataCleanupTargets, error) {
+	var out appsettings.DataCleanupTargets
+	for _, target := range r.Targets {
+		switch target {
+		case "messages":
+			out.Messages = true
+		case "delivery_tasks":
+			out.DeliveryTasks = true
+		case "ai_runs":
+			out.AIRuns = true
+		default:
+			return out, fmt.Errorf("未知的数据清理目标: %s", target)
+		}
+	}
+	if out.Empty() {
+		return out, fmt.Errorf("至少选择一个数据清理目标")
+	}
+	return out, nil
+}
+
+// DataCleanupDTO 是手动数据清理响应。
+type DataCleanupDTO struct {
+	DeletedMessages      int64            `json:"deleted_messages"`
+	DeletedDeliveryTasks int64            `json:"deleted_delivery_tasks"`
+	DeletedAIRuns        int64            `json:"deleted_ai_runs"`
+	LimitReached         []string         `json:"limit_reached"`
+	Retention            DataRetentionDTO `json:"retention"`
+}
+
+// NewDataCleanupDTO 构造手动数据清理响应。
+func NewDataCleanupDTO(result appsettings.DataCleanupResult) DataCleanupDTO {
+	limited := result.LimitReached
+	if limited == nil {
+		limited = []string{}
+	}
+	return DataCleanupDTO{
+		DeletedMessages:      result.DeletedMessages,
+		DeletedDeliveryTasks: result.DeletedDeliveryTasks,
+		DeletedAIRuns:        result.DeletedAIRuns,
+		LimitReached:         limited,
+		Retention:            NewDataRetentionDTO(result.Retention, result.Source),
+	}
+}
+
+// MediaCleanupRequest 是手动媒体清理请求。
+type MediaCleanupRequest struct {
+	DeleteLocal  bool `json:"delete_local"`
+	DeleteRemote bool `json:"delete_remote"`
+}
+
+// ToInput 转换为应用层输入。
+func (r MediaCleanupRequest) ToInput() appsettings.MediaCleanupInput {
+	return appsettings.MediaCleanupInput{DeleteLocal: r.DeleteLocal, DeleteRemote: r.DeleteRemote}
+}
+
+// MediaCleanupDTO 是手动媒体清理响应。
+type MediaCleanupDTO struct {
+	DeletedLocalFiles    int     `json:"deleted_local_files"`
+	DeletedRemoteObjects int     `json:"deleted_remote_objects"`
+	RetentionHours       float64 `json:"retention_hours"`
+}
+
+// NewMediaCleanupDTO 构造手动媒体清理响应。
+func NewMediaCleanupDTO(result appsettings.MediaCleanupResult) MediaCleanupDTO {
+	return MediaCleanupDTO(result)
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -86,4 +87,45 @@ func (h *SettingsHandler) UpdateDataRetention(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": dto.NewDataRetentionDTO(dr, appsettings.SourceDatabase)})
+}
+
+// CleanupDataRetention 按当前生效的保留策略立即清理选中的数据。
+func (h *SettingsHandler) CleanupDataRetention(c *gin.Context) {
+	var req dto.DataCleanupRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	targets, err := req.ToTargets()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	result, err := h.svc.RunDataCleanup(c.Request.Context(), targets)
+	if err != nil {
+		h.respondCleanupError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewDataCleanupDTO(result)})
+}
+
+// CleanupMedia 按当前生效的媒体保留期立即清理选中的存储范围。
+func (h *SettingsHandler) CleanupMedia(c *gin.Context) {
+	var req dto.MediaCleanupRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	result, err := h.svc.RunMediaCleanup(c.Request.Context(), req.ToInput())
+	if err != nil {
+		h.respondCleanupError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": dto.NewMediaCleanupDTO(result)})
+}
+
+func (h *SettingsHandler) respondCleanupError(c *gin.Context, err error) {
+	if errors.Is(err, appsettings.ErrCleanupInProgress) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	respondError(c, err)
 }

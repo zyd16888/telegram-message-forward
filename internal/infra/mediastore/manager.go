@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -11,7 +12,8 @@ import (
 // Manager 持有当前生效的媒体存储，支持设置变更后运行时热切换，
 // 无需重启服务。它同时实现 Store 与 /media 端点所需的签名校验能力。
 type Manager struct {
-	cur atomic.Pointer[bundle]
+	cur       atomic.Pointer[bundle]
+	cleanupMu sync.Mutex
 }
 
 type bundle struct {
@@ -69,11 +71,36 @@ func (m *Manager) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 
 // Cleanup 委托当前存储。
 func (m *Manager) Cleanup(ctx context.Context, olderThan time.Duration) (int, error) {
+	if !m.cleanupMu.TryLock() {
+		return 0, ErrCleanupInProgress
+	}
+	defer m.cleanupMu.Unlock()
 	b := m.cur.Load()
 	if b == nil {
 		return 0, nil
 	}
 	return b.store.Cleanup(ctx, olderThan)
+}
+
+// CleanupDetailed 对当前生效的存储执行一次手动清理。
+func (m *Manager) CleanupDetailed(ctx context.Context, olderThan time.Duration, deleteLocal, deleteRemote bool) (CleanupResult, error) {
+	if !m.cleanupMu.TryLock() {
+		return CleanupResult{}, ErrCleanupInProgress
+	}
+	defer m.cleanupMu.Unlock()
+	b := m.cur.Load()
+	if b == nil {
+		return CleanupResult{}, nil
+	}
+	cleaner, ok := b.store.(DetailedCleaner)
+	if !ok {
+		if deleteRemote {
+			return CleanupResult{}, fmt.Errorf("当前媒体存储不支持远端清理")
+		}
+		removed, err := b.store.Cleanup(ctx, olderThan)
+		return CleanupResult{DeletedLocalFiles: removed}, err
+	}
+	return cleaner.CleanupDetailed(ctx, olderThan, deleteLocal, deleteRemote)
 }
 
 // VerifySignedPath 委托当前本地存储的签名校验（/media 端点使用）。

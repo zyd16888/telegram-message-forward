@@ -126,11 +126,11 @@ func TestUpdateMediaValidation(t *testing.T) {
 }
 
 type fakeArchive struct {
-	msgBefore  time.Time
-	msgLimit   int
-	taskBefore time.Time
-	taskLimit  int
-	msgDeleted int64
+	msgBefore   time.Time
+	msgLimit    int
+	taskBefore  time.Time
+	taskLimit   int
+	msgDeleted  int64
 	taskDeleted int64
 	// expiredMsg / expiredTask 模拟「过期可删」计数；0 表示库中没有过期行。
 	expiredMsg  int64
@@ -239,5 +239,82 @@ func TestUpdateDataRetentionValidation(t *testing.T) {
 	svc := NewService(newFakeRepo(), fileCfg())
 	if _, err := svc.UpdateDataRetention(context.Background(), DataRetentionSettings{MessagesRetentionDays: -1}); err == nil {
 		t.Fatal("负数保留天数应报错")
+	}
+}
+
+func TestRunDataCleanupUsesSelectedTargetsAndSavedRetention(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, fileCfg())
+	arch := &fakeArchive{expiredMsg: 4, expiredTask: 7}
+	svc.SetArchiveStore(arch)
+	var aiDays int
+	svc.SetAIRunsCleaner(func(_ context.Context, retentionDays int) (int64, error) {
+		aiDays = retentionDays
+		return 3, nil
+	})
+	if _, err := svc.UpdateDataRetention(context.Background(), DataRetentionSettings{
+		MessagesRetentionDays:      5,
+		DeliveryTasksRetentionDays: 6,
+		AIRunsRetentionDays:        7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.RunDataCleanup(context.Background(), DataCleanupTargets{Messages: true, AIRuns: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DeletedMessages != 4 || result.DeletedDeliveryTasks != 0 || result.DeletedAIRuns != 3 {
+		t.Fatalf("清理结果不符: %+v", result)
+	}
+	if arch.taskDeleted != 0 || aiDays != 7 || result.Source != SourceDatabase {
+		t.Fatalf("应只清理选中目标并使用已保存保留期: tasks=%d aiDays=%d source=%s", arch.taskDeleted, aiDays, result.Source)
+	}
+}
+
+func TestRunDataCleanupReportsBatchLimit(t *testing.T) {
+	svc := NewService(newFakeRepo(), fileCfg())
+	svc.SetArchiveStore(&fakeArchive{expiredMsg: int64(archiveBatchSize*maxArchiveRounds + 1)})
+	result, err := svc.RunDataCleanup(context.Background(), DataCleanupTargets{Messages: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DeletedMessages != int64(archiveBatchSize*maxArchiveRounds) {
+		t.Fatalf("删除数量 = %d", result.DeletedMessages)
+	}
+	if len(result.LimitReached) != 1 || result.LimitReached[0] != "messages" {
+		t.Fatalf("应报告消息达到单次上限: %+v", result.LimitReached)
+	}
+}
+
+func TestRunMediaCleanupUsesEffectiveSettings(t *testing.T) {
+	svc := NewService(newFakeRepo(), fileCfg())
+	var gotRetention time.Duration
+	var gotInput MediaCleanupInput
+	svc.SetMediaCleaner(func(_ context.Context, retention time.Duration, in MediaCleanupInput) (MediaCleanupResult, error) {
+		gotRetention = retention
+		gotInput = in
+		return MediaCleanupResult{DeletedLocalFiles: 2, DeletedRemoteObjects: 1}, nil
+	})
+
+	result, err := svc.RunMediaCleanup(context.Background(), MediaCleanupInput{DeleteLocal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRetention != 168*time.Hour || !gotInput.DeleteLocal || gotInput.DeleteRemote {
+		t.Fatalf("媒体清理参数不符: retention=%v input=%+v", gotRetention, gotInput)
+	}
+	if result.DeletedLocalFiles != 2 || result.DeletedRemoteObjects != 1 || result.RetentionHours != 168 {
+		t.Fatalf("媒体清理结果不符: %+v", result)
+	}
+}
+
+func TestRunMediaCleanupRejectsRemoteWhenS3Disabled(t *testing.T) {
+	svc := NewService(newFakeRepo(), fileCfg())
+	svc.SetMediaCleaner(func(context.Context, time.Duration, MediaCleanupInput) (MediaCleanupResult, error) {
+		return MediaCleanupResult{}, nil
+	})
+	if _, err := svc.RunMediaCleanup(context.Background(), MediaCleanupInput{DeleteRemote: true}); err == nil {
+		t.Fatal("S3 未启用时不应允许远端清理")
 	}
 }

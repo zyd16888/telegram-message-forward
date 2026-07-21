@@ -184,6 +184,16 @@ func Build(cfg *config.Config) (*App, error) {
 	settingsSvc.SetMediaTester(func(ctx context.Context, ms appsettings.MediaSettings, s3Secret string) error {
 		return mediastore.TestS3(ctx, mediaS3Options(ms, s3Secret))
 	})
+	settingsSvc.SetMediaCleaner(func(ctx context.Context, retention time.Duration, in appsettings.MediaCleanupInput) (appsettings.MediaCleanupResult, error) {
+		result, err := mediaStore.CleanupDetailed(ctx, retention, in.DeleteLocal, in.DeleteRemote)
+		if errors.Is(err, mediastore.ErrCleanupInProgress) {
+			err = appsettings.ErrCleanupInProgress
+		}
+		return appsettings.MediaCleanupResult{
+			DeletedLocalFiles:    result.DeletedLocalFiles,
+			DeletedRemoteObjects: result.DeletedRemoteObjects,
+		}, err
+	})
 	initialMedia, initialS3Secret, _, err := settingsSvc.EffectiveMedia(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("加载媒体设置失败: %w", err)
@@ -219,6 +229,13 @@ func Build(cfg *config.Config) (*App, error) {
 		Logger:   log,
 		Wake:     deliveryNotifier.Notify,
 		Media:    mediaStore,
+	})
+	settingsSvc.SetAIRunsCleaner(func(ctx context.Context, retentionDays int) (int64, error) {
+		deleted, err := aiDigestSvc.CleanupRuns(ctx, retentionDays)
+		if errors.Is(err, appaidigest.ErrCleanupInProgress) {
+			err = appsettings.ErrCleanupInProgress
+		}
+		return deleted, err
 	})
 	aiScheduler := appaidigest.NewScheduler(aiDigestSvc, log)
 	aiScheduler.SetRetentionDaysFunc(func(ctx context.Context) int {

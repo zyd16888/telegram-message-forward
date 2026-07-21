@@ -6,6 +6,7 @@ package mediastore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,20 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrCleanupInProgress 表示已有媒体清理任务正在执行。
+var ErrCleanupInProgress = errors.New("已有媒体清理任务正在执行")
+
+// CleanupResult 分别统计本地缓存和远端对象的删除数量。
+type CleanupResult struct {
+	DeletedLocalFiles    int `json:"deleted_local_files"`
+	DeletedRemoteObjects int `json:"deleted_remote_objects"`
+}
+
+// DetailedCleaner 支持显式选择本地和远端清理范围。
+type DetailedCleaner interface {
+	CleanupDetailed(ctx context.Context, olderThan time.Duration, deleteLocal, deleteRemote bool) (CleanupResult, error)
+}
 
 // Store 是媒体存储接口。
 type Store interface {
@@ -70,6 +85,7 @@ func moveFile(src, dst string) error {
 // cleanupDir 删除 dir 下修改时间早于 cutoff 的文件，并顺带清理空目录。
 func cleanupDir(dir string, cutoff time.Time) (int, error) {
 	removed := 0
+	var removeErr error
 	err := filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -81,9 +97,11 @@ func cleanupDir(dir string, cutoff time.Time) (int, error) {
 			return nil
 		}
 		if info.ModTime().Before(cutoff) {
-			if rerr := os.Remove(p); rerr == nil {
-				removed++
+			if rerr := os.Remove(p); rerr != nil {
+				removeErr = errors.Join(removeErr, fmt.Errorf("删除媒体文件 %q 失败: %w", p, rerr))
+				return nil
 			}
+			removed++
 		}
 		return nil
 	})
@@ -98,5 +116,5 @@ func cleanupDir(dir string, cutoff time.Time) (int, error) {
 		_ = os.Remove(p) // 非空目录会失败，忽略即可
 		return nil
 	})
-	return removed, nil
+	return removed, removeErr
 }

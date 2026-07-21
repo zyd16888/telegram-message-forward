@@ -237,8 +237,10 @@ func NewRouter(deps Deps) *gin.Engine {
 				settings.GET("/media", deps.Settings.GetMedia)
 				settings.PUT("/media", deps.Settings.UpdateMedia)
 				settings.POST("/media/test-s3", deps.Settings.TestMediaS3)
+				settings.POST("/media/cleanup", deps.Settings.CleanupMedia)
 				settings.GET("/data-retention", deps.Settings.GetDataRetention)
 				settings.PUT("/data-retention", deps.Settings.UpdateDataRetention)
+				settings.POST("/data-retention/cleanup", deps.Settings.CleanupDataRetention)
 			}
 		}
 

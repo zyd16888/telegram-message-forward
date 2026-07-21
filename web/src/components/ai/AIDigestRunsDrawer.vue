@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { h, shallowRef, watch } from 'vue'
 import { NButton, NTag, NText, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
-import { aiApi } from '@/api/client'
+import { aiApi, settingsApi } from '@/api/client'
 import type { AIDigestProfile, AIDigestRun } from '@/types'
 import { errText } from '@/utils/error'
 import { formatDateTime, formatDateTimeTitle, formatDuration, runDisplayTime } from '@/utils/datetime'
@@ -120,8 +120,8 @@ function cleanup(): void {
     negativeText: '取消',
     onPositiveClick: async () => {
       try {
-        const result = await aiApi.runs.cleanup(30)
-        message.success(`已清理 ${result.deleted} 条运行记录`)
+        const result = await settingsApi.dataRetention.cleanup({ targets: ['ai_runs'] })
+        message.success(`已清理 ${result.deleted_ai_runs} 条运行记录`)
         page.value = 1
         await refresh()
       } catch (error) {

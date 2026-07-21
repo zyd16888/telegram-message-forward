@@ -80,6 +80,9 @@ const systemPrompt = `你是信息整理助手。只能基于用户提供的消�
 不要输出任何未在输入中出现的 secret、token、手机号、验证码或账号敏感信息。
 如果内容涉及财经、医疗、法律或其它高风险领域，仅做信息整理，不构成建议。`
 
+// ErrCleanupInProgress 表示已有 AI run 清理任务正在执行。
+var ErrCleanupInProgress = errors.New("已有 AI 运行清理任务正在执行")
+
 type Service struct {
 	repo          domainaidigest.Repository
 	settings      domainsettings.Repository
@@ -93,6 +96,7 @@ type Service struct {
 	wake          func()
 	media         mediastore.Store
 	mu            sync.Mutex
+	cleanupMu     sync.Mutex
 	activeCancels map[int64]context.CancelFunc
 }
 
@@ -733,7 +737,15 @@ func (s *Service) CleanupRuns(ctx context.Context, retentionDays int) (int64, er
 	if retentionDays == 0 {
 		return 0, nil // 0 = 不清理
 	}
-	return s.repo.CleanupRuns(ctx, s.clk.Now().Add(-time.Duration(retentionDays)*24*time.Hour))
+	if !s.cleanupMu.TryLock() {
+		return 0, ErrCleanupInProgress
+	}
+	defer s.cleanupMu.Unlock()
+	return s.repo.CleanupRuns(
+		ctx,
+		s.clk.Now().Add(-time.Duration(retentionDays)*24*time.Hour),
+		[]domainaidigest.RunStatus{domainaidigest.RunSuccess, domainaidigest.RunFailed, domainaidigest.RunCancelled},
+	)
 }
 
 func (s *Service) RecoverStaleRuns(ctx context.Context, timeout time.Duration) (int64, error) {

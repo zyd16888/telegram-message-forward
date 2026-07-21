@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -353,6 +354,8 @@ type memoryDigestRepo struct {
 	profiles      []*domainaidigest.Profile
 	lastExecution map[int64]*domainaidigest.Run
 	runs          map[int64]*domainaidigest.Run
+	cleanupBefore time.Time
+	cleanupStatus []domainaidigest.RunStatus
 }
 
 func (r *memoryDigestRepo) CreateProfile(_ context.Context, profile *domainaidigest.Profile) error {
@@ -422,7 +425,11 @@ func (r *memoryDigestRepo) UpsertOutput(context.Context, *domainaidigest.Output)
 func (r *memoryDigestRepo) GetOutputByRunID(context.Context, int64) (*domainaidigest.Output, error) {
 	return nil, nil
 }
-func (r *memoryDigestRepo) CleanupRuns(context.Context, time.Time) (int64, error) { return 0, nil }
+func (r *memoryDigestRepo) CleanupRuns(_ context.Context, before time.Time, statuses []domainaidigest.RunStatus) (int64, error) {
+	r.cleanupBefore = before
+	r.cleanupStatus = append([]domainaidigest.RunStatus(nil), statuses...)
+	return 2, nil
+}
 func (r *memoryDigestRepo) AggregateStatsSince(context.Context, time.Time) (map[int64]domainaidigest.ProfileStats, error) {
 	return map[int64]domainaidigest.ProfileStats{}, nil
 }
@@ -446,6 +453,23 @@ func TestCleanupRunsZeroSkips(t *testing.T) {
 	n, err := svc.CleanupRuns(context.Background(), 0)
 	if err != nil || n != 0 {
 		t.Fatalf("0 retention should skip: n=%d err=%v", n, err)
+	}
+}
+
+func TestCleanupRunsOnlyRequestsTerminalStatuses(t *testing.T) {
+	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	repo := &memoryDigestRepo{}
+	svc := NewService(Deps{Repo: repo, Clock: fixedClock{now: now}})
+	n, err := svc.CleanupRuns(context.Background(), 7)
+	if err != nil || n != 2 {
+		t.Fatalf("CleanupRuns: n=%d err=%v", n, err)
+	}
+	if !repo.cleanupBefore.Equal(now.Add(-7 * 24 * time.Hour)) {
+		t.Fatalf("cleanup before = %v", repo.cleanupBefore)
+	}
+	want := []domainaidigest.RunStatus{domainaidigest.RunSuccess, domainaidigest.RunFailed, domainaidigest.RunCancelled}
+	if !reflect.DeepEqual(repo.cleanupStatus, want) {
+		t.Fatalf("cleanup statuses = %v, want %v", repo.cleanupStatus, want)
 	}
 }
 

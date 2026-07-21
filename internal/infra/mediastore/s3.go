@@ -34,7 +34,7 @@ type S3Options struct {
 // S3 是 S3 兼容对象存储实现（AWS S3 / Cloudflare R2 / MinIO / OSS / COS 等）。
 //
 // 本地目录仍作为二进制缓存保留：需要直接读取文件内容的渠道
-//（企业微信 base64、邮件附件等）继续走本地路径。
+// （企业微信 base64、邮件附件等）继续走本地路径。
 type S3 struct {
 	local  *Local
 	client *minio.Client
@@ -141,9 +141,21 @@ func (s *S3) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 // Cleanup 清理本地缓存；开启 AutoCleanup 时同步删除对象存储中过期的对象，
 // 否则对象存储侧交由桶生命周期规则处理。
 func (s *S3) Cleanup(ctx context.Context, olderThan time.Duration) (int, error) {
-	removed, localErr := s.local.Cleanup(ctx, olderThan)
-	if !s.opts.AutoCleanup {
-		return removed, localErr
+	result, err := s.CleanupDetailed(ctx, olderThan, true, s.opts.AutoCleanup)
+	return result.DeletedLocalFiles + result.DeletedRemoteObjects, err
+}
+
+// CleanupDetailed 按调用方明确指定的范围清理本地缓存和远端对象。
+func (s *S3) CleanupDetailed(ctx context.Context, olderThan time.Duration, deleteLocal, deleteRemote bool) (CleanupResult, error) {
+	var result CleanupResult
+	var localErr error
+	if deleteLocal {
+		localResult, err := s.local.CleanupDetailed(ctx, olderThan, true, false)
+		result.DeletedLocalFiles = localResult.DeletedLocalFiles
+		localErr = err
+	}
+	if !deleteRemote {
+		return result, localErr
 	}
 
 	cutoff := time.Now().Add(-olderThan)
@@ -164,12 +176,12 @@ func (s *S3) Cleanup(ctx context.Context, olderThan time.Duration) (int, error) 
 			continue
 		}
 		if err := s.client.RemoveObject(ctx, s.opts.Bucket, obj.Key, minio.RemoveObjectOptions{}); err != nil {
-			remoteErr = fmt.Errorf("删除过期对象失败: %w", err)
+			remoteErr = errors.Join(remoteErr, fmt.Errorf("删除过期对象 %q 失败: %w", obj.Key, err))
 			continue
 		}
-		removed++
+		result.DeletedRemoteObjects++
 	}
-	return removed, errors.Join(localErr, remoteErr)
+	return result, errors.Join(localErr, remoteErr)
 }
 
 func (s *S3) objectKey(key string) string {

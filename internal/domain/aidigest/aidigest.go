@@ -347,7 +347,7 @@ type Repository interface {
 	ListRunItems(ctx context.Context, runID int64) ([]*RunItem, error)
 	UpsertOutput(ctx context.Context, out *Output) error
 	GetOutputByRunID(ctx context.Context, runID int64) (*Output, error)
-	CleanupRuns(ctx context.Context, before time.Time) (int64, error)
+	CleanupRuns(ctx context.Context, before time.Time, statuses []RunStatus) (int64, error)
 	RecoverStaleRuns(ctx context.Context, before, finishedAt time.Time) (int64, error)
 	// AggregateStatsSince 汇总 since 之后各 Profile 的运行计数与 token。
 	AggregateStatsSince(ctx context.Context, since time.Time) (map[int64]ProfileStats, error)

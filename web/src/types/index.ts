@@ -531,6 +531,17 @@ export interface MediaS3TestResult {
   error?: string
 }
 
+export interface MediaCleanupRequest {
+  delete_local: boolean
+  delete_remote: boolean
+}
+
+export interface MediaCleanupResult {
+  deleted_local_files: number
+  deleted_remote_objects: number
+  retention_hours: number
+}
+
 export interface DataRetentionSettings {
   messages_retention_days: number
   delivery_tasks_retention_days: number
@@ -543,6 +554,20 @@ export interface DataRetentionRequest {
   messages_retention_days: number
   delivery_tasks_retention_days: number
   ai_runs_retention_days: number
+}
+
+export type DataCleanupTarget = 'messages' | 'delivery_tasks' | 'ai_runs'
+
+export interface DataCleanupRequest {
+  targets: DataCleanupTarget[]
+}
+
+export interface DataCleanupResult {
+  deleted_messages: number
+  deleted_delivery_tasks: number
+  deleted_ai_runs: number
+  limit_reached: DataCleanupTarget[]
+  retention: DataRetentionSettings
 }
 
 export type BackupCounts = Record<string, number>

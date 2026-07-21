@@ -405,8 +405,10 @@ func (r *AIDigestRepository) GetOutputByRunID(ctx context.Context, runID int64) 
 	return toAIDigestOutputDomain(&m), nil
 }
 
-func (r *AIDigestRepository) CleanupRuns(ctx context.Context, before time.Time) (int64, error) {
-	res := r.db.WithContext(ctx).Where("created_at < ?", before).Delete(&model.AIDigestRun{})
+func (r *AIDigestRepository) CleanupRuns(ctx context.Context, before time.Time, statuses []domainaidigest.RunStatus) (int64, error) {
+	res := r.db.WithContext(ctx).
+		Where("created_at < ? AND status IN ?", before, statuses).
+		Delete(&model.AIDigestRun{})
 	return res.RowsAffected, res.Error
 }
 

@@ -81,11 +81,24 @@ func (l *Local) Open(_ context.Context, key string) (io.ReadCloser, error) {
 }
 
 // Cleanup 删除早于 olderThan 的本地文件。
-func (l *Local) Cleanup(_ context.Context, olderThan time.Duration) (int, error) {
-	if _, err := os.Stat(l.dir); os.IsNotExist(err) {
-		return 0, nil
+func (l *Local) Cleanup(ctx context.Context, olderThan time.Duration) (int, error) {
+	result, err := l.CleanupDetailed(ctx, olderThan, true, false)
+	return result.DeletedLocalFiles, err
+}
+
+// CleanupDetailed 按需清理本地缓存；本地实现不支持远端清理。
+func (l *Local) CleanupDetailed(_ context.Context, olderThan time.Duration, deleteLocal, deleteRemote bool) (CleanupResult, error) {
+	if deleteRemote {
+		return CleanupResult{}, fmt.Errorf("当前媒体存储不支持远端清理")
 	}
-	return cleanupDir(l.dir, l.now().Add(-olderThan))
+	if !deleteLocal {
+		return CleanupResult{}, nil
+	}
+	if _, err := os.Stat(l.dir); os.IsNotExist(err) {
+		return CleanupResult{}, nil
+	}
+	removed, err := cleanupDir(l.dir, l.now().Add(-olderThan))
+	return CleanupResult{DeletedLocalFiles: removed}, err
 }
 
 // VerifySignedPath 校验 /media 端点收到的签名与有效期。

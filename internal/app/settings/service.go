@@ -7,8 +7,10 @@ package settings
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"telegram-message-forward/internal/config"
@@ -82,6 +84,28 @@ type MediaReloader func(ms MediaSettings, s3SecretKey string) error
 // MediaTester 校验一组 S3 设置的连通性（bootstrap 注入，底层走 mediastore）。
 type MediaTester func(ctx context.Context, ms MediaSettings, s3SecretKey string) error
 
+// ErrCleanupInProgress 表示同类清理任务已在执行。
+var ErrCleanupInProgress = errors.New("已有清理任务正在执行")
+
+// AIRunsCleaner 清理超过保留期的终态 AI run。
+type AIRunsCleaner func(ctx context.Context, retentionDays int) (int64, error)
+
+// MediaCleanupInput 指定手动媒体清理范围。
+type MediaCleanupInput struct {
+	DeleteLocal  bool
+	DeleteRemote bool
+}
+
+// MediaCleanupResult 是媒体清理结果。
+type MediaCleanupResult struct {
+	DeletedLocalFiles    int     `json:"deleted_local_files"`
+	DeletedRemoteObjects int     `json:"deleted_remote_objects"`
+	RetentionHours       float64 `json:"retention_hours"`
+}
+
+// MediaCleaner 对当前生效媒体存储执行清理。
+type MediaCleaner func(ctx context.Context, retention time.Duration, in MediaCleanupInput) (MediaCleanupResult, error)
+
 // DefaultMessagesRetentionDays 是消息保留天数默认值（0=不清理）。
 const DefaultMessagesRetentionDays = 90
 
@@ -112,6 +136,28 @@ type ArchiveResult struct {
 	DeletedDeliveryTasks int64 `json:"deleted_delivery_tasks"`
 }
 
+// DataCleanupTargets 指定一次手动数据清理的目标。
+type DataCleanupTargets struct {
+	Messages      bool
+	DeliveryTasks bool
+	AIRuns        bool
+}
+
+// Empty 返回是否未选择任何目标。
+func (t DataCleanupTargets) Empty() bool {
+	return !t.Messages && !t.DeliveryTasks && !t.AIRuns
+}
+
+// DataCleanupResult 汇总手动数据清理结果和实际使用的保留策略。
+type DataCleanupResult struct {
+	DeletedMessages      int64                 `json:"deleted_messages"`
+	DeletedDeliveryTasks int64                 `json:"deleted_delivery_tasks"`
+	DeletedAIRuns        int64                 `json:"deleted_ai_runs"`
+	LimitReached         []string              `json:"limit_reached"`
+	Retention            DataRetentionSettings `json:"retention"`
+	Source               string                `json:"-"`
+}
+
 // ArchiveStore 负责按时间窗口分批删除历史消息与终态投递任务。
 type ArchiveStore interface {
 	// DeleteTerminalDeliveryTasksBefore 删除 created_at < before 的终态投递任务（含 attempts 级联）。
@@ -127,7 +173,10 @@ type Service struct {
 	fileSecret   string
 	reload       MediaReloader
 	testS3       MediaTester
+	cleanMedia   MediaCleaner
 	archive      ArchiveStore
+	cleanAIRuns  AIRunsCleaner
+	archiveMu    sync.Mutex
 	now          func() time.Time
 }
 
@@ -147,8 +196,14 @@ func (s *Service) SetMediaReloader(fn MediaReloader) { s.reload = fn }
 // SetMediaTester 注入 S3 连通性测试实现。
 func (s *Service) SetMediaTester(fn MediaTester) { s.testS3 = fn }
 
+// SetMediaCleaner 注入当前媒体存储的清理实现。
+func (s *Service) SetMediaCleaner(fn MediaCleaner) { s.cleanMedia = fn }
+
 // SetArchiveStore 注入消息/投递归档存储。
 func (s *Service) SetArchiveStore(store ArchiveStore) { s.archive = store }
+
+// SetAIRunsCleaner 注入 AI run 清理实现。
+func (s *Service) SetAIRunsCleaner(fn AIRunsCleaner) { s.cleanAIRuns = fn }
 
 // EffectiveMedia 返回当前生效的媒体设置、S3 secret 明文与来源。
 // 仅供 bootstrap 装配与内部重载使用，不得直接返回给 API。
@@ -245,6 +300,30 @@ func (s *Service) TestS3(ctx context.Context, in MediaSettings, s3SecretKey *str
 	return s.testS3(ctx, in, secret)
 }
 
+// RunMediaCleanup 按当前已保存并生效的保留期执行一次媒体清理。
+func (s *Service) RunMediaCleanup(ctx context.Context, in MediaCleanupInput) (MediaCleanupResult, error) {
+	if !in.DeleteLocal && !in.DeleteRemote {
+		return MediaCleanupResult{}, fmt.Errorf("至少选择一个媒体清理目标")
+	}
+	if s.cleanMedia == nil {
+		return MediaCleanupResult{}, fmt.Errorf("媒体清理能力未装配")
+	}
+	ms, _, _, err := s.EffectiveMedia(ctx)
+	if err != nil {
+		return MediaCleanupResult{}, err
+	}
+	retention := ms.Retention()
+	if retention <= 0 {
+		return MediaCleanupResult{}, fmt.Errorf("媒体保留时长为 0，当前没有可清理的过期媒体")
+	}
+	if in.DeleteRemote && !ms.S3.Enabled {
+		return MediaCleanupResult{}, fmt.Errorf("当前未启用 S3，不能清理远端对象")
+	}
+	result, err := s.cleanMedia(ctx, retention, in)
+	result.RetentionHours = ms.RetentionHours
+	return result, err
+}
+
 // GetDataRetention 返回当前生效的归档保留策略。
 func (s *Service) GetDataRetention(ctx context.Context) (DataRetentionSettings, string, error) {
 	row, err := s.repo.Get(ctx, domainsettings.KeyDataRetention)
@@ -282,54 +361,92 @@ func (s *Service) UpdateDataRetention(ctx context.Context, in DataRetentionSetti
 // RunArchiveCleanup 按当前保留策略分批清理过期消息与终态投递任务。
 // 保留天数为 0 时对应类型不清理。先清投递再清消息，避免无用的长事务。
 func (s *Service) RunArchiveCleanup(ctx context.Context) (ArchiveResult, error) {
-	var out ArchiveResult
-	if s.archive == nil {
-		return out, nil
+	result, err := s.runDataCleanup(ctx, DataCleanupTargets{Messages: true, DeliveryTasks: true})
+	return ArchiveResult{
+		DeletedMessages:      result.DeletedMessages,
+		DeletedDeliveryTasks: result.DeletedDeliveryTasks,
+	}, err
+}
+
+// RunDataCleanup 按当前已保存并生效的保留策略清理选中的数据目标。
+func (s *Service) RunDataCleanup(ctx context.Context, targets DataCleanupTargets) (DataCleanupResult, error) {
+	if targets.Empty() {
+		return DataCleanupResult{}, fmt.Errorf("至少选择一个数据清理目标")
 	}
-	dr, _, err := s.GetDataRetention(ctx)
+	return s.runDataCleanup(ctx, targets)
+}
+
+func (s *Service) runDataCleanup(ctx context.Context, targets DataCleanupTargets) (DataCleanupResult, error) {
+	var out DataCleanupResult
+	if !s.archiveMu.TryLock() {
+		return out, ErrCleanupInProgress
+	}
+	defer s.archiveMu.Unlock()
+
+	dr, source, err := s.GetDataRetention(ctx)
 	if err != nil {
 		return out, err
 	}
+	out.Retention = dr
+	out.Source = source
 	now := s.now()
-	if dr.DeliveryTasksRetentionDays > 0 {
+	if targets.DeliveryTasks && dr.DeliveryTasksRetentionDays > 0 && s.archive != nil {
 		before := now.Add(-time.Duration(dr.DeliveryTasksRetentionDays) * 24 * time.Hour)
-		n, err := deleteInBatches(ctx, archiveBatchSize, maxArchiveRounds, func(limit int) (int64, error) {
+		n, limited, err := deleteInBatches(ctx, archiveBatchSize, maxArchiveRounds, func(limit int) (int64, error) {
 			return s.archive.DeleteTerminalDeliveryTasksBefore(ctx, before, limit)
 		})
 		if err != nil {
 			return out, fmt.Errorf("清理过期投递任务失败: %w", err)
 		}
 		out.DeletedDeliveryTasks = n
+		if limited {
+			out.LimitReached = append(out.LimitReached, "delivery_tasks")
+		}
 	}
-	if dr.MessagesRetentionDays > 0 {
+	if targets.Messages && dr.MessagesRetentionDays > 0 && s.archive != nil {
 		before := now.Add(-time.Duration(dr.MessagesRetentionDays) * 24 * time.Hour)
-		n, err := deleteInBatches(ctx, archiveBatchSize, maxArchiveRounds, func(limit int) (int64, error) {
+		n, limited, err := deleteInBatches(ctx, archiveBatchSize, maxArchiveRounds, func(limit int) (int64, error) {
 			return s.archive.DeleteMessagesBefore(ctx, before, limit)
 		})
 		if err != nil {
 			return out, fmt.Errorf("清理过期消息失败: %w", err)
 		}
 		out.DeletedMessages = n
+		if limited {
+			out.LimitReached = append(out.LimitReached, "messages")
+		}
+	}
+	if targets.AIRuns && dr.AIRunsRetentionDays > 0 {
+		if s.cleanAIRuns == nil {
+			return out, fmt.Errorf("AI 运行清理能力未装配")
+		}
+		n, err := s.cleanAIRuns(ctx, dr.AIRunsRetentionDays)
+		if err != nil {
+			return out, fmt.Errorf("清理过期 AI 运行记录失败: %w", err)
+		}
+		out.DeletedAIRuns = n
 	}
 	return out, nil
 }
 
-func deleteInBatches(ctx context.Context, batch, maxRounds int, fn func(limit int) (int64, error)) (int64, error) {
+func deleteInBatches(ctx context.Context, batch, maxRounds int, fn func(limit int) (int64, error)) (int64, bool, error) {
 	var total int64
+	limited := false
 	for i := 0; i < maxRounds; i++ {
 		if err := ctx.Err(); err != nil {
-			return total, err
+			return total, limited, err
 		}
 		n, err := fn(batch)
 		if err != nil {
-			return total, err
+			return total, limited, err
 		}
 		total += n
 		if n < int64(batch) {
-			break
+			return total, false, nil
 		}
+		limited = i == maxRounds-1
 	}
-	return total, nil
+	return total, limited, nil
 }
 
 func defaultDataRetention() DataRetentionSettings {

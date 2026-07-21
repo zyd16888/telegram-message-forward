@@ -113,3 +113,21 @@ func TestS3CleanupDisabledSkipsRemote(t *testing.T) {
 		t.Fatal("未开启 auto_cleanup 不应发起删除请求")
 	}
 }
+
+func TestS3ManualCleanupCanExplicitlyDeleteRemote(t *testing.T) {
+	newTime := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	srv, deleted := newS3Mock(t, listBucketXML(newTime))
+	defer srv.Close()
+
+	s3 := newTestS3(t, srv.URL, false)
+	result, err := s3.CleanupDetailed(context.Background(), 30*24*time.Hour, false, true)
+	if err != nil {
+		t.Fatalf("CleanupDetailed: %v", err)
+	}
+	if result.DeletedLocalFiles != 0 || result.DeletedRemoteObjects != 1 {
+		t.Fatalf("手动清理结果不符: %+v", result)
+	}
+	if _, ok := deleted.Load("tmf/telegram/source_1/old.jpg"); !ok {
+		t.Fatal("显式选择远端后应删除过期对象")
+	}
+}
