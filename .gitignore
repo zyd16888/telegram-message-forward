@@ -74,3 +74,4 @@ config.local.yaml
 *.session
 
 legacy/
+data/

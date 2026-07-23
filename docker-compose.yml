@@ -2,7 +2,6 @@ services:
   config-init:
     image: ghcr.io/zyd16888/telegram-message-forward:nightly
     pull_policy: always
-    user: "0:0"
     command: ["-init-config", "/app/configs/config.yaml"]
     volumes:
       - ./configs:/app/configs
