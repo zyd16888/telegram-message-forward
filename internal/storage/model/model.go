@@ -215,6 +215,9 @@ type Message struct {
 	SentAt            *time.Time
 	ReceivedAt        time.Time
 	CreatedAt         time.Time
+	ContentRevision   int
+	ContentHash       string
+	EditedAt          *time.Time
 }
 
 func (Message) TableName() string { return "messages" }
@@ -237,6 +240,8 @@ type DeliveryTask struct {
 	LockedBy        string
 	LastError       string
 	MessageSnapshot datatypes.JSON
+	MessageRevision int
+	TextSuffix      string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

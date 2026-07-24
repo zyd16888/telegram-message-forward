@@ -7,19 +7,26 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
 
 	domainaccount "telegram-message-forward/internal/domain/account"
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainpeer "telegram-message-forward/internal/domain/peer"
 	domainsource "telegram-message-forward/internal/domain/source"
 	infratelegram "telegram-message-forward/internal/infra/telegram"
 	pluginsource "telegram-message-forward/internal/plugin/source"
 )
 
-const syncDialogsPageSize = 100
+const (
+	syncDialogsPageSize      = 100
+	defaultEditDebounce      = 30 * time.Second
+	defaultEditResendSuffix  = "--已编辑（二次发送）"
+	maxEditResendSuffixRunes = 200
+)
 
 // Deps 是 Telegram Source 插件的依赖，由 bootstrap 注入（避免 plugin 直连存储层）。
 type Deps struct {
@@ -39,9 +46,10 @@ type Deps struct {
 // Telegram 客户端本质是「每账号一个」；插件内部按 account 维护 runner，
 // 多个 source 只注册为同一个 runner 的订阅，避免重复启动 Telegram client。
 type Plugin struct {
-	deps    Deps
-	mu      sync.Mutex
-	runners map[int64]*accountRunner // account_id -> runner
+	deps         Deps
+	mu           sync.Mutex
+	runners      map[int64]*accountRunner // account_id -> runner
+	editDebounce time.Duration
 }
 
 // NewPlugin 创建 Telegram Source 插件。
@@ -49,7 +57,7 @@ func NewPlugin(deps Deps) *Plugin {
 	if deps.Log == nil {
 		deps.Log = slog.Default()
 	}
-	return &Plugin{deps: deps, runners: map[int64]*accountRunner{}}
+	return &Plugin{deps: deps, runners: map[int64]*accountRunner{}, editDebounce: defaultEditDebounce}
 }
 
 var _ pluginsource.Plugin = (*Plugin)(nil)
@@ -63,8 +71,26 @@ func (p *Plugin) Capabilities() pluginsource.Capabilities {
 	return pluginsource.Capabilities{SupportsSync: true, SupportsMedia: true, SupportsHistory: true}
 }
 
-// ValidateConfig 目前无额外配置校验。
-func (p *Plugin) ValidateConfig(map[string]any) error { return nil }
+// ValidateConfig 校验 Telegram Source 的编辑补发配置。
+func (p *Plugin) ValidateConfig(config map[string]any) error {
+	for _, key := range []string{"edit_resend_enabled", "edit_resend_suffix_enabled"} {
+		if value, ok := config[key]; ok {
+			if _, valid := value.(bool); !valid {
+				return fmt.Errorf("%s 必须是布尔值", key)
+			}
+		}
+	}
+	if value, ok := config["edit_resend_suffix"]; ok {
+		suffix, valid := value.(string)
+		if !valid {
+			return fmt.Errorf("edit_resend_suffix 必须是字符串")
+		}
+		if utf8.RuneCountInString(suffix) > maxEditResendSuffixRunes {
+			return fmt.Errorf("edit_resend_suffix 不能超过 %d 个字符", maxEditResendSuffixRunes)
+		}
+	}
+	return nil
+}
 
 // buildClient 按账号构建客户端。update 为 nil 时用于一次性 API 调用（如同步）。
 func (p *Plugin) buildClient(acc *domainaccount.Account, update telegram.UpdateHandler) (*telegram.Client, error) {
@@ -560,11 +586,23 @@ type sourceSubscription struct {
 	handler pluginsource.Handler
 }
 
+type editKey struct {
+	sourceID  int64
+	messageID int
+}
+
+type pendingEdit struct {
+	timer    *time.Timer
+	message  *tg.Message
+	entities tg.Entities
+}
+
 type accountRunner struct {
 	accountID       int64
 	client          *telegram.Client
 	cancel          context.CancelFunc
 	sources         map[int64]sourceSubscription // source_id -> subscription
+	pendingEdits    map[editKey]*pendingEdit
 	recentMessageAt *time.Time
 	lastError       string
 	ready           chan struct{}
@@ -574,12 +612,13 @@ type accountRunner struct {
 
 func newAccountRunner(accountID int64, client *telegram.Client, cancel context.CancelFunc) *accountRunner {
 	return &accountRunner{
-		accountID: accountID,
-		client:    client,
-		cancel:    cancel,
-		sources:   map[int64]sourceSubscription{},
-		ready:     make(chan struct{}),
-		done:      make(chan struct{}),
+		accountID:    accountID,
+		client:       client,
+		cancel:       cancel,
+		sources:      map[int64]sourceSubscription{},
+		pendingEdits: map[editKey]*pendingEdit{},
+		ready:        make(chan struct{}),
+		done:         make(chan struct{}),
 	}
 }
 
@@ -592,11 +631,32 @@ func (r *accountRunner) setSource(src *domainsource.Source, handler pluginsource
 		return
 	}
 	r.sources[src.ID] = sourceSubscription{source: *src, handler: handler}
+	if !sourceEditResendEnabled(src) {
+		r.cancelPendingSource(src.ID)
+	}
 }
 
 func (r *accountRunner) removeSource(sourceID int64) bool {
+	r.cancelPendingSource(sourceID)
 	delete(r.sources, sourceID)
 	return len(r.sources) == 0
+}
+
+func (r *accountRunner) cancelPendingSource(sourceID int64) {
+	for key, pending := range r.pendingEdits {
+		if key.sourceID != sourceID {
+			continue
+		}
+		pending.timer.Stop()
+		delete(r.pendingEdits, key)
+	}
+}
+
+func (r *accountRunner) cancelAllPendingEdits() {
+	for key, pending := range r.pendingEdits {
+		pending.timer.Stop()
+		delete(r.pendingEdits, key)
+	}
 }
 
 func (r *accountRunner) matchingSubscriptions(msg *tg.Message) []sourceSubscription {
@@ -636,6 +696,7 @@ func (p *Plugin) StopAccount(ctx context.Context, accountID int64) error {
 	p.mu.Lock()
 	runner := p.runners[accountID]
 	if runner != nil {
+		runner.cancelAllPendingEdits()
 		delete(p.runners, accountID)
 	}
 	p.mu.Unlock()
@@ -690,6 +751,22 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 	})
 	dispatcher.OnNewMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewMessage) error {
 		p.forwardToSubscriptions(runCtx, acc.ID, client, e, u.Message)
+		return nil
+	})
+	dispatcher.OnEditChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateEditChannelMessage) error {
+		p.scheduleEdit(runCtx, acc.ID, client, e, u.Message)
+		return nil
+	})
+	dispatcher.OnEditMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateEditMessage) error {
+		p.scheduleEdit(runCtx, acc.ID, client, e, u.Message)
+		return nil
+	})
+	dispatcher.OnDeleteChannelMessages(func(ctx context.Context, _ tg.Entities, u *tg.UpdateDeleteChannelMessages) error {
+		p.cancelDeletedEdits(acc.ID, u.Messages, &u.ChannelID)
+		return nil
+	})
+	dispatcher.OnDeleteMessages(func(ctx context.Context, _ tg.Entities, u *tg.UpdateDeleteMessages) error {
+		p.cancelDeletedEdits(acc.ID, u.Messages, nil)
 		return nil
 	})
 
@@ -747,6 +824,7 @@ func (p *Plugin) Start(_ context.Context, acc *domainaccount.Account, src *domai
 		}
 		p.mu.Lock()
 		if p.runners[acc.ID] == runner {
+			runner.cancelAllPendingEdits()
 			delete(p.runners, acc.ID)
 		}
 		p.mu.Unlock()
@@ -774,6 +852,108 @@ func (p *Plugin) Stop(_ context.Context, src *domainsource.Source) error {
 	return nil
 }
 
+func (p *Plugin) scheduleEdit(runCtx context.Context, accountID int64, client *telegram.Client, e tg.Entities, m tg.MessageClass) {
+	msg, ok := m.(*tg.Message)
+	if !ok {
+		return
+	}
+
+	p.mu.Lock()
+	runner := p.runners[accountID]
+	if runner == nil {
+		p.mu.Unlock()
+		return
+	}
+	subs := runner.matchingSubscriptions(msg)
+	delay := p.editDebounce
+	if delay <= 0 {
+		delay = defaultEditDebounce
+	}
+	for _, sub := range subs {
+		if !sourceEditResendEnabled(&sub.source) {
+			continue
+		}
+		key := editKey{sourceID: sub.source.ID, messageID: msg.ID}
+		if previous := runner.pendingEdits[key]; previous != nil {
+			previous.timer.Stop()
+		}
+		messageCopy := *msg
+		pending := &pendingEdit{message: &messageCopy, entities: e}
+		pending.timer = time.AfterFunc(delay, func() {
+			p.flushPendingEdit(runCtx, accountID, client, key, pending)
+		})
+		runner.pendingEdits[key] = pending
+	}
+	p.mu.Unlock()
+}
+
+func (p *Plugin) flushPendingEdit(runCtx context.Context, accountID int64, client *telegram.Client, key editKey, pending *pendingEdit) {
+	if runCtx.Err() != nil {
+		return
+	}
+
+	p.mu.Lock()
+	runner := p.runners[accountID]
+	if runner == nil || runner.pendingEdits[key] != pending {
+		p.mu.Unlock()
+		return
+	}
+	delete(runner.pendingEdits, key)
+	sub, ok := runner.sources[key.sourceID]
+	if !ok || !sourceEditResendEnabled(&sub.source) {
+		p.mu.Unlock()
+		return
+	}
+	now := time.Now()
+	runner.recentMessageAt = &now
+	p.mu.Unlock()
+
+	nm := Normalize(sub.source.ID, pending.message, pending.entities)
+	nm.EventKind = domainmessage.EventEdit
+	nm.EditTextSuffix = sourceEditResendSuffix(&sub.source)
+	nm.Media = downloadMessageMedia(runCtx, client, sub.source.ID, pending.message, nm.Media, p.downloadPolicy(), sourceDownloadFiles(&sub.source))
+	for _, media := range nm.Media {
+		if media.DownloadStatus == "failed" {
+			p.deps.Log.Warn("Telegram 编辑消息媒体下载失败，按降级文本继续处理", "source", sub.source.ID, "message_id", pending.message.ID, "media_type", media.Type, "err", media.DownloadError)
+		}
+	}
+	if runCtx.Err() != nil {
+		return
+	}
+	if err := sub.handler(runCtx, nm); err != nil {
+		p.deps.Log.Error("处理 Telegram 编辑消息失败", "source", sub.source.ID, "message_id", pending.message.ID, "err", err)
+	}
+}
+
+func (p *Plugin) cancelDeletedEdits(accountID int64, messageIDs []int, channelID *int64) {
+	if len(messageIDs) == 0 {
+		return
+	}
+	deleted := make(map[int]struct{}, len(messageIDs))
+	for _, messageID := range messageIDs {
+		deleted[messageID] = struct{}{}
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	runner := p.runners[accountID]
+	if runner == nil {
+		return
+	}
+	for key, pending := range runner.pendingEdits {
+		if _, ok := deleted[key.messageID]; !ok {
+			continue
+		}
+		if channelID != nil {
+			peer, ok := pending.message.PeerID.(*tg.PeerChannel)
+			if !ok || peer.ChannelID != *channelID {
+				continue
+			}
+		}
+		pending.timer.Stop()
+		delete(runner.pendingEdits, key)
+	}
+}
 func (p *Plugin) forwardToSubscriptions(runCtx context.Context, accountID int64, client *telegram.Client, e tg.Entities, m tg.MessageClass) {
 	msg, ok := m.(*tg.Message)
 	if !ok {
@@ -844,6 +1024,33 @@ func (p *Plugin) downloadPolicy() DownloadPolicy {
 		return DownloadPolicy{}
 	}
 	return p.deps.DownloadPolicy()
+}
+
+// sourceEditResendEnabled 读取编辑补发开关；已有 Source 默认关闭。
+func sourceEditResendEnabled(src *domainsource.Source) bool {
+	if src == nil || src.Config == nil {
+		return false
+	}
+	enabled, _ := src.Config["edit_resend_enabled"].(bool)
+	return enabled
+}
+
+// sourceEditResendSuffix 返回编辑补发后缀；后缀开关默认开启，文本未配置时使用内置默认值。
+func sourceEditResendSuffix(src *domainsource.Source) string {
+	if src == nil {
+		return ""
+	}
+	if value, ok := src.Config["edit_resend_suffix_enabled"]; ok {
+		enabled, valid := value.(bool)
+		if !valid || !enabled {
+			return ""
+		}
+	}
+	if value, ok := src.Config["edit_resend_suffix"]; ok {
+		suffix, _ := value.(string)
+		return suffix
+	}
+	return defaultEditResendSuffix
 }
 
 // sourceDownloadFiles 读取 source 级「下载文件」开关；默认关闭（仅下载图片）。

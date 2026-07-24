@@ -64,6 +64,9 @@ func (s *Service) UseSourceCursor(c sourceCursor) *Service {
 //
 // 落库使用 (source_id, external_message_id) 幂等约束；重复消息不会重复投递。
 func (s *Service) Ingest(ctx context.Context, msg *domainmessage.NormalizedMessage) error {
+	if msg != nil && msg.EventKind == domainmessage.EventEdit {
+		return s.ingestEdit(ctx, msg)
+	}
 	if msg.ReceivedAt.IsZero() {
 		msg.ReceivedAt = s.clock.Now()
 	}
@@ -99,6 +102,45 @@ func (s *Service) Ingest(ctx context.Context, msg *domainmessage.NormalizedMessa
 		"message_id", msg.ID,
 		"source_id", msg.SourceID,
 		"matched_flows", len(matches),
+	)
+	return nil
+}
+
+func (s *Service) ingestEdit(ctx context.Context, msg *domainmessage.NormalizedMessage) error {
+	if msg == nil {
+		return nil
+	}
+	if msg.ReceivedAt.IsZero() {
+		msg.ReceivedAt = s.clock.Now()
+	}
+	if msg.MessageType == "" {
+		msg.MessageType = "text"
+	}
+	s.persistMedia(ctx, msg)
+	result, err := s.messages.ApplyEdit(ctx, msg)
+	if err != nil {
+		return err
+	}
+	if !result.Found {
+		s.log.Debug("忽略未采集原消息的 Telegram 编辑事件",
+			"source_id", msg.SourceID, "external_id", msg.ExternalMessageID)
+		return nil
+	}
+	if !result.Changed {
+		return nil
+	}
+	matches, err := s.evaluate(ctx, msg)
+	if err != nil {
+		return err
+	}
+	if err := s.queue.EnqueueEdit(ctx, msg, matches, msg.EditTextSuffix); err != nil {
+		return err
+	}
+	s.log.Info("Telegram 编辑消息已入队补发",
+		"message_id", msg.ID,
+		"source_id", msg.SourceID,
+		"external_id", msg.ExternalMessageID,
+		"revision", msg.ContentRevision,
 	)
 	return nil
 }

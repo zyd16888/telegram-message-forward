@@ -31,25 +31,35 @@ const (
 
 // Task 是一个投递任务。
 type Task struct {
-	ID           int64
-	MessageID    int64
-	RuleID       int64
-	SinkID       int64
-	TemplateID   *int64
-	OriginType   string
-	OriginID     int64
-	OriginNodeID int64
-	Status       Status
-	AttemptCount int
-	MaxAttempts  int
-	NextRetryAt  *time.Time
-	LockedAt     *time.Time
-	LockedBy     string
-	LastError    string
+	ID              int64
+	MessageID       int64
+	RuleID          int64
+	SinkID          int64
+	TemplateID      *int64
+	OriginType      string
+	OriginID        int64
+	OriginNodeID    int64
+	Status          Status
+	AttemptCount    int
+	MaxAttempts     int
+	NextRetryAt     *time.Time
+	LockedAt        *time.Time
+	LockedBy        string
+	LastError       string
+	MessageRevision int
+	TextSuffix      string
 	// MessageSnapshot 是 Flow/AI 产出的消息快照；为空时按 MessageID 读取原始消息。
 	MessageSnapshot *domainmessage.NormalizedMessage
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// FlowRoute 是原消息实际生成过的 Flow 投递路由。
+type FlowRoute struct {
+	SinkID       int64
+	TemplateID   *int64
+	OriginID     int64
+	OriginNodeID int64
 }
 
 // Attempt 是一次投递尝试记录，只保存脱敏摘要。
@@ -93,4 +103,5 @@ type Repository interface {
 	GetByID(ctx context.Context, id int64) (*Task, error)
 	List(ctx context.Context, status Status, limit, offset int) ([]*Task, error)
 	Count(ctx context.Context, status Status) (int64, error)
+	ListFlowRoutesByMessage(ctx context.Context, messageID int64) ([]FlowRoute, error)
 }

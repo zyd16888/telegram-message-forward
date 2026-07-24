@@ -30,6 +30,12 @@ var _ domainmessage.Repository = (*MessageRepository)(nil)
 //
 // 命中唯一冲突时视为幂等成功，并回填已存在记录的 ID。
 func (r *MessageRepository) Create(ctx context.Context, m *domainmessage.NormalizedMessage) error {
+	if m.ContentRevision <= 0 {
+		m.ContentRevision = 1
+	}
+	if m.ContentHash == "" {
+		m.ContentHash = domainmessage.Fingerprint(m)
+	}
 	mo, err := toMessageModel(m)
 	if err != nil {
 		return err
@@ -55,6 +61,65 @@ func (r *MessageRepository) Create(ctx context.Context, m *domainmessage.Normali
 	}
 	m.ID = existing.ID
 	return nil
+}
+
+// ApplyEdit 更新已采集消息的可变内容，并在内容实际变化时递增 revision。
+func (r *MessageRepository) ApplyEdit(ctx context.Context, m *domainmessage.NormalizedMessage) (domainmessage.EditResult, error) {
+	if m == nil || m.SourceID <= 0 || m.ExternalMessageID <= 0 {
+		return domainmessage.EditResult{}, nil
+	}
+	incomingHash := domainmessage.Fingerprint(m)
+	result := domainmessage.EditResult{}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing model.Message
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("source_id = ? AND external_message_id = ?", m.SourceID, m.ExternalMessageID).
+			First(&existing).Error
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil
+			}
+			return err
+		}
+		result.Found = true
+		m.ID = existing.ID
+		revision := existing.ContentRevision
+		if revision <= 0 {
+			revision = 1
+		}
+		currentHash := existing.ContentHash
+		if currentHash == "" {
+			current, err := toMessageDomain(&existing)
+			if err != nil {
+				return err
+			}
+			currentHash = domainmessage.Fingerprint(current)
+		}
+		if currentHash == incomingHash {
+			m.ContentRevision = revision
+			m.ContentHash = currentHash
+			return nil
+		}
+
+		m.ContentRevision = revision + 1
+		m.ContentHash = incomingHash
+		updated, err := toMessageModel(m)
+		if err != nil {
+			return err
+		}
+		updates := map[string]any{
+			"message_type": updated.MessageType, "text": updated.Text,
+			"media": updated.Media, "links": updated.Links, "original_url": updated.OriginalURL,
+			"raw_payload": updated.RawPayload, "edited_at": updated.EditedAt,
+			"content_revision": updated.ContentRevision, "content_hash": updated.ContentHash,
+		}
+		if err := tx.Model(&model.Message{}).Where("id = ?", existing.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		result.Changed = true
+		return nil
+	})
+	return result, err
 }
 
 // GetByID 按 id 查询消息。
@@ -318,6 +383,9 @@ func toMessageModel(m *domainmessage.NormalizedMessage) (*model.Message, error) 
 		SentAt:            m.SentAt,
 		ReceivedAt:        m.ReceivedAt,
 		CreatedAt:         m.CreatedAt,
+		ContentRevision:   m.ContentRevision,
+		ContentHash:       m.ContentHash,
+		EditedAt:          m.EditedAt,
 	}, nil
 }
 
@@ -374,6 +442,9 @@ func toMessageDomain(m *model.Message) (*domainmessage.NormalizedMessage, error)
 		SentAt:            m.SentAt,
 		ReceivedAt:        m.ReceivedAt,
 		CreatedAt:         m.CreatedAt,
+		ContentRevision:   m.ContentRevision,
+		ContentHash:       m.ContentHash,
+		EditedAt:          m.EditedAt,
 	}, nil
 }
 

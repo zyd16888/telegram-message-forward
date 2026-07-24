@@ -77,6 +77,9 @@ func (r *recordingTaskRepo) List(context.Context, domaindelivery.Status, int, in
 func (r *recordingTaskRepo) Count(context.Context, domaindelivery.Status) (int64, error) {
 	return 0, nil
 }
+func (r *recordingTaskRepo) ListFlowRoutesByMessage(context.Context, int64) ([]domaindelivery.FlowRoute, error) {
+	return nil, nil
+}
 
 type fakeMessageRepo struct {
 	msg *domainmessage.NormalizedMessage
@@ -85,6 +88,9 @@ type fakeMessageRepo struct {
 func (r fakeMessageRepo) Create(context.Context, *domainmessage.NormalizedMessage) error { return nil }
 func (r fakeMessageRepo) GetByID(context.Context, int64) (*domainmessage.NormalizedMessage, error) {
 	return r.msg, nil
+}
+func (r fakeMessageRepo) ApplyEdit(context.Context, *domainmessage.NormalizedMessage) (domainmessage.EditResult, error) {
+	return domainmessage.EditResult{}, nil
 }
 func (r fakeMessageRepo) ExistsByExternalID(context.Context, int64, int64) (bool, error) {
 	return false, nil
@@ -278,5 +284,16 @@ func TestWorkerCancelsDisabledSinkWithoutSending(t *testing.T) {
 	}
 	if tasks.task.NextRetryAt != nil {
 		t.Fatal("禁用渠道取消任务后不应设置下次重试时间")
+	}
+}
+
+func TestAppendTextSuffixAtFinalEnd(t *testing.T) {
+	got := appendTextSuffix("正文\n", "  --已编辑（二次发送）  ")
+	want := "正文\n--已编辑（二次发送）"
+	if got != want {
+		t.Fatalf("appendTextSuffix() = %q, want %q", got, want)
+	}
+	if !strings.HasSuffix(got, "--已编辑（二次发送）") {
+		t.Fatalf("后缀不在最终正文末尾: %q", got)
 	}
 }

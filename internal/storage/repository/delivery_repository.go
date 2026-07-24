@@ -30,6 +30,9 @@ var _ domaindelivery.Repository = (*DeliveryRepository)(nil)
 
 // Create 插入投递任务，按来源类型的唯一键幂等。
 func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task) error {
+	if t.MessageRevision <= 0 {
+		t.MessageRevision = 1
+	}
 	if t.OriginType == "" {
 		t.OriginType = "flow"
 	}
@@ -40,7 +43,7 @@ func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task)
 	switch t.OriginType {
 	case "flow":
 		res := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "message_id"}, {Name: "origin_type"}, {Name: "origin_id"}, {Name: "origin_node_id"}},
+			Columns: []clause.Column{{Name: "message_id"}, {Name: "origin_type"}, {Name: "origin_id"}, {Name: "origin_node_id"}, {Name: "message_revision"}},
 			TargetWhere: clause.Where{Exprs: []clause.Expression{
 				clause.Expr{SQL: "origin_type = 'flow'"},
 			}},
@@ -56,7 +59,7 @@ func (r *DeliveryRepository) Create(ctx context.Context, t *domaindelivery.Task)
 		var existing model.DeliveryTask
 		if qerr := r.db.WithContext(ctx).
 			Select("id").
-			Where("message_id = ? AND origin_type = ? AND origin_id = ? AND origin_node_id = ?", t.MessageID, "flow", t.OriginID, t.OriginNodeID).
+			Where("message_id = ? AND origin_type = ? AND origin_id = ? AND origin_node_id = ? AND message_revision = ?", t.MessageID, "flow", t.OriginID, t.OriginNodeID, t.MessageRevision).
 			First(&existing).Error; qerr != nil {
 			return qerr
 		}
@@ -250,6 +253,24 @@ func (r *DeliveryRepository) Count(ctx context.Context, status domaindelivery.St
 	var count int64
 	err := r.deliveryStatusQuery(ctx, status).Count(&count).Error
 	return count, err
+}
+
+// ListFlowRoutesByMessage 返回原消息实际生成过的 Flow 路由并去重。
+func (r *DeliveryRepository) ListFlowRoutesByMessage(ctx context.Context, messageID int64) ([]domaindelivery.FlowRoute, error) {
+	if messageID <= 0 {
+		return []domaindelivery.FlowRoute{}, nil
+	}
+	var routes []domaindelivery.FlowRoute
+	err := r.db.WithContext(ctx).Table("delivery_tasks").
+		Select("sink_id, template_id, origin_id, origin_node_id").
+		Where("message_id = ? AND origin_type = 'flow'", messageID).
+		Group("sink_id, template_id, origin_id, origin_node_id").
+		Order("origin_id, origin_node_id, sink_id").
+		Scan(&routes).Error
+	if err != nil {
+		return nil, err
+	}
+	return routes, nil
 }
 
 // ListByQuery 按复合条件分页查询投递任务。
@@ -504,6 +525,8 @@ func toDeliveryModel(t *domaindelivery.Task) (*model.DeliveryTask, error) {
 		LockedBy:        t.LockedBy,
 		LastError:       t.LastError,
 		MessageSnapshot: snapshot,
+		MessageRevision: t.MessageRevision,
+		TextSuffix:      t.TextSuffix,
 		CreatedAt:       t.CreatedAt,
 		UpdatedAt:       t.UpdatedAt,
 	}, nil
@@ -547,6 +570,8 @@ func toDeliveryDomain(m *model.DeliveryTask) (*domaindelivery.Task, error) {
 		LockedBy:        m.LockedBy,
 		LastError:       m.LastError,
 		MessageSnapshot: snapshot,
+		MessageRevision: m.MessageRevision,
+		TextSuffix:      m.TextSuffix,
 		CreatedAt:       m.CreatedAt,
 		UpdatedAt:       m.UpdatedAt,
 	}, nil

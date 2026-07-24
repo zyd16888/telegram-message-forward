@@ -187,8 +187,16 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*domain
 	if in.Name != nil {
 		src.Name = *in.Name
 	}
-	if in.Config != nil {
+	configChanged := in.Config != nil
+	if configChanged {
 		src.Config = in.Config
+		plugin, err := s.pluginForSource(src)
+		if err != nil {
+			return nil, err
+		}
+		if err := plugin.ValidateConfig(src.Config); err != nil {
+			return nil, err
+		}
 	}
 	toggled := false
 	if in.Enabled != nil && *in.Enabled != src.Enabled {
@@ -207,6 +215,10 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*domain
 			if err := s.stopSource(ctx, src); err != nil {
 				return nil, err
 			}
+		}
+	} else if configChanged && src.Enabled && sourceRequiresAccount(src) {
+		if err := s.startSourceRuntime(ctx, src); err != nil {
+			return nil, fmt.Errorf("source 配置已保存但运行配置刷新失败: %w", err)
 		}
 	}
 	return src, nil
@@ -304,6 +316,19 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 }
 
 func (s *Service) startSource(ctx context.Context, src *domainsource.Source) error {
+	if err := s.startSourceRuntime(ctx, src); err != nil {
+		return err
+	}
+	// 启用/创建/POST start 与进程 StartAll 一致：开关开且 last_message_id>0 时做启动补漏。
+	if err := s.CatchUpSource(ctx, src); err != nil {
+		// 补漏失败不回滚已启动的监听，但必须可观测。
+		return fmt.Errorf("监听已启动，但历史补漏失败: %w", err)
+	}
+	return nil
+}
+
+// startSourceRuntime 只刷新插件运行态，不触发历史补漏；用于已启用 Source 的配置热更新。
+func (s *Service) startSourceRuntime(ctx context.Context, src *domainsource.Source) error {
 	plugin, err := s.pluginForSource(src)
 	if err != nil {
 		return err
@@ -321,15 +346,7 @@ func (s *Service) startSource(ctx context.Context, src *domainsource.Source) err
 	if s.manager == nil || s.manager.ingest == nil {
 		return fmt.Errorf("source manager 未初始化")
 	}
-	if err := plugin.Start(ctx, acc, src, s.manager.ingest.Ingest); err != nil {
-		return err
-	}
-	// 启用/创建/POST start 与进程 StartAll 一致：开关开且 last_message_id>0 时做启动补漏。
-	if err := s.CatchUpSource(ctx, src); err != nil {
-		// 补漏失败不回滚已启动的监听，但必须可观测。
-		return fmt.Errorf("监听已启动，但历史补漏失败: %w", err)
-	}
-	return nil
+	return plugin.Start(ctx, acc, src, s.manager.ingest.Ingest)
 }
 
 // Stop 停止某监听源。

@@ -408,3 +408,34 @@ var _ domainsource.Repository = (*fakeSourceRepo)(nil)
 var _ domainaccount.Repository = (*fakeAccountRepo)(nil)
 var _ pluginsource.Plugin = (*fakeSourcePlugin)(nil)
 var _ pluginsource.RunnerStatusProvider = (*fakeSourcePlugin)(nil)
+
+func TestUpdateTelegramConfigRefreshesRunnerWithoutCatchUp(t *testing.T) {
+	svc, plugin, repo := newTestService()
+	src := &domainsource.Source{
+		Type: "telegram", AccountID: 1, PeerType: domainsource.PeerChannel, PeerID: 100,
+		Name: "channel", Enabled: true, LastMessageID: 42,
+		Config: map[string]any{"history_backfill_enabled": true},
+	}
+	if err := repo.Create(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := svc.Update(context.Background(), src.ID, UpdateInput{Config: map[string]any{
+		"history_backfill_enabled":   true,
+		"edit_resend_enabled":        true,
+		"edit_resend_suffix_enabled": true,
+		"edit_resend_suffix":         "--custom",
+	}})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if len(plugin.started) != 1 || plugin.started[0] != src.ID {
+		t.Fatalf("配置更新应热刷新运行订阅，started=%v", plugin.started)
+	}
+	if len(plugin.catchUpCalls) != 0 {
+		t.Fatalf("配置热刷新不应触发历史补漏，catchUp=%v", plugin.catchUpCalls)
+	}
+	if updated.Config["edit_resend_enabled"] != true {
+		t.Fatalf("编辑补发配置未保存: %+v", updated.Config)
+	}
+}

@@ -35,6 +35,10 @@ func Normalize(sourceID int64, msg *tg.Message, ent tg.Entities) *domainmessage.
 		t := time.Unix(int64(msg.Date), 0).UTC()
 		nm.SentAt = &t
 	}
+	if editDate, ok := msg.GetEditDate(); ok && editDate != 0 {
+		t := time.Unix(int64(editDate), 0).UTC()
+		nm.EditedAt = &t
+	}
 
 	fillSender(nm, msg, ent)
 	nm.Links = extractLinks(msg.Message, msg)

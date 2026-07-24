@@ -206,7 +206,8 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 	media := w.publicMedia(ctx, msg.Media)
 	media, cleanup := w.localUploadMedia(ctx, caps, media)
 	defer cleanup()
-	fallbackText := mediaFallbackText(rendered.Text, media, msg.OriginalURL)
+	fallbackText := appendTextSuffix(mediaFallbackText(rendered.Text, media, msg.OriginalURL), task.TextSuffix)
+	rendered.Text = appendTextSuffix(rendered.Text, task.TextSuffix)
 	payload := pluginsink.Payload{
 		Format:       string(rendered.Format),
 		Text:         rendered.Text,
@@ -596,6 +597,18 @@ func mediaFallbackText(text string, media []domainmessage.Media, originalURL str
 		}
 	}
 	return out
+}
+
+func appendTextSuffix(text, suffix string) string {
+	suffix = strings.TrimSpace(suffix)
+	if suffix == "" {
+		return text
+	}
+	text = strings.TrimRight(text, "\r\n")
+	if text == "" {
+		return suffix
+	}
+	return text + "\n" + suffix
 }
 
 func degradeNoteFromSummary(summary []byte) string {

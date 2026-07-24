@@ -14,6 +14,7 @@ import (
 type notifyTaskRepo struct {
 	created int
 	tasks   []*domaindelivery.Task
+	routes  []domaindelivery.FlowRoute
 }
 
 func (r *notifyTaskRepo) Create(_ context.Context, t *domaindelivery.Task) error {
@@ -38,6 +39,9 @@ func (r *notifyTaskRepo) List(context.Context, domaindelivery.Status, int, int) 
 }
 func (r *notifyTaskRepo) Count(context.Context, domaindelivery.Status) (int64, error) {
 	return int64(r.created), nil
+}
+func (r *notifyTaskRepo) ListFlowRoutesByMessage(context.Context, int64) ([]domaindelivery.FlowRoute, error) {
+	return r.routes, nil
 }
 
 func TestQueueNotifiesAfterEnqueue(t *testing.T) {
@@ -119,5 +123,31 @@ func TestQueueSkipsDisabledSink(t *testing.T) {
 	case <-notifier.C():
 		t.Fatal("没有创建任务时不应唤醒 worker")
 	default:
+	}
+}
+
+func TestQueueEnqueueEditReusesOriginalRoutes(t *testing.T) {
+	templateID := int64(9)
+	repo := &notifyTaskRepo{routes: []domaindelivery.FlowRoute{{
+		SinkID: 30, TemplateID: &templateID, OriginID: 7, OriginNodeID: 42,
+	}}}
+	queue := NewQueue(repo, 3)
+	msg := &domainmessage.NormalizedMessage{ID: 10, Text: "edited", ContentRevision: 2}
+
+	if err := queue.EnqueueEdit(context.Background(), msg, nil, "--edited"); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.tasks) != 1 {
+		t.Fatalf("created = %d, want 1", len(repo.tasks))
+	}
+	task := repo.tasks[0]
+	if task.SinkID != 30 || task.OriginID != 7 || task.OriginNodeID != 42 {
+		t.Fatalf("未复用原 Flow 路由: %+v", task)
+	}
+	if task.MessageRevision != 2 || task.TextSuffix != "--edited" {
+		t.Fatalf("编辑 revision/后缀错误: %+v", task)
+	}
+	if task.MessageSnapshot == nil || task.MessageSnapshot.Text != "edited" {
+		t.Fatalf("编辑消息快照错误: %+v", task.MessageSnapshot)
 	}
 }

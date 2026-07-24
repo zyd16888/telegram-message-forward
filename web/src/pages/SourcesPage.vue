@@ -37,6 +37,15 @@ const webhookForm = reactive({
   enabled: true,
 })
 
+const defaultEditResendSuffix = '--已编辑（二次发送）'
+const editSettingsVisible = shallowRef(false)
+const editSettingsSaving = shallowRef(false)
+const editSettingsSource = shallowRef<Source | null>(null)
+const editSettingsForm = reactive({
+  suffix_enabled: true,
+  suffix: defaultEditResendSuffix,
+})
+
 const accountNameById = computed(() => new Map(accounts.value.map((a) => [a.id, a.name])))
 
 const ruleCountBySourceId = computed(() => {
@@ -157,6 +166,53 @@ async function toggleHistoryBackfill(row: Source, value: boolean) {
   }
 }
 
+async function toggleEditResend(row: Source, value: boolean) {
+  const config = {
+    ...(row.config ?? {}),
+    edit_resend_enabled: value,
+    edit_resend_suffix_enabled:
+      typeof row.config?.edit_resend_suffix_enabled === 'boolean' ? row.config.edit_resend_suffix_enabled : true,
+    edit_resend_suffix:
+      typeof row.config?.edit_resend_suffix === 'string' ? row.config.edit_resend_suffix : defaultEditResendSuffix,
+  }
+  try {
+    const updated = await sourcesApi.update(row.id, { config })
+    sources.value = sources.value.map((s) => (s.id === row.id ? updated : s))
+    message.success(value ? '已开启编辑补发' : '已关闭编辑补发')
+  } catch (e) {
+    message.error('更新失败：' + errText(e))
+  }
+}
+
+function openEditSettings(row: Source) {
+  editSettingsSource.value = row
+  editSettingsForm.suffix_enabled = row.config?.edit_resend_suffix_enabled !== false
+  editSettingsForm.suffix =
+    typeof row.config?.edit_resend_suffix === 'string' ? row.config.edit_resend_suffix : defaultEditResendSuffix
+  editSettingsVisible.value = true
+}
+
+async function saveEditSettings() {
+  const row = editSettingsSource.value
+  if (!row) return
+  editSettingsSaving.value = true
+  const config = {
+    ...(row.config ?? {}),
+    edit_resend_suffix_enabled: editSettingsForm.suffix_enabled,
+    edit_resend_suffix: editSettingsForm.suffix,
+  }
+  try {
+    const updated = await sourcesApi.update(row.id, { config })
+    sources.value = sources.value.map((s) => (s.id === row.id ? updated : s))
+    editSettingsVisible.value = false
+    editSettingsSource.value = updated
+    message.success('编辑补发设置已保存')
+  } catch (e) {
+    message.error('保存失败：' + errText(e))
+  } finally {
+    editSettingsSaving.value = false
+  }
+}
 const historyBusyId = ref<number | null>(null)
 
 async function previewHistory(row: Source) {
@@ -398,6 +454,19 @@ const telegramColumns: DataTableColumns<Source> = [
       ),
   },
   {
+    title: '编辑补发',
+    key: 'edit_resend',
+    width: 116,
+    render: (row) =>
+      h('div', { class: 'edit-resend-cell' }, [
+        h(NSwitch, {
+          size: 'small',
+          value: row.config?.edit_resend_enabled === true,
+          onUpdateValue: (value: boolean) => toggleEditResend(row, value),
+        }),
+        actionButton('编辑补发设置', 'settings', () => openEditSettings(row)),
+      ]),
+  },  {
     title: '历史补拉',
     key: 'history_backfill',
     width: 100,
@@ -523,7 +592,7 @@ onMounted(async () => {
             :columns="telegramColumns"
             :data="visibleTelegramSources"
             :bordered="false"
-            :scroll-x="1220"
+            :scroll-x="1340"
           />
         </NSpace>
       </NTabPane>
@@ -628,6 +697,29 @@ onMounted(async () => {
         </NSpace>
       </NTabPane>
     </NTabs>
+
+    <NModal v-model:show="editSettingsVisible" preset="card" title="编辑补发设置" class="edit-settings-modal">
+      <NForm label-placement="top">
+        <NFormItem label="添加后缀">
+          <NSwitch v-model:value="editSettingsForm.suffix_enabled" />
+        </NFormItem>
+        <NFormItem label="后缀内容">
+          <NInput
+            v-model:value="editSettingsForm.suffix"
+            :disabled="!editSettingsForm.suffix_enabled"
+            :maxlength="200"
+            show-count
+            placeholder="--已编辑（二次发送）"
+          />
+        </NFormItem>
+      </NForm>
+      <template #footer>
+        <div class="modal-actions">
+          <NButton @click="editSettingsVisible = false">取消</NButton>
+          <NButton type="primary" :loading="editSettingsSaving" @click="saveEditSettings">保存</NButton>
+        </div>
+      </template>
+    </NModal>
   </NSpace>
 </template>
 
@@ -677,6 +769,21 @@ onMounted(async () => {
 .runtime-cell {
   display: grid;
   gap: 4px;
+}
+
+.edit-resend-cell,
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-actions {
+  justify-content: flex-end;
+}
+
+.edit-settings-modal {
+  width: min(480px, calc(100vw - 32px));
 }
 
 :deep(.action-row) {

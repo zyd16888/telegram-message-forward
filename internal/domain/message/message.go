@@ -3,7 +3,18 @@ package message
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
+)
+
+// EventKind 标识标准化消息来自新消息还是编辑事件。
+type EventKind string
+
+const (
+	EventNew  EventKind = "new"
+	EventEdit EventKind = "edit"
 )
 
 // Media 是一个媒体附件的内部描述。
@@ -48,6 +59,50 @@ type NormalizedMessage struct {
 	SentAt            *time.Time
 	ReceivedAt        time.Time
 	CreatedAt         time.Time
+	ContentRevision   int
+	ContentHash       string
+	EditedAt          *time.Time
+	EventKind         EventKind `json:"-"`
+	EditTextSuffix    string    `json:"-"`
+}
+
+// EditResult 是一次编辑落库的结果。Found=false 表示原消息未被本服务采集。
+type EditResult struct {
+	Found   bool
+	Changed bool
+}
+
+// Fingerprint 返回会影响下游正文和媒体语义的稳定指纹。
+func Fingerprint(m *NormalizedMessage) string {
+	if m == nil {
+		return ""
+	}
+	type mediaFingerprint struct {
+		Type     string `json:"type"`
+		FileName string `json:"file_name,omitempty"`
+		MimeType string `json:"mime_type,omitempty"`
+		Size     int64  `json:"size,omitempty"`
+		Width    int    `json:"width,omitempty"`
+		Height   int    `json:"height,omitempty"`
+		Caption  string `json:"caption,omitempty"`
+	}
+	media := make([]mediaFingerprint, 0, len(m.Media))
+	for _, item := range m.Media {
+		media = append(media, mediaFingerprint{
+			Type: item.Type, FileName: item.FileName, MimeType: item.MimeType,
+			Size: item.Size, Width: item.Width, Height: item.Height, Caption: item.Caption,
+		})
+	}
+	payload := struct {
+		MessageType string             `json:"message_type"`
+		Text        string             `json:"text"`
+		Media       []mediaFingerprint `json:"media"`
+		Links       []Link             `json:"links"`
+		OriginalURL string             `json:"original_url"`
+	}{m.MessageType, m.Text, media, m.Links, m.OriginalURL}
+	b, _ := json.Marshal(payload)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // Repository 是消息仓储接口。
@@ -55,6 +110,7 @@ type NormalizedMessage struct {
 // Create 需保证按 (source_id, external_message_id) 幂等：重复消息不产生新记录。
 type Repository interface {
 	Create(ctx context.Context, m *NormalizedMessage) error
+	ApplyEdit(ctx context.Context, m *NormalizedMessage) (EditResult, error)
 	GetByID(ctx context.Context, id int64) (*NormalizedMessage, error)
 	ExistsByExternalID(ctx context.Context, sourceID, externalMessageID int64) (bool, error)
 }
