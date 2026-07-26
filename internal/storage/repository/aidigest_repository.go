@@ -21,6 +21,8 @@ type AIDigestRepository struct {
 	db *gorm.DB
 }
 
+const aiDigestRunItemBatchSize = 500
+
 func NewAIDigestRepository(db *gorm.DB) *AIDigestRepository {
 	return &AIDigestRepository{db: db}
 }
@@ -342,7 +344,7 @@ func (r *AIDigestRepository) AddRunItems(ctx context.Context, items []*domainaid
 			MessageSnapshot: snapshotJSON,
 		})
 	}
-	return r.db.WithContext(ctx).Create(&ms).Error
+	return r.db.WithContext(ctx).CreateInBatches(&ms, aiDigestRunItemBatchSize).Error
 }
 
 func (r *AIDigestRepository) ListRunItems(ctx context.Context, runID int64) ([]*domainaidigest.RunItem, error) {

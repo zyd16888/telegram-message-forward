@@ -1,11 +1,18 @@
 package repository
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+
 	domainaidigest "telegram-message-forward/internal/domain/aidigest"
 )
+
+const postgresExtendedProtocolParameterLimit = 65535
 
 func TestAIDigestRunAuditRoundTrip(t *testing.T) {
 	run := &domainaidigest.Run{
@@ -47,5 +54,51 @@ func TestAIDigestRunAuditRoundTrip(t *testing.T) {
 	}
 	if restored.ProfileSnapshot == nil || restored.ProfileSnapshot.PromptTemplate != "original" {
 		t.Fatalf("profile snapshot round trip mismatch: %+v", restored.ProfileSnapshot)
+	}
+}
+
+func TestAddRunItemsBatchesBeyondPostgresParameterLimit(t *testing.T) {
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN: "host=localhost user=test dbname=test sslmode=disable",
+	}), &gorm.Config{
+		DryRun:                 true,
+		DisableAutomaticPing:   true,
+		SkipDefaultTransaction: true,
+		Logger:                 logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var parameterCounts []int
+	if err := db.Callback().Create().After("gorm:create").Register("test:capture_parameter_count", func(tx *gorm.DB) {
+		parameterCounts = append(parameterCounts, len(tx.Statement.Vars))
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	const itemCount = postgresExtendedProtocolParameterLimit/8 + 1
+	items := make([]*domainaidigest.RunItem, 0, itemCount)
+	for i := 1; i <= itemCount; i++ {
+		items = append(items, &domainaidigest.RunItem{
+			RunID:           1,
+			MessageID:       int64(i),
+			SourceID:        1,
+			SortOrder:       i - 1,
+			MessageSnapshot: &domainaidigest.MessageSnapshot{ID: int64(i), SourceID: 1},
+		})
+	}
+
+	repo := NewAIDigestRepository(db)
+	if err := repo.AddRunItems(context.Background(), items); err != nil {
+		t.Fatal(err)
+	}
+	if len(parameterCounts) <= 1 {
+		t.Fatalf("expected multiple insert batches, got parameter counts %v", parameterCounts)
+	}
+	for i, count := range parameterCounts {
+		if count > postgresExtendedProtocolParameterLimit {
+			t.Fatalf("batch %d has %d parameters, exceeds PostgreSQL limit %d", i, count, postgresExtendedProtocolParameterLimit)
+		}
 	}
 }
