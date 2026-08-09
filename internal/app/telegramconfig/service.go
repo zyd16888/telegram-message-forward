@@ -78,13 +78,17 @@ func (s *Service) ListProxies(ctx context.Context) ([]*domainconfig.Proxy, error
 }
 
 func (s *Service) CreateProxy(ctx context.Context, in ProxyInput) (*domainconfig.Proxy, error) {
+	proxyType, err := domainconfig.NormalizeProxyType(in.Type)
+	if err != nil {
+		return nil, err
+	}
 	pass := ""
 	if in.Password != nil {
 		pass = *in.Password
 	}
 	p := &domainconfig.Proxy{
 		Name:     in.Name,
-		Type:     in.Type,
+		Type:     proxyType,
 		Addr:     in.Addr,
 		Username: in.Username,
 		Password: pass,
@@ -97,12 +101,16 @@ func (s *Service) CreateProxy(ctx context.Context, in ProxyInput) (*domainconfig
 }
 
 func (s *Service) UpdateProxy(ctx context.Context, id int64, in ProxyInput) (*domainconfig.Proxy, error) {
+	proxyType, err := domainconfig.NormalizeProxyType(in.Type)
+	if err != nil {
+		return nil, err
+	}
 	p, err := s.proxies.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	p.Name = in.Name
-	p.Type = in.Type
+	p.Type = proxyType
 	p.Addr = in.Addr
 	p.Username = in.Username
 	p.Enabled = in.Enabled

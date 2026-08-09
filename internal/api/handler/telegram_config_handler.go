@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"telegram-message-forward/internal/api/dto"
 	appconfig "telegram-message-forward/internal/app/telegramconfig"
+	domainconfig "telegram-message-forward/internal/domain/telegramconfig"
 )
 
 // TelegramConfigHandler 处理 Telegram App 与代理配置。
@@ -100,7 +102,7 @@ func (h *TelegramConfigHandler) CreateProxy(c *gin.Context) {
 		Name: req.Name, Type: req.Type, Addr: req.Addr, Username: req.Username, Password: req.Password, Enabled: req.Enabled,
 	})
 	if err != nil {
-		respondError(c, err)
+		respondTelegramConfigError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": dto.NewSharedProxyDTO(p)})
@@ -119,10 +121,18 @@ func (h *TelegramConfigHandler) UpdateProxy(c *gin.Context) {
 		Name: req.Name, Type: req.Type, Addr: req.Addr, Username: req.Username, Password: req.Password, Enabled: req.Enabled,
 	})
 	if err != nil {
-		respondError(c, err)
+		respondTelegramConfigError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": dto.NewSharedProxyDTO(p)})
+}
+
+func respondTelegramConfigError(c *gin.Context, err error) {
+	if errors.Is(err, domainconfig.ErrUnsupportedProxyType) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	respondError(c, err)
 }
 
 func (h *TelegramConfigHandler) DeleteProxy(c *gin.Context) {

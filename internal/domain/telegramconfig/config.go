@@ -3,10 +3,33 @@ package telegramconfig
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	domainaccount "telegram-message-forward/internal/domain/account"
 )
+
+const (
+	ProxyTypeSOCKS5 = "socks5"
+	ProxyTypeHTTP   = "http"
+	ProxyTypeHTTPS  = "https"
+)
+
+// ErrUnsupportedProxyType 表示代理类型不在系统支持范围内。
+var ErrUnsupportedProxyType = errors.New("不支持的代理类型")
+
+// NormalizeProxyType 规范化并校验代理类型。
+func NormalizeProxyType(value string) (string, error) {
+	typ := strings.ToLower(strings.TrimSpace(value))
+	switch typ {
+	case ProxyTypeSOCKS5, ProxyTypeHTTP, ProxyTypeHTTPS:
+		return typ, nil
+	default:
+		return "", fmt.Errorf("%w：%q（支持 socks5 / http / https）", ErrUnsupportedProxyType, strings.TrimSpace(value))
+	}
+}
 
 // TelegramApp 是 Telegram 官方平台应用配置，多个账号可复用同一组 app_id/app_hash。
 type TelegramApp struct {
