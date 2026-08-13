@@ -16,9 +16,11 @@ import (
 
 func TestSendIncludesPublicMediaMetadata(t *testing.T) {
 	var gotBody atomic.Value
+	var gotIdempotencyKey atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody.Store(string(b))
+		gotIdempotencyKey.Store(r.Header.Get("Idempotency-Key"))
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -41,12 +43,15 @@ func TestSendIncludesPublicMediaMetadata(t *testing.T) {
 			StorageKey:     "telegram/source_1/1_0.jpg",
 			DownloadStatus: "downloaded",
 		}},
-	}, pluginsink.Options{})
+	}, pluginsink.Options{DeliveryKey: "delivery-42-part-0"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Success {
 		t.Fatalf("应成功: %+v", res)
+	}
+	if gotIdempotencyKey.Load() != "delivery-42-part-0" {
+		t.Fatalf("应发送稳定幂等键: %v", gotIdempotencyKey.Load())
 	}
 	body, _ := gotBody.Load().(string)
 	for _, want := range []string{`"media"`, `"file_name":"image.jpg"`, `"download_status":"downloaded"`, `"fallback_text"`} {

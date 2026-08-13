@@ -2,7 +2,6 @@
 package ntfy
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"telegram-message-forward/internal/domain/formschema"
 	domainmessage "telegram-message-forward/internal/domain/message"
@@ -46,7 +46,7 @@ type Sink struct {
 
 // New 创建 ntfy Sink。
 func New() *Sink {
-	return &Sink{client: &http.Client{}}
+	return &Sink{client: &http.Client{Timeout: 30 * time.Second}}
 }
 
 var _ pluginsink.Plugin = (*Sink)(nil)
@@ -96,6 +96,7 @@ func (s *Sink) Capabilities() domainsink.Capabilities {
 		SupportsAudio:    true,
 		SupportsVideo:    true,
 		MaxFileSizeMB:    15,
+		MaxMediaItems:    1,
 		Media: []domainsink.MediaCapability{
 			{Type: "image", Supported: true, MaxSizeMB: 15, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: true, DeliveryMode: "attach_header_or_upload", Fallback: "超限或不可读时降级为图片摘要和链接"},
 			{Type: "file", Supported: true, MaxSizeMB: 15, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: true, DeliveryMode: "attach_header_or_upload", Fallback: "超限或不可读时降级为文件摘要和链接"},
@@ -113,7 +114,7 @@ func (s *Sink) ValidateConfig(config map[string]any) error {
 	return nil
 }
 
-func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, _ pluginsink.Options) (*pluginsink.Result, error) {
+func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, opts pluginsink.Options) (*pluginsink.Result, error) {
 	topicURL, _ := sink.Config["topic_url"].(string)
 	if topicURL == "" {
 		return &pluginsink.Result{Success: false, Error: "ntfy 缺少 topic_url"}, nil
@@ -132,12 +133,12 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 			return s.publishText(ctx, sink, payload, attachURL)
 		}
 		if media.LocalPath != "" && shouldUploadLocal(sink, media) {
-			return s.publishLocalMedia(ctx, sink, payload, media)
+			return s.publishLocalMedia(ctx, sink, payload, media, opts)
 		}
 		return s.publishFallbackText(ctx, sink, payload)
 	case attachmentModeUpload:
 		if media.LocalPath != "" {
-			return s.publishLocalMedia(ctx, sink, payload, media)
+			return s.publishLocalMedia(ctx, sink, payload, media, opts)
 		}
 		if attachURL != "" {
 			return s.publishText(ctx, sink, payload, attachURL)
@@ -145,7 +146,7 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 		return s.publishFallbackText(ctx, sink, payload)
 	default:
 		if media.LocalPath != "" && shouldUploadLocal(sink, media) {
-			return s.publishLocalMedia(ctx, sink, payload, media)
+			return s.publishLocalMedia(ctx, sink, payload, media, opts)
 		}
 		if attachURL != "" {
 			return s.publishText(ctx, sink, payload, attachURL)
@@ -164,10 +165,13 @@ func (s *Sink) publishText(ctx context.Context, sink *domainsink.Sink, payload p
 	return s.do(req)
 }
 
-func (s *Sink) publishLocalMedia(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, media domainmessage.Media) (*pluginsink.Result, error) {
-	if payload.Text != "" {
+func (s *Sink) publishLocalMedia(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, media domainmessage.Media, opts pluginsink.Options) (*pluginsink.Result, error) {
+	if payload.Text != "" && !opts.IsCompleted("text") {
 		if res, err := s.publishText(ctx, sink, payload, ""); err != nil || res == nil || !res.Success {
 			return res, err
+		}
+		if err := opts.MarkCompleted(ctx, "text"); err != nil {
+			return nil, err
 		}
 	}
 	return s.publishAttachment(ctx, sink, media)
@@ -181,12 +185,13 @@ func (s *Sink) publishFallbackText(ctx context.Context, sink *domainsink.Sink, p
 }
 
 func (s *Sink) publishAttachment(ctx context.Context, sink *domainsink.Sink, media domainmessage.Media) (*pluginsink.Result, error) {
-	data, err := os.ReadFile(filepath.Clean(media.LocalPath))
+	file, err := os.Open(filepath.Clean(media.LocalPath))
 	if err != nil {
 		return &pluginsink.Result{Success: false, Error: "读取附件失败: " + err.Error()}, nil
 	}
+	defer file.Close()
 	topicURL, _ := sink.Config["topic_url"].(string)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, topicURL, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, topicURL, file)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +234,7 @@ func (s *Sink) do(req *http.Request) (*pluginsink.Result, error) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	summary, _ := json.Marshal(map[string]any{"status_code": resp.StatusCode})
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &pluginsink.Result{Success: false, ResponseSummary: summary, Error: fmt.Sprintf("ntfy 返回非 2xx 状态: %d %s", resp.StatusCode, string(body))}, nil
+		return pluginsink.HTTPFailure(summary, resp.StatusCode, resp.Header, fmt.Sprintf("ntfy 返回非 2xx 状态: %d %s", resp.StatusCode, string(body))), nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
 }

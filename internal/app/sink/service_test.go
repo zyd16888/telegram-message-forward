@@ -111,3 +111,27 @@ func TestServiceTestExistingKeepsSecret(t *testing.T) {
 		t.Fatalf("应记录最近测试成功: %+v", repo.item.Observability)
 	}
 }
+
+func TestTestMediaValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   TestMediaInput
+	}{
+		{name: "unsupported type", in: TestMediaInput{Type: "archive", URL: "https://example.com/a.zip"}},
+		{name: "local file", in: TestMediaInput{Type: "file", URL: "file:///tmp/a.txt"}},
+		{name: "credentials", in: TestMediaInput{Type: "image", URL: "https://user:pass@example.com/a.jpg"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := testMedia(tc.in); err == nil {
+				t.Fatalf("testMedia(%+v) 应失败", tc.in)
+			}
+		})
+	}
+	media, err := testMedia(TestMediaInput{Type: " IMAGE ", URL: " https://example.com/a.jpg ", FileName: " a.jpg "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if media.Type != "image" || media.RemoteURL != "https://example.com/a.jpg" || media.FileName != "a.jpg" {
+		t.Fatalf("测试媒体规范化结果不正确: %+v", media)
+	}
+}

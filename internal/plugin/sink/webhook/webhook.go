@@ -116,7 +116,7 @@ type webhookMedia struct {
 }
 
 // Send 将渲染内容 POST 到目标 URL。
-func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, _ pluginsink.Options) (*pluginsink.Result, error) {
+func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, opts pluginsink.Options) (*pluginsink.Result, error) {
 	url, _ := sink.Config["url"].(string)
 	if url == "" {
 		return nil, fmt.Errorf("webhook sink 缺少 url 配置")
@@ -136,6 +136,11 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 			headers["Authorization"] = "Bearer " + string(sink.Secret)
 		}
 	}
+	if opts.DeliveryKey != "" {
+		if _, exists := headers["Idempotency-Key"]; !exists {
+			headers["Idempotency-Key"] = opts.DeliveryKey
+		}
+	}
 
 	reqBody := body{Text: payload.Text, Format: payload.Format, Media: publicMedia(payload.Media), FallbackText: payload.FallbackText}
 	resp, err := s.client.PostJSON(ctx, url, reqBody, headers)
@@ -145,11 +150,7 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 
 	summary := responseSummary(resp)
 	if !resp.IsSuccess() {
-		return &pluginsink.Result{
-			Success:         false,
-			ResponseSummary: summary,
-			Error:           fmt.Sprintf("webhook 返回非 2xx 状态: %d", resp.StatusCode),
-		}, nil
+		return pluginsink.HTTPFailure(summary, resp.StatusCode, resp.Header, fmt.Sprintf("webhook 返回非 2xx 状态: %d", resp.StatusCode)), nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
 }

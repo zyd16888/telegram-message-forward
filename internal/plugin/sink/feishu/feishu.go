@@ -3,6 +3,9 @@ package feishu
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -50,6 +53,7 @@ func (s *Sink) Descriptor() pluginsink.Descriptor {
 				Placeholder: "https://open.feishu.cn/open-apis/bot/v2/hook/...",
 			},
 		},
+		SecretField:  &formschema.FieldSpec{Key: "secret", Label: "签名密钥", Type: formschema.FieldPassword, Secret: true, Placeholder: "可选；机器人安全设置中的签名密钥"},
 		Capabilities: s.Capabilities(),
 	}
 }
@@ -96,9 +100,18 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 		}
 	}
 	body := buildBody(payload)
+	if len(sink.Secret) > 0 {
+		timestamp := time.Now().Unix()
+		body["timestamp"] = timestamp
+		body["sign"] = sign(string(sink.Secret), timestamp)
+	}
 	resp, err := s.client.PostJSON(ctx, url, body, nil)
 	if err != nil {
 		return &pluginsink.Result{Success: false, Error: err.Error()}, err
+	}
+	if !resp.IsSuccess() {
+		summary, _ := json.Marshal(map[string]any{"status_code": resp.StatusCode})
+		return pluginsink.HTTPFailure(summary, resp.StatusCode, resp.Header, fmt.Sprintf("飞书返回 HTTP %d", resp.StatusCode)), nil
 	}
 	var r apiResp
 	if err := json.Unmarshal(resp.Body, &r); err != nil {
@@ -106,7 +119,7 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 	}
 	summary, _ := json.Marshal(map[string]any{"code": r.Code, "msg": r.Msg})
 	if r.Code != 0 {
-		return &pluginsink.Result{Success: false, ResponseSummary: summary, Error: fmt.Sprintf("飞书返回错误 code=%d msg=%s", r.Code, r.Msg)}, nil
+		return pluginsink.PermanentResult(summary, fmt.Sprintf("飞书返回错误 code=%d msg=%s", r.Code, r.Msg)), nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
 }
@@ -114,16 +127,10 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 func buildBody(payload pluginsink.Payload) map[string]any {
 	if payload.Format == "markdown" {
 		return map[string]any{
-			"msg_type": "post",
-			"content": map[string]any{
-				"post": map[string]any{
-					"zh_cn": map[string]any{
-						"title": "消息通知",
-						"content": [][]map[string]string{{
-							{"tag": "text", "text": payload.Text},
-						}},
-					},
-				},
+			"msg_type": "interactive",
+			"card": map[string]any{
+				"header":   map[string]any{"title": map[string]string{"tag": "plain_text", "content": "消息通知"}},
+				"elements": []map[string]string{{"tag": "markdown", "content": payload.Text}},
 			},
 		}
 	}
@@ -131,6 +138,12 @@ func buildBody(payload pluginsink.Payload) map[string]any {
 		"msg_type": "text",
 		"content":  map[string]string{"text": payload.Text},
 	}
+}
+
+func sign(secret string, timestamp int64) string {
+	stringToSign := fmt.Sprintf("%d\n%s", timestamp, secret)
+	h := hmac.New(sha256.New, []byte(stringToSign))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
 func truncate(b []byte, n int) []byte {

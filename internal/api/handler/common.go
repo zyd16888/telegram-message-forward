@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	domainsink "telegram-message-forward/internal/domain/sink"
 )
 
 // parseID 从路径参数解析 int64 id。
@@ -23,6 +24,10 @@ func parseID(c *gin.Context) (int64, bool) {
 func respondError(c *gin.Context, err error) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		return
+	}
+	if errors.Is(err, domainsink.ErrInUse) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

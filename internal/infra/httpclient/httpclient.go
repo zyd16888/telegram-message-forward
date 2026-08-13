@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -52,6 +54,7 @@ func New(opts ...Option) *Client {
 // Response 是一次 HTTP 调用的结果。
 type Response struct {
 	StatusCode int
+	Header     http.Header
 	Body       []byte
 }
 
@@ -150,7 +153,7 @@ func uploadFileName(filePath, fileName string) string {
 func (c *Client) do(req *http.Request) (*Response, error) {
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求失败: %w", err)
+		return nil, fmt.Errorf("请求失败 %s %s: %w", req.Method, safeRequestURL(req.URL), sanitizeURLError(err))
 	}
 	defer resp.Body.Close()
 
@@ -158,5 +161,25 @@ func (c *Client) do(req *http.Request) (*Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
-	return &Response{StatusCode: resp.StatusCode, Body: data}, nil
+	return &Response{StatusCode: resp.StatusCode, Header: resp.Header.Clone(), Body: data}, nil
+}
+
+func safeRequestURL(u *url.URL) string {
+	if u == nil {
+		return "<unknown>"
+	}
+	return u.Scheme + "://" + u.Host + u.EscapedPath()
+}
+
+func sanitizeURLError(err error) error {
+	for {
+		var urlErr *url.Error
+		if !errors.As(err, &urlErr) {
+			return err
+		}
+		if urlErr.Err == nil || urlErr.Err == err {
+			return errors.New("HTTP 请求失败")
+		}
+		err = urlErr.Err
+	}
 }

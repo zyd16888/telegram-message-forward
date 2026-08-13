@@ -3,6 +3,7 @@ package wecom
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,11 +12,19 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
 )
+
+func resetAppTokenState() {
+	tokenMu.Lock()
+	tokenCache = map[string]*cachedToken{}
+	tokenCalls = map[string]*tokenCall{}
+	tokenMu.Unlock()
+}
 
 func TestBotSendSuccess(t *testing.T) {
 	var gotBody atomic.Value
@@ -399,6 +408,204 @@ func TestAppTokenCacheAndRefresh(t *testing.T) {
 	}
 	if tokenCalls.Load() != tokBefore {
 		t.Fatalf("token 应命中缓存，不应再次 gettoken（before=%d after=%d）", tokBefore, tokenCalls.Load())
+	}
+}
+
+func TestAppRefreshesTokenWhenMediaUploadReportsExpired(t *testing.T) {
+	resetAppTokenState()
+	file := t.TempDir() + "/report.pdf"
+	if err := os.WriteFile(file, []byte("pdf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var tokenCount, uploadCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gettoken"):
+			n := tokenCount.Add(1)
+			fmt.Fprintf(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK%d","expires_in":7200}`, n)
+		case strings.Contains(r.URL.Path, "/media/upload"):
+			if uploadCount.Add(1) == 1 {
+				io.WriteString(w, `{"errcode":42001,"errmsg":"expired"}`)
+			} else {
+				io.WriteString(w, `{"errcode":0,"errmsg":"ok","media_id":"MEDIA"}`)
+			}
+		case strings.Contains(r.URL.Path, "/message/send"):
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		}
+	}))
+	defer srv.Close()
+	oldBase := apiBase
+	apiBase = srv.URL
+	t.Cleanup(func() { apiBase = oldBase })
+
+	sink := &domainsink.Sink{Type: "wecom_app", Config: map[string]any{"corpid": "corp", "agentid": "1"}, Secret: []byte("secret")}
+	res, err := NewApp().Send(context.Background(), sink, pluginsink.Payload{Media: []domainmessage.Media{{Type: "file", LocalPath: file}}}, pluginsink.Options{})
+	if err != nil || res == nil || !res.Success {
+		t.Fatalf("上传 token 失效后应刷新成功: res=%+v err=%v", res, err)
+	}
+	if tokenCount.Load() != 2 || uploadCount.Load() != 2 {
+		t.Fatalf("应刷新 token 并重新上传 token=%d upload=%d", tokenCount.Load(), uploadCount.Load())
+	}
+}
+
+func TestAppRetrySkipsCompletedMedia(t *testing.T) {
+	resetAppTokenState()
+	file := t.TempDir() + "/report.pdf"
+	if err := os.WriteFile(file, []byte("pdf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var uploadCount, fileCount, textCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gettoken"):
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK","expires_in":7200}`)
+		case strings.Contains(r.URL.Path, "/media/upload"):
+			uploadCount.Add(1)
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","media_id":"MEDIA"}`)
+		case strings.Contains(r.URL.Path, "/message/send"):
+			body, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(body), `"msgtype":"file"`) {
+				fileCount.Add(1)
+				io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+				return
+			}
+			if textCount.Add(1) == 1 {
+				io.WriteString(w, `{"errcode":-1,"errmsg":"system busy"}`)
+				return
+			}
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+		}
+	}))
+	defer srv.Close()
+	oldBase := apiBase
+	apiBase = srv.URL
+	t.Cleanup(func() { apiBase = oldBase })
+
+	completed := map[string]bool{}
+	opts := pluginsink.Options{
+		StepPrefix: "part:0",
+		Completed:  completed,
+		Checkpoint: func(_ context.Context, key string) error {
+			completed[key] = true
+			return nil
+		},
+	}
+	sink := &domainsink.Sink{Type: "wecom_app", Config: map[string]any{"corpid": "corp", "agentid": "1"}, Secret: []byte("secret")}
+	payload := pluginsink.Payload{Text: "caption", Media: []domainmessage.Media{{Type: "file", LocalPath: file}}}
+	first, err := NewApp().Send(context.Background(), sink, payload, opts)
+	if err != nil || first == nil || first.Success || first.FailureKind != pluginsink.FailureTransient {
+		t.Fatalf("第一次应仅在文本步骤临时失败: result=%+v err=%v", first, err)
+	}
+	if !completed["part:0:media"] {
+		t.Fatalf("媒体成功后应记录 checkpoint: %+v", completed)
+	}
+	second, err := NewApp().Send(context.Background(), sink, payload, opts)
+	if err != nil || second == nil || !second.Success {
+		t.Fatalf("重试应跳过媒体并完成文本: result=%+v err=%v", second, err)
+	}
+	if uploadCount.Load() != 1 || fileCount.Load() != 1 || textCount.Load() != 2 {
+		t.Fatalf("重试调用次数不正确 upload=%d file=%d text=%d", uploadCount.Load(), fileCount.Load(), textCount.Load())
+	}
+}
+
+func TestAppMediaUploadHTTPFailureClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		kind   pluginsink.FailureKind
+	}{
+		{name: "bad request", status: http.StatusBadRequest, kind: pluginsink.FailurePermanent},
+		{name: "rate limited", status: http.StatusTooManyRequests, kind: pluginsink.FailureTransient},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetAppTokenState()
+			file := t.TempDir() + "/report.pdf"
+			if err := os.WriteFile(file, []byte("pdf"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.Contains(r.URL.Path, "/gettoken") {
+					io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK","expires_in":7200}`)
+					return
+				}
+				w.WriteHeader(tc.status)
+			}))
+			defer srv.Close()
+			oldBase := apiBase
+			apiBase = srv.URL
+			t.Cleanup(func() { apiBase = oldBase })
+
+			sink := &domainsink.Sink{Type: "wecom_app", Config: map[string]any{"corpid": "corp", "agentid": "1"}, Secret: []byte("secret")}
+			res, err := NewApp().Send(context.Background(), sink, pluginsink.Payload{Media: []domainmessage.Media{{Type: "file", LocalPath: file}}}, pluginsink.Options{})
+			res = pluginsink.ApplyErrorClassification(res, err)
+			if res == nil || res.Success || res.FailureKind != tc.kind {
+				t.Fatalf("HTTP %d 分类 = %+v, want %s", tc.status, res, tc.kind)
+			}
+		})
+	}
+}
+
+func TestAppGetTokenHTTPFailureClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		kind   pluginsink.FailureKind
+	}{
+		{name: "bad credentials", status: http.StatusBadRequest, kind: pluginsink.FailurePermanent},
+		{name: "service unavailable", status: http.StatusServiceUnavailable, kind: pluginsink.FailureTransient},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetAppTokenState()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			defer srv.Close()
+			oldBase := apiBase
+			apiBase = srv.URL
+			t.Cleanup(func() { apiBase = oldBase })
+
+			sink := &domainsink.Sink{Type: "wecom_app", Config: map[string]any{"corpid": "corp", "agentid": "1"}, Secret: []byte("secret")}
+			res, err := NewApp().Send(context.Background(), sink, pluginsink.Payload{Text: "hello"}, pluginsink.Options{})
+			res = pluginsink.ApplyErrorClassification(res, err)
+			if res == nil || res.Success || res.FailureKind != tc.kind {
+				t.Fatalf("HTTP %d 分类 = %+v, want %s", tc.status, res, tc.kind)
+			}
+		})
+	}
+}
+
+func TestAppCoalescesConcurrentTokenRefresh(t *testing.T) {
+	resetAppTokenState()
+	var tokenCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/gettoken") {
+			tokenCount.Add(1)
+			time.Sleep(20 * time.Millisecond)
+			io.WriteString(w, `{"errcode":0,"errmsg":"ok","access_token":"TOK","expires_in":7200}`)
+			return
+		}
+		io.WriteString(w, `{"errcode":0,"errmsg":"ok"}`)
+	}))
+	defer srv.Close()
+	oldBase := apiBase
+	apiBase = srv.URL
+	t.Cleanup(func() { apiBase = oldBase })
+	sink := &domainsink.Sink{Type: "wecom_app", Config: map[string]any{"corpid": "corp", "agentid": "1"}, Secret: []byte("secret")}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := NewApp().Send(context.Background(), sink, pluginsink.Payload{Text: "hello"}, pluginsink.Options{})
+			if err != nil || res == nil || !res.Success {
+				t.Errorf("并发发送失败: res=%+v err=%v", res, err)
+			}
+		}()
+	}
+	wg.Wait()
+	if tokenCount.Load() != 1 {
+		t.Fatalf("并发冷启动应只请求一次 token，实际 %d", tokenCount.Load())
 	}
 }
 

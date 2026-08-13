@@ -89,6 +89,7 @@ func (s *Sink) Capabilities() domainsink.Capabilities {
 		SupportsMarkdown: true,
 		SupportsImage:    true,
 		MaxTextLength:    20000,
+		MaxMediaItems:    1,
 		Media: []domainsink.MediaCapability{
 			{Type: "image", Supported: true, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: false, DeliveryMode: "markdown_public_url", Fallback: "本地图片无法直传时降级为 [图片消息] + caption + 原始链接"},
 			{Type: "file", Supported: false, Fallback: "自定义机器人不支持文件直传，降级为文件名、大小和原始链接摘要"},
@@ -210,6 +211,10 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 	if err != nil {
 		return &pluginsink.Result{Success: false, Error: err.Error()}, err
 	}
+	if !resp.IsSuccess() {
+		summary, _ := json.Marshal(map[string]any{"status_code": resp.StatusCode})
+		return pluginsink.HTTPFailure(summary, resp.StatusCode, resp.Header, fmt.Sprintf("钉钉返回 HTTP %d", resp.StatusCode)), nil
+	}
 
 	var r apiResp
 	if err := json.Unmarshal(resp.Body, &r); err != nil {
@@ -217,11 +222,7 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 	}
 	summary, _ := json.Marshal(map[string]any{"errcode": r.ErrCode, "errmsg": r.ErrMsg})
 	if r.ErrCode != 0 {
-		return &pluginsink.Result{
-			Success:         false,
-			ResponseSummary: summary,
-			Error:           fmt.Sprintf("钉钉返回错误 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg),
-		}, nil
+		return pluginsink.PermanentResult(summary, fmt.Sprintf("钉钉返回错误 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg)), nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
 }

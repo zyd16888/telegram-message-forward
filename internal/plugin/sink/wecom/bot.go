@@ -80,6 +80,7 @@ func (s *BotSink) Capabilities() domainsink.Capabilities {
 		MaxTextLength:    4096,
 		MaxTextBytes:     map[string]int{"text": 2048, "markdown": 4096},
 		MaxFileSizeMB:    20,
+		MaxMediaItems:    1,
 		Media: []domainsink.MediaCapability{
 			{Type: "image", Supported: true, MaxSizeMB: 2, SupportsPublicURL: false, RequiresUpload: false, SupportsBinary: true, DeliveryMode: "base64_md5", Fallback: "降级为 [图片消息] + caption + 原始链接"},
 			{Type: "file", Supported: true, MaxSizeMB: 20, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为文件名、大小和原始链接摘要"},
@@ -99,6 +100,16 @@ func (s *BotSink) ValidateConfig(config map[string]any) error {
 	return nil
 }
 
+func (s *BotSink) ValidateSink(sink *domainsink.Sink) error {
+	if url, _ := sink.Config["webhook_url"].(string); strings.TrimSpace(url) != "" {
+		return nil
+	}
+	if strings.TrimSpace(string(sink.Secret)) == "" {
+		return fmt.Errorf("wecom_bot 缺少 webhook key（secret）或 webhook_url")
+	}
+	return nil
+}
+
 // webhookURL 组装机器人 webhook 地址。优先 config.webhook_url；否则用 secret 作为 key。
 func (s *BotSink) webhookURL(sink *domainsink.Sink) (string, string, error) {
 	debug := debugEnabled(sink.Config)
@@ -113,7 +124,7 @@ func (s *BotSink) webhookURL(sink *domainsink.Sink) (string, string, error) {
 }
 
 // Send 向群机器人 webhook 发送消息。
-func (s *BotSink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, _ pluginsink.Options) (*pluginsink.Result, error) {
+func (s *BotSink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, opts pluginsink.Options) (*pluginsink.Result, error) {
 	url, bucket, err := s.webhookURL(sink)
 	if err != nil {
 		return failResult(nil, err.Error()), nil
@@ -124,18 +135,28 @@ func (s *BotSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 	}
 
 	if img, ok := firstLocalImage(payload, botNativeImageMaxBytes); ok {
-		res, err := s.sendImage(ctx, url, img.LocalPath)
-		if err != nil || res == nil || !res.Success {
-			return res, err
+		if !opts.IsCompleted("media") {
+			res, err := s.sendImage(ctx, url, img.LocalPath)
+			if err != nil || res == nil || !res.Success {
+				return res, err
+			}
+			if err := opts.MarkCompleted(ctx, "media"); err != nil {
+				return nil, err
+			}
 		}
-		return s.sendTextAfterMedia(ctx, url, payload, res)
+		return s.sendTextAfterMedia(ctx, url, payload)
 	}
 	if file, ok := firstLocalFile(payload); ok {
-		res, err := s.sendFile(ctx, url, file.LocalPath, file.FileName)
-		if err != nil || res == nil || !res.Success {
-			return res, err
+		if !opts.IsCompleted("media") {
+			res, err := s.sendFile(ctx, url, file.LocalPath, file.FileName)
+			if err != nil || res == nil || !res.Success {
+				return res, err
+			}
+			if err := opts.MarkCompleted(ctx, "media"); err != nil {
+				return nil, err
+			}
 		}
-		return s.sendTextAfterMedia(ctx, url, payload, res)
+		return s.sendTextAfterMedia(ctx, url, payload)
 	}
 	if len(payload.Media) > 0 {
 		payload.Format = "text"
@@ -157,16 +178,21 @@ func (s *BotSink) sendText(ctx context.Context, url string, payload pluginsink.P
 	if err != nil {
 		return failResult(nil, err.Error()), err
 	}
+	if !resp.IsSuccess() {
+		return httpFailResult(resp, fmt.Sprintf("企业微信返回 HTTP %d", resp.StatusCode)), nil
+	}
 	summary, ok, _, errMsg := parseResp(resp.Body)
 	if !ok {
-		return failResult(summary, errMsg), nil
+		var r apiResp
+		_ = json.Unmarshal(resp.Body, &r)
+		return apiFailResult(summary, r.ErrCode, errMsg), nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
 }
 
-func (s *BotSink) sendTextAfterMedia(ctx context.Context, url string, payload pluginsink.Payload, mediaResult *pluginsink.Result) (*pluginsink.Result, error) {
+func (s *BotSink) sendTextAfterMedia(ctx context.Context, url string, payload pluginsink.Payload) (*pluginsink.Result, error) {
 	if payload.Text == "" {
-		return mediaResult, nil
+		return &pluginsink.Result{Success: true}, nil
 	}
 	return s.sendText(ctx, url, payload)
 }
@@ -194,6 +220,9 @@ func (s *BotSink) sendFile(ctx context.Context, url string, path string, fileNam
 	if err != nil {
 		return failResult(nil, "上传文件失败: "+err.Error()), err
 	}
+	if !resp.IsSuccess() {
+		return httpFailResult(resp, fmt.Sprintf("企业微信上传返回 HTTP %d", resp.StatusCode)), nil
+	}
 	var r struct {
 		apiResp
 		MediaID string `json:"media_id"`
@@ -203,7 +232,7 @@ func (s *BotSink) sendFile(ctx context.Context, url string, path string, fileNam
 	}
 	if r.ErrCode != 0 || r.MediaID == "" {
 		summary, _ := json.Marshal(map[string]any{"errcode": r.ErrCode, "errmsg": r.ErrMsg, "has_media_id": r.MediaID != ""})
-		return failResult(summary, fmt.Sprintf("上传文件失败 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg)), nil
+		return apiFailResult(summary, r.ErrCode, fmt.Sprintf("上传文件失败 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg)), nil
 	}
 
 	body := map[string]any{
@@ -214,9 +243,14 @@ func (s *BotSink) sendFile(ctx context.Context, url string, path string, fileNam
 	if err != nil {
 		return failResult(nil, err.Error()), err
 	}
+	if !sendResp.IsSuccess() {
+		return httpFailResult(sendResp, fmt.Sprintf("企业微信返回 HTTP %d", sendResp.StatusCode)), nil
+	}
 	summary, ok, _, errMsg := parseResp(sendResp.Body)
 	if !ok {
-		return failResult(summary, errMsg), nil
+		var r apiResp
+		_ = json.Unmarshal(sendResp.Body, &r)
+		return apiFailResult(summary, r.ErrCode, errMsg), nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
 }
@@ -234,9 +268,14 @@ func (s *BotSink) sendImage(ctx context.Context, url string, path string) (*plug
 	if err != nil {
 		return failResult(nil, err.Error()), err
 	}
+	if !resp.IsSuccess() {
+		return httpFailResult(resp, fmt.Sprintf("企业微信返回 HTTP %d", resp.StatusCode)), nil
+	}
 	summary, ok, _, errMsg := parseResp(resp.Body)
 	if !ok {
-		return failResult(summary, errMsg), nil
+		var r apiResp
+		_ = json.Unmarshal(resp.Body, &r)
+		return apiFailResult(summary, r.ErrCode, errMsg), nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
 }

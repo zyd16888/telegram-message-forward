@@ -4,8 +4,11 @@ package sink
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
+	domainmessage "telegram-message-forward/internal/domain/message"
 	domainsink "telegram-message-forward/internal/domain/sink"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
 )
@@ -63,16 +66,12 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domainsink.Sink,
 	if err != nil {
 		return nil, err
 	}
-	if err := plugin.ValidateConfig(in.Config); err != nil {
-		return nil, fmt.Errorf("渠道配置校验失败: %w", err)
-	}
 	sk := &domainsink.Sink{
-		Type:         in.Type,
-		Name:         in.Name,
-		Enabled:      in.Enabled,
-		Config:       in.Config,
-		Secret:       []byte(in.Secret),
+		Type: in.Type, Name: in.Name, Enabled: in.Enabled, Config: in.Config, Secret: []byte(in.Secret),
 		Capabilities: plugin.Capabilities(),
+	}
+	if err := pluginsink.Validate(plugin, sk); err != nil {
+		return nil, fmt.Errorf("渠道配置校验失败: %w", err)
 	}
 	if err := s.repo.Create(ctx, sk); err != nil {
 		return nil, err
@@ -101,13 +100,6 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*domain
 		sk.Enabled = *in.Enabled
 	}
 	if in.Config != nil {
-		plugin, err := pluginsink.New(sk.Type)
-		if err != nil {
-			return nil, err
-		}
-		if err := plugin.ValidateConfig(in.Config); err != nil {
-			return nil, fmt.Errorf("渠道配置校验失败: %w", err)
-		}
 		sk.Config = in.Config
 	}
 	if in.Secret != nil {
@@ -118,6 +110,9 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*domain
 		return nil, err
 	}
 	sk.Capabilities = plugin.Capabilities()
+	if err := pluginsink.Validate(plugin, sk); err != nil {
+		return nil, fmt.Errorf("渠道配置校验失败: %w", err)
+	}
 	if err := s.repo.Update(ctx, sk); err != nil {
 		return nil, err
 	}
@@ -135,6 +130,13 @@ type TestInput struct {
 	Type   string
 	Config map[string]any
 	Secret *string
+	Media  *TestMediaInput
+}
+
+type TestMediaInput struct {
+	Type     string
+	URL      string
+	FileName string
 }
 
 // Test 用当前配置向渠道发送一条测试消息。
@@ -169,16 +171,25 @@ func (s *Service) Test(ctx context.Context, in TestInput) (*pluginsink.Result, e
 	if err != nil {
 		return nil, err
 	}
-	if err := plugin.ValidateConfig(sk.Config); err != nil {
+	if err := pluginsink.Validate(plugin, sk); err != nil {
 		if in.ID > 0 {
 			_ = s.repo.UpdateTestResult(ctx, in.ID, time.Now(), false, err.Error())
 		}
 		return nil, fmt.Errorf("渠道配置校验失败: %w", err)
 	}
-	result, sendErr := plugin.Send(ctx, sk, pluginsink.Payload{
+	payload := pluginsink.Payload{
 		Format: "text",
 		Text:   "这是一条来自 Telegram Message Forward 的渠道测试消息。",
-	}, pluginsink.Options{})
+	}
+	if in.Media != nil {
+		media, err := testMedia(*in.Media)
+		if err != nil {
+			return nil, fmt.Errorf("测试媒体无效: %w", err)
+		}
+		payload.Media = []domainmessage.Media{media}
+		payload.FallbackText = payload.Text + "\n[测试媒体] " + media.RemoteURL
+	}
+	result, sendErr := plugin.Send(ctx, sk, payload, pluginsink.Options{})
 	if in.ID > 0 {
 		success := result != nil && result.Success && sendErr == nil
 		errText := ""
@@ -192,6 +203,20 @@ func (s *Service) Test(ctx context.Context, in TestInput) (*pluginsink.Result, e
 		_ = s.repo.UpdateTestResult(ctx, in.ID, time.Now(), success, errText)
 	}
 	return result, sendErr
+}
+
+func testMedia(in TestMediaInput) (domainmessage.Media, error) {
+	kind := strings.ToLower(strings.TrimSpace(in.Type))
+	switch kind {
+	case "image", "file", "audio", "video":
+	default:
+		return domainmessage.Media{}, fmt.Errorf("不支持的类型 %q", in.Type)
+	}
+	u, err := url.Parse(strings.TrimSpace(in.URL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return domainmessage.Media{}, fmt.Errorf("URL 必须是无用户凭据的 http/https 公网地址")
+	}
+	return domainmessage.Media{Type: kind, RemoteURL: u.String(), FileName: strings.TrimSpace(in.FileName)}, nil
 }
 
 // Types 返回已注册的 Sink 类型。

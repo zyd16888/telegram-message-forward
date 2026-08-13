@@ -25,6 +25,10 @@ import (
 
 var errSinkDisabled = errors.New("目标渠道已禁用，已取消投递")
 
+type progressRepository interface {
+	UpdateProgress(context.Context, int64, map[string]bool) error
+}
+
 // Worker 从数据库领取投递任务并执行。
 type Worker struct {
 	id        string
@@ -114,6 +118,7 @@ func (w *Worker) tick(ctx context.Context) error {
 func (w *Worker) process(ctx context.Context, task *domaindelivery.Task) {
 	startedAt := w.clock.Now()
 	result, err := w.deliver(ctx, task)
+	result = pluginsink.ApplyErrorClassification(result, err)
 
 	finishedAt := w.clock.Now()
 	attempt := &domaindelivery.Attempt{
@@ -143,11 +148,12 @@ func (w *Worker) process(ctx context.Context, task *domaindelivery.Task) {
 		} else {
 			task.LastError = ""
 		}
+		task.Progress = nil
 	} else {
 		attempt.Status = domaindelivery.AttemptFailed
 		attempt.Error = errString(err, result)
 		task.LastError = attempt.Error
-		w.applyRetry(task)
+		w.applyRetry(task, result)
 	}
 
 	if aerr := w.tasks.AddAttempt(ctx, attempt); aerr != nil {
@@ -215,17 +221,41 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 		FallbackText: fallbackText,
 	}
 	degradeReasons := mediaDegradeReasons(caps, media, w.media != nil)
-	if len(media) > 0 && !supportsAllMedia(caps, media) {
+	if len(media) > 0 && (!supportsAllMedia(caps, media) || exceedsMediaCount(caps, media)) {
 		payload.Format = string(domaintemplate.FormatText)
 		payload.Text = fallbackText
+		payload.Media = nil
 		if len(degradeReasons) == 0 {
-			degradeReasons = []string{"渠道不支持当前媒体形态，已降级为文本"}
+			if exceedsMediaCount(caps, media) {
+				degradeReasons = []string{fmt.Sprintf("渠道单条最多处理 %d 个媒体，已全部降级为文本摘要", caps.MaxMediaItems)}
+			} else {
+				degradeReasons = []string{"渠道不支持当前媒体形态，已降级为文本"}
+			}
 		}
 	}
 	parts := splitPayload(payload, caps)
+	if task.Progress == nil {
+		task.Progress = map[string]bool{}
+	}
 	var last *pluginsink.Result
 	for i, part := range parts {
-		result, sendErr := plugin.Send(ctx, s, part, pluginsink.Options{})
+		stepPrefix := fmt.Sprintf("part:%d", i)
+		if task.Progress[stepPrefix] {
+			continue
+		}
+		opts := pluginsink.Options{
+			DeliveryKey: fmt.Sprintf("delivery-%d-revision-%d-part-%d", task.ID, task.MessageRevision, i),
+			StepPrefix:  stepPrefix,
+			Completed:   task.Progress,
+			Checkpoint: func(checkpointCtx context.Context, key string) error {
+				if task.Progress == nil {
+					task.Progress = map[string]bool{}
+				}
+				task.Progress[key] = true
+				return w.updateProgress(checkpointCtx, task)
+			},
+		}
+		result, sendErr := plugin.Send(ctx, s, part, opts)
 		if sendErr != nil {
 			return result, fmt.Errorf("发送第 %d/%d 段: %w", i+1, len(parts), sendErr)
 		}
@@ -235,6 +265,10 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 		if !result.Success {
 			result.Error = fmt.Sprintf("第 %d/%d 段发送失败: %s", i+1, len(parts), result.Error)
 			return result, nil
+		}
+		task.Progress[stepPrefix] = true
+		if err := w.updateProgress(ctx, task); err != nil {
+			return nil, fmt.Errorf("记录第 %d/%d 段投递进度: %w", i+1, len(parts), err)
 		}
 		last = result
 		if len(parts) == 1 {
@@ -249,6 +283,14 @@ func (w *Worker) deliver(ctx context.Context, task *domaindelivery.Task) (*plugi
 		out.ResponseSummary = last.ResponseSummary
 	}
 	return attachDegradeNote(out, degradeReasons), nil
+}
+
+func (w *Worker) updateProgress(ctx context.Context, task *domaindelivery.Task) error {
+	repo, ok := w.tasks.(progressRepository)
+	if !ok {
+		return nil
+	}
+	return repo.UpdateProgress(ctx, task.ID, task.Progress)
 }
 
 // mediaDegradeReasons 解释为何媒体会（或已经）降级为文本，供 attempt/详情展示。
@@ -371,6 +413,10 @@ func supportsAllMedia(c domainsink.Capabilities, media []domainmessage.Media) bo
 		}
 	}
 	return true
+}
+
+func exceedsMediaCount(c domainsink.Capabilities, media []domainmessage.Media) bool {
+	return c.MaxMediaItems > 0 && len(media) > c.MaxMediaItems
 }
 
 // supportsMediaItem 判断渠道能否真实投递单个媒体。
@@ -528,7 +574,7 @@ func mediaCapabilitySupports(mc domainsink.MediaCapability, item domainmessage.M
 	if !mc.Supported {
 		return false
 	}
-	if mc.MaxSizeMB > 0 && item.Size > int64(mc.MaxSizeMB)*1024*1024 {
+	if mc.MaxSizeMB > 0 && mediaSize(item) > int64(mc.MaxSizeMB)*1024*1024 {
 		return false
 	}
 	hasLocal := hasReadableLocalFile(item.LocalPath)
@@ -546,6 +592,18 @@ func mediaCapabilitySupports(mc domainsink.MediaCapability, item domainmessage.M
 		return false
 	}
 	return true
+}
+
+func mediaSize(item domainmessage.Media) int64 {
+	if item.Size > 0 {
+		return item.Size
+	}
+	if item.LocalPath != "" {
+		if info, err := os.Stat(filepath.Clean(item.LocalPath)); err == nil && !info.IsDir() {
+			return info.Size()
+		}
+	}
+	return 0
 }
 
 func hasReadableLocalFile(path string) bool {
@@ -636,14 +694,18 @@ func humanBytes(n int64) string {
 }
 
 // applyRetry 根据剩余次数决定进入 retrying 还是 dead。
-func (w *Worker) applyRetry(task *domaindelivery.Task) {
-	if task.AttemptCount >= task.MaxAttempts {
+func (w *Worker) applyRetry(task *domaindelivery.Task, result *pluginsink.Result) {
+	if result != nil && result.FailureKind == pluginsink.FailurePermanent || task.AttemptCount >= task.MaxAttempts {
 		task.Status = domaindelivery.StatusDead
 		task.NextRetryAt = nil
 		return
 	}
 	task.Status = domaindelivery.StatusRetrying
-	next := w.clock.Now().Add(backoff(task.AttemptCount))
+	delay := backoff(task.AttemptCount)
+	if result != nil && result.RetryAfter > delay {
+		delay = result.RetryAfter
+	}
+	next := w.clock.Now().Add(delay)
 	task.NextRetryAt = &next
 }
 

@@ -186,12 +186,11 @@ func (r *BackupRepository) loadPayload(ctx context.Context, p *backupPayload, in
 		p.Accounts = append(p.Accounts, backupAccount{Account: item, AppHash: hash, Session: session})
 	}
 	for _, item := range sinks {
-		plain, err := r.decrypt(item.SecretEncrypted)
+		backupItem, err := r.backupSink(item)
 		if err != nil {
 			return err
 		}
-		item.SecretEncrypted = nil
-		p.Sinks = append(p.Sinks, backupSink{Sink: item, Secret: plain})
+		p.Sinks = append(p.Sinks, backupItem)
 	}
 	for _, item := range settings {
 		plain, err := r.decrypt(item.SecretEncrypted)
@@ -207,6 +206,47 @@ func (r *BackupRepository) loadPayload(ctx context.Context, p *backupPayload, in
 func (r *BackupRepository) decrypt(value []byte) (string, error) {
 	plain, err := r.cipher.Decrypt(value)
 	return string(plain), err
+}
+
+func (r *BackupRepository) backupSink(item model.Sink) (backupSink, error) {
+	secret, err := r.decrypt(item.SecretEncrypted)
+	if err != nil {
+		return backupSink{}, err
+	}
+	config := []byte(item.Config)
+	if len(item.ConfigEncrypted) > 0 {
+		config, err = r.cipher.Decrypt(item.ConfigEncrypted)
+		if err != nil {
+			return backupSink{}, fmt.Errorf("解密备份渠道配置失败: %w", err)
+		}
+	}
+	if len(config) == 0 {
+		config = []byte(`{}`)
+	}
+	item.Config = datatypes.JSON(config)
+	item.ConfigEncrypted = nil
+	item.SecretEncrypted = nil
+	return backupSink{Sink: item, Secret: secret}, nil
+}
+
+func (r *BackupRepository) restoreSink(item backupSink) (model.Sink, error) {
+	row := item.Sink
+	config := []byte(row.Config)
+	if len(config) == 0 {
+		config = []byte(`{}`)
+	}
+	configEncrypted, err := r.cipher.Encrypt(config)
+	if err != nil {
+		return model.Sink{}, err
+	}
+	secretEncrypted, err := r.cipher.Encrypt([]byte(item.Secret))
+	if err != nil {
+		return model.Sink{}, err
+	}
+	row.Config = datatypes.JSON([]byte(`{}`))
+	row.ConfigEncrypted = configEncrypted
+	row.SecretEncrypted = secretEncrypted
+	return row, nil
 }
 
 func payloadCounts(p *backupPayload) domainbackup.Counts {
@@ -342,12 +382,10 @@ func (r *BackupRepository) restore(tx *gorm.DB, p *backupPayload, same bool) err
 		sourceMap[item.ID] = id
 	}
 	for _, item := range p.Sinks {
-		row := item.Sink
-		enc, err := r.cipher.Encrypt([]byte(item.Secret))
+		row, err := r.restoreSink(item)
 		if err != nil {
 			return err
 		}
-		row.SecretEncrypted = enc
 		if same {
 			var current model.Sink
 			if tx.First(&current, item.ID).Error == nil {

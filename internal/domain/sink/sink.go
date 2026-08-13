@@ -3,8 +3,11 @@ package sink
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+var ErrInUse = errors.New("渠道仍被引用，不能删除")
 
 // MediaCapability 声明一个 Sink 对某类媒体的投递能力。
 type MediaCapability struct {
@@ -30,6 +33,7 @@ type Capabilities struct {
 	MaxTextLength    int               `json:"max_text_length,omitempty"`
 	MaxTextBytes     map[string]int    `json:"max_text_bytes,omitempty"`
 	MaxFileSizeMB    int               `json:"max_file_size_mb,omitempty"`
+	MaxMediaItems    int               `json:"max_media_items,omitempty"`
 	Media            []MediaCapability `json:"media,omitempty"`
 	Notes            []string          `json:"notes,omitempty"`
 }

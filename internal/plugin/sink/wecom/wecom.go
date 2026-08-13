@@ -19,6 +19,7 @@ import (
 	"golang.org/x/time/rate"
 
 	domainmessage "telegram-message-forward/internal/domain/message"
+	"telegram-message-forward/internal/infra/httpclient"
 	pluginsink "telegram-message-forward/internal/plugin/sink"
 )
 
@@ -130,7 +131,27 @@ func withDebugParam(rawURL string, enabled bool) string {
 
 // failResult 构造失败结果。
 func failResult(summary []byte, errMsg string) *pluginsink.Result {
-	return &pluginsink.Result{Success: false, ResponseSummary: summary, Error: errMsg}
+	return pluginsink.PermanentResult(summary, errMsg)
+}
+
+func apiFailResult(summary []byte, code int, errMsg string) *pluginsink.Result {
+	switch code {
+	case -1, 45009, 45011:
+		return pluginsink.TransientResult(summary, errMsg, 0)
+	default:
+		return pluginsink.PermanentResult(summary, errMsg)
+	}
+}
+
+func resultForAPIError(body, summary []byte, errMsg string) *pluginsink.Result {
+	var r apiResp
+	_ = json.Unmarshal(body, &r)
+	return apiFailResult(summary, r.ErrCode, errMsg)
+}
+
+func httpFailResult(resp *httpclient.Response, message string) *pluginsink.Result {
+	summary, _ := json.Marshal(map[string]any{"status_code": resp.StatusCode})
+	return pluginsink.HTTPFailure(summary, resp.StatusCode, resp.Header, message)
 }
 
 func firstLocalImage(payload pluginsink.Payload, imageLimitBytes int64) (domainmessage.Media, bool) {

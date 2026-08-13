@@ -125,6 +125,7 @@ type Sink struct {
 	Name            string
 	Enabled         bool
 	Config          datatypes.JSON
+	ConfigEncrypted []byte
 	SecretEncrypted []byte
 	Capabilities    datatypes.JSON
 	LastTestAt      *time.Time
@@ -242,6 +243,7 @@ type DeliveryTask struct {
 	MessageSnapshot datatypes.JSON
 	MessageRevision int
 	TextSuffix      string
+	Progress        datatypes.JSON
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

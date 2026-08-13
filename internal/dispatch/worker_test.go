@@ -29,6 +29,52 @@ var chunkTestPayloads struct {
 	items []pluginsink.Payload
 }
 
+var checkpointTestState struct {
+	sync.Mutex
+	calls  int
+	texts  []string
+	failAt int
+}
+
+type checkpointTestSink struct{}
+
+type mediaLimitTestSink struct{}
+
+func (checkpointTestSink) Name() string                        { return "dispatch_checkpoint_test" }
+func (checkpointTestSink) ValidateConfig(map[string]any) error { return nil }
+func (checkpointTestSink) Capabilities() domainsink.Capabilities {
+	return domainsink.Capabilities{SupportsText: true, MaxTextLength: 40}
+}
+func (checkpointTestSink) Send(_ context.Context, _ *domainsink.Sink, payload pluginsink.Payload, _ pluginsink.Options) (*pluginsink.Result, error) {
+	checkpointTestState.Lock()
+	defer checkpointTestState.Unlock()
+	checkpointTestState.calls++
+	checkpointTestState.texts = append(checkpointTestState.texts, payload.Text)
+	if checkpointTestState.calls == checkpointTestState.failAt {
+		return pluginsink.TransientResult(nil, "temporary", 0), nil
+	}
+	return &pluginsink.Result{Success: true}, nil
+}
+
+func (mediaLimitTestSink) Name() string                        { return "dispatch_media_limit_test" }
+func (mediaLimitTestSink) ValidateConfig(map[string]any) error { return nil }
+func (mediaLimitTestSink) Capabilities() domainsink.Capabilities {
+	return domainsink.Capabilities{
+		SupportsText:  true,
+		SupportsImage: true,
+		MaxMediaItems: 1,
+		Media: []domainsink.MediaCapability{{
+			Type: "image", Supported: true, SupportsPublicURL: true,
+		}},
+	}
+}
+func (mediaLimitTestSink) Send(_ context.Context, _ *domainsink.Sink, payload pluginsink.Payload, _ pluginsink.Options) (*pluginsink.Result, error) {
+	chunkTestPayloads.Lock()
+	chunkTestPayloads.items = append(chunkTestPayloads.items, payload)
+	chunkTestPayloads.Unlock()
+	return &pluginsink.Result{Success: true}, nil
+}
+
 type chunkTestSink struct{}
 
 func (chunkTestSink) Name() string                        { return "dispatch_chunk_test" }
@@ -45,11 +91,24 @@ func (chunkTestSink) Send(_ context.Context, _ *domainsink.Sink, payload plugins
 
 func init() {
 	pluginsink.Register("dispatch_chunk_test", func() (pluginsink.Plugin, error) { return chunkTestSink{}, nil })
+	pluginsink.Register("dispatch_checkpoint_test", func() (pluginsink.Plugin, error) { return checkpointTestSink{}, nil })
+	pluginsink.Register("dispatch_media_limit_test", func() (pluginsink.Plugin, error) { return mediaLimitTestSink{}, nil })
 }
 
 type recordingTaskRepo struct {
 	attempt *domaindelivery.Attempt
 	task    *domaindelivery.Task
+}
+
+func (r *recordingTaskRepo) UpdateProgress(_ context.Context, _ int64, progress map[string]bool) error {
+	if r.task == nil {
+		r.task = &domaindelivery.Task{}
+	}
+	r.task.Progress = make(map[string]bool, len(progress))
+	for key, value := range progress {
+		r.task.Progress[key] = value
+	}
+	return nil
 }
 
 func (r *recordingTaskRepo) Create(context.Context, *domaindelivery.Task) error { return nil }
@@ -201,6 +260,87 @@ func TestWorkerSplitsTextUsingRuntimeSinkCapabilities(t *testing.T) {
 		if len([]rune(payload.Text)) > 50 {
 			t.Fatalf("part %d length = %d, want <= 50", i+1, len([]rune(payload.Text)))
 		}
+	}
+}
+
+func TestWorkerRetrySkipsCompletedTextParts(t *testing.T) {
+	checkpointTestState.Lock()
+	checkpointTestState.calls = 0
+	checkpointTestState.texts = nil
+	checkpointTestState.failAt = 2
+	checkpointTestState.Unlock()
+
+	tasks := &recordingTaskRepo{}
+	worker := NewWorker("test", config.DispatchConfig{}, tasks,
+		fakeSinkRepo{sink: &domainsink.Sink{ID: 1, Type: "dispatch_checkpoint_test", Enabled: true}},
+		fakeTemplateRepo{}, fakeMessageRepo{msg: &domainmessage.NormalizedMessage{ID: 10, Text: strings.Repeat("checkpoint sentence. ", 8)}},
+		tmpl.NewRenderer(), clock.System{}, slog.Default())
+	task := &domaindelivery.Task{ID: 9, MessageID: 10, SinkID: 1, Progress: map[string]bool{}}
+
+	first, err := worker.deliver(context.Background(), task)
+	if err != nil || first == nil || first.Success {
+		t.Fatalf("第一次应在第二段失败: result=%+v err=%v", first, err)
+	}
+	if !task.Progress["part:0"] {
+		t.Fatalf("第一段成功后应持久化 checkpoint: %+v", task.Progress)
+	}
+	checkpointTestState.Lock()
+	checkpointTestState.failAt = 0
+	checkpointTestState.Unlock()
+	second, err := worker.deliver(context.Background(), task)
+	if err != nil || second == nil || !second.Success {
+		t.Fatalf("重试应完成剩余分段: result=%+v err=%v", second, err)
+	}
+	checkpointTestState.Lock()
+	defer checkpointTestState.Unlock()
+	firstText := checkpointTestState.texts[0]
+	count := 0
+	for _, text := range checkpointTestState.texts {
+		if text == firstText {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("已成功第一段不应重复发送，实际 %d 次", count)
+	}
+}
+
+func TestWorkerDropsAllMediaWhenCountExceedsSinkLimit(t *testing.T) {
+	chunkTestPayloads.Lock()
+	chunkTestPayloads.items = nil
+	chunkTestPayloads.Unlock()
+
+	worker := NewWorker("test", config.DispatchConfig{}, nil,
+		fakeSinkRepo{sink: &domainsink.Sink{ID: 1, Type: "dispatch_media_limit_test", Enabled: true}},
+		fakeTemplateRepo{}, fakeMessageRepo{msg: &domainmessage.NormalizedMessage{
+			ID: 10, Text: "two images", Media: []domainmessage.Media{
+				{Type: "image", RemoteURL: "https://example.com/1.jpg"},
+				{Type: "image", RemoteURL: "https://example.com/2.jpg"},
+			},
+		}}, tmpl.NewRenderer(), clock.System{}, slog.Default())
+
+	res, err := worker.deliver(context.Background(), &domaindelivery.Task{ID: 10, MessageID: 10, SinkID: 1})
+	if err != nil || res == nil || !res.Success {
+		t.Fatalf("媒体超限后应降级投递成功: result=%+v err=%v", res, err)
+	}
+	chunkTestPayloads.Lock()
+	defer chunkTestPayloads.Unlock()
+	if len(chunkTestPayloads.items) != 1 || len(chunkTestPayloads.items[0].Media) != 0 {
+		t.Fatalf("媒体超限后插件不应收到媒体: %+v", chunkTestPayloads.items)
+	}
+	if chunkTestPayloads.items[0].Format != string(domaintemplate.FormatText) {
+		t.Fatalf("媒体超限后格式 = %q, want text", chunkTestPayloads.items[0].Format)
+	}
+}
+
+func TestWorkerPermanentFailureGoesDeadImmediately(t *testing.T) {
+	worker := NewWorker("test", config.DispatchConfig{}, &recordingTaskRepo{},
+		fakeSinkRepo{}, fakeTemplateRepo{}, fakeMessageRepo{}, tmpl.NewRenderer(), clock.System{}, slog.Default())
+	task := &domaindelivery.Task{ID: 11, MaxAttempts: 5}
+
+	worker.applyRetry(task, pluginsink.PermanentResult(nil, "invalid configuration"))
+	if task.Status != domaindelivery.StatusDead || task.NextRetryAt != nil {
+		t.Fatalf("永久失败应直接进入 dead: %+v", task)
 	}
 }
 

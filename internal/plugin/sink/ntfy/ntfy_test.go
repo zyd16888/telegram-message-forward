@@ -98,6 +98,53 @@ func TestSendLocalAttachment(t *testing.T) {
 	}
 }
 
+func TestSendLocalAttachmentRetrySkipsCompletedText(t *testing.T) {
+	file := t.TempDir() + "/a.txt"
+	if err := os.WriteFile(file, []byte("attachment"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var textCalls, uploadCalls atomic.Int32
+	failUpload := atomic.Bool{}
+	failUpload.Store(true)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			textCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		uploadCalls.Add(1)
+		if failUpload.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	completed := map[string]bool{}
+	opts := pluginsink.Options{Completed: completed, StepPrefix: "part:0", Checkpoint: func(_ context.Context, key string) error {
+		completed[key] = true
+		return nil
+	}}
+	sink := &domainsink.Sink{Type: "ntfy", Config: map[string]any{"topic_url": srv.URL}}
+	payload := pluginsink.Payload{Text: "hello", Media: []domainmessage.Media{{Type: "file", FileName: "a.txt", LocalPath: file}}}
+	first, err := New().Send(context.Background(), sink, payload, opts)
+	if err != nil || first == nil || first.Success || first.FailureKind != pluginsink.FailureTransient {
+		t.Fatalf("第一次附件 500 应临时失败: res=%+v err=%v", first, err)
+	}
+	if !completed["part:0:text"] {
+		t.Fatalf("正文成功应记录 checkpoint: %+v", completed)
+	}
+	failUpload.Store(false)
+	second, err := New().Send(context.Background(), sink, payload, opts)
+	if err != nil || second == nil || !second.Success {
+		t.Fatalf("重试附件应成功: res=%+v err=%v", second, err)
+	}
+	if textCalls.Load() != 1 || uploadCalls.Load() != 2 {
+		t.Fatalf("重试不应重复正文 text=%d upload=%d", textCalls.Load(), uploadCalls.Load())
+	}
+}
+
 func TestSendLargeLocalAttachmentUsesURLInAutoMode(t *testing.T) {
 	file := t.TempDir() + "/large.txt"
 	if err := os.WriteFile(file, []byte("large attachment"), 0o644); err != nil {

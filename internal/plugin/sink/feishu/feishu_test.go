@@ -38,6 +38,29 @@ func TestSendTextSuccess(t *testing.T) {
 	}
 }
 
+func TestSendMarkdownUsesInteractiveCardAndSignature(t *testing.T) {
+	var gotBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(b))
+		io.WriteString(w, `{"code":0,"msg":"ok"}`)
+	}))
+	defer srv.Close()
+
+	s := New()
+	sink := &domainsink.Sink{Type: "feishu_bot", Config: map[string]any{"webhook_url": srv.URL}, Secret: []byte("secret")}
+	res, err := s.Send(context.Background(), sink, pluginsink.Payload{Format: "markdown", Text: "**hello**"}, pluginsink.Options{})
+	if err != nil || !res.Success {
+		t.Fatalf("Markdown 应成功: res=%+v err=%v", res, err)
+	}
+	body, _ := gotBody.Load().(string)
+	for _, want := range []string{`"msg_type":"interactive"`, `"tag":"markdown"`, `"timestamp":`, `"sign":`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("飞书 Markdown/签名请求缺少 %s: %s", want, body)
+		}
+	}
+}
+
 func TestSendMediaFallsBackToText(t *testing.T) {
 	var gotBody atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

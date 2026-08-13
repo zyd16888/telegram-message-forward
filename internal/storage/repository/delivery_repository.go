@@ -115,6 +115,7 @@ func (r *DeliveryRepository) UpdateStatus(ctx context.Context, t *domaindelivery
 		"attempt_count": t.AttemptCount,
 		"next_retry_at": t.NextRetryAt,
 		"last_error":    t.LastError,
+		"progress":      marshalProgress(t.Progress),
 		"updated_at":    time.Now(),
 	}
 	// 终态清理领取锁。
@@ -159,6 +160,7 @@ func (r *DeliveryRepository) Requeue(ctx context.Context, id int64) error {
 			"locked_at":     nil,
 			"locked_by":     "",
 			"last_error":    "",
+			"progress":      datatypes.JSON([]byte(`{}`)),
 			"updated_at":    time.Now(),
 		}).Error
 }
@@ -178,9 +180,18 @@ func (r *DeliveryRepository) RequeueByStatus(ctx context.Context, status domaind
 			"locked_at":     nil,
 			"locked_by":     "",
 			"last_error":    "",
+			"progress":      datatypes.JSON([]byte(`{}`)),
 			"updated_at":    time.Now(),
 		})
 	return res.RowsAffected, res.Error
+}
+
+// UpdateProgress 持久化任务内已完成的投递步骤，供失败重试跳过已成功的外部调用。
+func (r *DeliveryRepository) UpdateProgress(ctx context.Context, id int64, progress map[string]bool) error {
+	return r.db.WithContext(ctx).Model(&model.DeliveryTask{}).Where("id = ?", id).Updates(map[string]any{
+		"progress":   marshalProgress(progress),
+		"updated_at": time.Now(),
+	}).Error
 }
 
 // AddAttempt 追加一次投递尝试记录。
@@ -527,6 +538,7 @@ func toDeliveryModel(t *domaindelivery.Task) (*model.DeliveryTask, error) {
 		MessageSnapshot: snapshot,
 		MessageRevision: t.MessageRevision,
 		TextSuffix:      t.TextSuffix,
+		Progress:        marshalProgress(t.Progress),
 		CreatedAt:       t.CreatedAt,
 		UpdatedAt:       t.UpdatedAt,
 	}, nil
@@ -553,6 +565,12 @@ func toDeliveryDomain(m *model.DeliveryTask) (*domaindelivery.Task, error) {
 	if m.OriginNodeID != nil {
 		originNodeID = *m.OriginNodeID
 	}
+	progress := map[string]bool{}
+	if len(m.Progress) > 0 {
+		if err := json.Unmarshal(m.Progress, &progress); err != nil {
+			return nil, fmt.Errorf("解析 delivery progress 失败: %w", err)
+		}
+	}
 	return &domaindelivery.Task{
 		ID:              m.ID,
 		MessageID:       messageID,
@@ -572,9 +590,21 @@ func toDeliveryDomain(m *model.DeliveryTask) (*domaindelivery.Task, error) {
 		MessageSnapshot: snapshot,
 		MessageRevision: m.MessageRevision,
 		TextSuffix:      m.TextSuffix,
+		Progress:        progress,
 		CreatedAt:       m.CreatedAt,
 		UpdatedAt:       m.UpdatedAt,
 	}, nil
+}
+
+func marshalProgress(progress map[string]bool) datatypes.JSON {
+	if len(progress) == 0 {
+		return datatypes.JSON([]byte(`{}`))
+	}
+	b, err := json.Marshal(progress)
+	if err != nil {
+		return datatypes.JSON([]byte(`{}`))
+	}
+	return datatypes.JSON(b)
 }
 
 func nullablePositive(v int64) *int64 {

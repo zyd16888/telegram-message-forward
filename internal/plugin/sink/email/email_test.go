@@ -118,4 +118,19 @@ func TestValidateConfig(t *testing.T) {
 	if err := s.ValidateConfig(map[string]any{"smtp_addr": "smtp:25", "from": "bot@example.com", "to": []any{"a@example.com"}}); err != nil {
 		t.Fatalf("完整配置不应失败: %v", err)
 	}
+	if err := s.ValidateConfig(map[string]any{"smtp_addr": "smtp:25", "security": "insecure", "from": "bot@example.com", "to": []any{"a@example.com"}}); err == nil {
+		t.Fatal("未知连接安全模式应失败")
+	}
+}
+
+func TestSMTPHost(t *testing.T) {
+	for input, want := range map[string]string{
+		"smtp.example.com:587": "smtp.example.com",
+		"[2001:db8::1]:465":    "2001:db8::1",
+		"smtp.example.com":     "smtp.example.com",
+	} {
+		if got := smtpHost(input); got != want {
+			t.Fatalf("smtpHost(%q) = %q, want %q", input, got, want)
+		}
+	}
 }

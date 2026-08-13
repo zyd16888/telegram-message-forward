@@ -5,15 +5,18 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/smtp"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"telegram-message-forward/internal/domain/formschema"
 	domainmessage "telegram-message-forward/internal/domain/message"
@@ -36,7 +39,7 @@ type Sink struct {
 
 // New 创建邮件 Sink。
 func New() *Sink {
-	return &Sink{send: smtp.SendMail}
+	return &Sink{}
 }
 
 var _ pluginsink.Plugin = (*Sink)(nil)
@@ -50,6 +53,11 @@ func (s *Sink) Descriptor() pluginsink.Descriptor {
 		Description: "通过 SMTP 发送文本、HTML 或附件邮件。",
 		ConfigFields: []formschema.FieldSpec{
 			{Key: "smtp_addr", Label: "SMTP 地址", Type: formschema.FieldText, Required: true, Placeholder: "smtp.example.com:587"},
+			{Key: "security", Label: "连接安全", Type: formschema.FieldSelect, Default: "starttls", Options: []formschema.Option{
+				{Label: "STARTTLS（推荐，通常 587）", Value: "starttls"},
+				{Label: "TLS（通常 465）", Value: "tls"},
+				{Label: "明文（仅可信内网）", Value: "plain"},
+			}},
 			{Key: "username", Label: "用户名", Type: formschema.FieldText, Placeholder: "user@example.com"},
 			{Key: "from", Label: "发件人", Type: formschema.FieldText, Required: true, Placeholder: "bot@example.com"},
 			{Key: "to", Label: "收件人", Type: formschema.FieldStringList, Required: true, Placeholder: "逐行输入收件人"},
@@ -90,6 +98,10 @@ func (s *Sink) ValidateConfig(config map[string]any) error {
 	if smtpAddr, _ := config["smtp_addr"].(string); smtpAddr == "" {
 		return fmt.Errorf("email 缺少 smtp_addr")
 	}
+	security := configString(config, "security")
+	if security != "" && security != "starttls" && security != "tls" && security != "plain" {
+		return fmt.Errorf("email 不支持的连接安全模式 %q", security)
+	}
 	if from, _ := config["from"].(string); from == "" {
 		return fmt.Errorf("email 缺少 from")
 	}
@@ -125,11 +137,82 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 	if username != "" && len(sink.Secret) > 0 {
 		auth = smtp.PlainAuth("", username, string(sink.Secret), smtpHost(addr))
 	}
-	if err := s.send(addr, auth, from, to, msg); err != nil {
+	sender := s.send
+	if sender == nil {
+		sender = func(addr string, auth smtp.Auth, from string, to []string, msg []byte) error {
+			return sendSMTP(ctx, addr, configString(cfg, "security"), auth, from, to, msg)
+		}
+	}
+	if err := sender(addr, auth, from, to, msg); err != nil {
 		return &pluginsink.Result{Success: false, Error: err.Error()}, err
 	}
 	summary, _ := json.Marshal(map[string]any{"recipients": len(to), "attachments": attachCount})
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
+}
+
+func sendSMTP(ctx context.Context, addr, security string, auth smtp.Auth, from string, to []string, msg []byte) error {
+	host := smtpHost(addr)
+	deadline := time.Now().Add(30 * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	dialer := &net.Dialer{Timeout: time.Until(deadline)}
+	var conn net.Conn
+	var err error
+	switch security {
+	case "tls":
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	case "plain":
+		conn, err = dialer.DialContext(ctx, "tcp", addr)
+	default:
+		conn, err = dialer.DialContext(ctx, "tcp", addr)
+	}
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return err
+	}
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if security != "tls" && security != "plain" {
+		ok, _ := client.Extension("STARTTLS")
+		if !ok {
+			return fmt.Errorf("SMTP 服务不支持 STARTTLS；如为可信内网服务，请显式选择明文模式")
+		}
+		if err := client.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
+			return err
+		}
+	}
+	if auth != nil {
+		if err := client.Auth(auth); err != nil {
+			return err
+		}
+	}
+	if err := client.Mail(from); err != nil {
+		return err
+	}
+	for _, recipient := range to {
+		if err := client.Rcpt(recipient); err != nil {
+			return err
+		}
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := writer.Write(msg); err != nil {
+		writer.Close()
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	return client.Quit()
 }
 
 func buildMessage(from string, to []string, subject string, payload pluginsink.Payload) ([]byte, int, error) {
@@ -282,7 +365,15 @@ func configStringSlice(config map[string]any, key string) []string {
 	return nil
 }
 
+func configString(config map[string]any, key string) string {
+	v, _ := config[key].(string)
+	return strings.TrimSpace(v)
+}
+
 func smtpHost(addr string) string {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
 	if i := strings.LastIndex(addr, ":"); i > 0 {
 		return addr[:i]
 	}

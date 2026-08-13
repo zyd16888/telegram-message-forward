@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,9 +31,16 @@ type cachedToken struct {
 	expires time.Time
 }
 
+type tokenCall struct {
+	done  chan struct{}
+	token string
+	err   error
+}
+
 var (
 	tokenMu    sync.Mutex
 	tokenCache = map[string]*cachedToken{}
+	tokenCalls = map[string]*tokenCall{}
 )
 
 // AppSink 是企业微信应用消息 Sink（需 corpid/secret/agentid + access_token 缓存刷新）。
@@ -110,6 +119,7 @@ func (s *AppSink) Capabilities() domainsink.Capabilities {
 		MaxTextLength:    2048,
 		MaxTextBytes:     map[string]int{"text": 2048, "markdown": 2048},
 		MaxFileSizeMB:    20,
+		MaxMediaItems:    1,
 		Media: []domainsink.MediaCapability{
 			{Type: "image", Supported: true, MaxSizeMB: 10, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为 [图片消息] + caption + 原始链接"},
 			{Type: "file", Supported: true, MaxSizeMB: 20, SupportsPublicURL: false, RequiresUpload: true, SupportsBinary: true, DeliveryMode: "upload_media", Fallback: "降级为文件名、大小和原始链接摘要"},
@@ -131,6 +141,13 @@ func (s *AppSink) ValidateConfig(config map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func (s *AppSink) ValidateSink(sink *domainsink.Sink) error {
+	if strings.TrimSpace(string(sink.Secret)) == "" {
+		return fmt.Errorf("wecom_app 缺少 CorpSecret")
+	}
+	return s.ValidateConfig(sink.Config)
 }
 
 func (s *AppSink) corpID(sink *domainsink.Sink) string {
@@ -171,12 +188,40 @@ func (s *AppSink) getToken(ctx context.Context, corpid, agentid, secret string, 
 			return tok, nil
 		}
 	}
+	if call, ok := tokenCalls[cacheKey]; ok {
+		tokenMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-call.done:
+			return call.token, call.err
+		}
+	}
+	call := &tokenCall{done: make(chan struct{})}
+	tokenCalls[cacheKey] = call
 	tokenMu.Unlock()
+
+	defer func() {
+		tokenMu.Lock()
+		delete(tokenCalls, cacheKey)
+		close(call.done)
+		tokenMu.Unlock()
+	}()
 
 	url := withDebugParam(fmt.Sprintf("%s/gettoken?corpid=%s&corpsecret=%s", apiBase, corpid, secret), debug)
 	resp, err := s.client.Get(ctx, url, nil)
 	if err != nil {
+		call.err = err
 		return "", err
+	}
+	if !resp.IsSuccess() {
+		result := httpFailResult(resp, fmt.Sprintf("企业微信 gettoken 返回 HTTP %d", resp.StatusCode))
+		if result.FailureKind == pluginsink.FailurePermanent {
+			call.err = pluginsink.PermanentError("%s", result.Error)
+		} else {
+			call.err = pluginsink.TransientError(errors.New(result.Error), result.RetryAfter)
+		}
+		return "", call.err
 	}
 	var tr struct {
 		apiResp
@@ -184,10 +229,16 @@ func (s *AppSink) getToken(ctx context.Context, corpid, agentid, secret string, 
 		ExpiresIn   int    `json:"expires_in"`
 	}
 	if err := json.Unmarshal(resp.Body, &tr); err != nil {
-		return "", fmt.Errorf("解析 access_token 响应失败: %w", err)
+		call.err = fmt.Errorf("解析 access_token 响应失败: %w", err)
+		return "", call.err
 	}
 	if tr.ErrCode != 0 || tr.AccessToken == "" {
-		return "", fmt.Errorf("获取 access_token 失败 errcode=%d errmsg=%s", tr.ErrCode, tr.ErrMsg)
+		if tr.ErrCode == -1 || tr.ErrCode == 45009 || tr.ErrCode == 45011 {
+			call.err = pluginsink.TransientError(fmt.Errorf("获取 access_token 失败 errcode=%d errmsg=%s", tr.ErrCode, tr.ErrMsg), 0)
+		} else {
+			call.err = pluginsink.PermanentError("获取 access_token 失败 errcode=%d errmsg=%s", tr.ErrCode, tr.ErrMsg)
+		}
+		return "", call.err
 	}
 
 	ttl := time.Duration(tr.ExpiresIn) * time.Second
@@ -196,12 +247,13 @@ func (s *AppSink) getToken(ctx context.Context, corpid, agentid, secret string, 
 	}
 	tokenMu.Lock()
 	tokenCache[cacheKey] = &cachedToken{token: tr.AccessToken, expires: time.Now().Add(ttl - tokenExpirySafety)}
+	call.token = tr.AccessToken
 	tokenMu.Unlock()
 	return tr.AccessToken, nil
 }
 
 // Send 通过应用消息接口发送。access_token 失效时刷新并重试一次。
-func (s *AppSink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, _ pluginsink.Options) (*pluginsink.Result, error) {
+func (s *AppSink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsink.Payload, opts pluginsink.Options) (*pluginsink.Result, error) {
 	corpid := s.corpID(sink)
 	agentid := s.agentID(sink)
 	secret := string(sink.Secret)
@@ -214,13 +266,13 @@ func (s *AppSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 		return nil, err
 	}
 
-	result, tokenExpired, err := s.trySend(ctx, sink, corpid, agentid, secret, payload, false)
-	if err != nil {
+	result, tokenExpired, err := s.trySend(ctx, sink, corpid, agentid, secret, payload, opts, false)
+	if err != nil && !tokenExpired {
 		return failResult(nil, err.Error()), err
 	}
 	if tokenExpired {
 		// 强制刷新 token 后重试一次。
-		result, _, err = s.trySend(ctx, sink, corpid, agentid, secret, payload, true)
+		result, _, err = s.trySend(ctx, sink, corpid, agentid, secret, payload, opts, true)
 		if err != nil {
 			return failResult(nil, err.Error()), err
 		}
@@ -229,7 +281,7 @@ func (s *AppSink) Send(ctx context.Context, sink *domainsink.Sink, payload plugi
 }
 
 // trySend 发送一次；返回结果、是否因 token 失效需要重试、以及网络错误。
-func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, agentid, secret string, payload pluginsink.Payload, forceRefresh bool) (*pluginsink.Result, bool, error) {
+func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, agentid, secret string, payload pluginsink.Payload, opts pluginsink.Options, forceRefresh bool) (*pluginsink.Result, bool, error) {
 	debug := debugEnabled(sink.Config)
 	token, err := s.getToken(ctx, corpid, agentid, secret, debug, forceRefresh)
 	if err != nil {
@@ -237,26 +289,38 @@ func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, ag
 	}
 
 	if img, ok := firstLocalImage(payload, appTemporaryImageMaxBytes); ok {
-		mediaID, summary, err := s.uploadMedia(ctx, token, "image", img.LocalPath, img.FileName, debug)
+		if opts.IsCompleted("media") {
+			return s.sendAppTextAfterMedia(ctx, sink, token, agentid, payload)
+		}
+		mediaID, summary, expired, err := s.uploadMedia(ctx, token, "image", img.LocalPath, img.FileName, debug)
 		if err != nil {
-			return failResult(summary, err.Error()), false, err
+			return failResult(summary, err.Error()), expired, err
 		}
 		res, expired, err := s.sendAppImage(ctx, sink, token, agentid, mediaID)
 		if err != nil || expired || res == nil || !res.Success {
 			return res, expired, err
 		}
-		return s.sendAppTextAfterMedia(ctx, sink, token, agentid, payload, res)
+		if err := opts.MarkCompleted(ctx, "media"); err != nil {
+			return nil, false, err
+		}
+		return s.sendAppTextAfterMedia(ctx, sink, token, agentid, payload)
 	}
 	if file, ok := firstLocalFile(payload); ok {
-		mediaID, summary, err := s.uploadMedia(ctx, token, "file", file.LocalPath, file.FileName, debug)
+		if opts.IsCompleted("media") {
+			return s.sendAppTextAfterMedia(ctx, sink, token, agentid, payload)
+		}
+		mediaID, summary, expired, err := s.uploadMedia(ctx, token, "file", file.LocalPath, file.FileName, debug)
 		if err != nil {
-			return failResult(summary, err.Error()), false, err
+			return failResult(summary, err.Error()), expired, err
 		}
 		res, expired, err := s.sendAppFile(ctx, sink, token, agentid, mediaID)
 		if err != nil || expired || res == nil || !res.Success {
 			return res, expired, err
 		}
-		return s.sendAppTextAfterMedia(ctx, sink, token, agentid, payload, res)
+		if err := opts.MarkCompleted(ctx, "media"); err != nil {
+			return nil, false, err
+		}
+		return s.sendAppTextAfterMedia(ctx, sink, token, agentid, payload)
 	}
 	if len(payload.Media) > 0 {
 		payload.Format = "text"
@@ -265,9 +329,9 @@ func (s *AppSink) trySend(ctx context.Context, sink *domainsink.Sink, corpid, ag
 	return s.sendAppText(ctx, sink, token, agentid, payload)
 }
 
-func (s *AppSink) sendAppTextAfterMedia(ctx context.Context, sink *domainsink.Sink, token, agentid string, payload pluginsink.Payload, mediaResult *pluginsink.Result) (*pluginsink.Result, bool, error) {
+func (s *AppSink) sendAppTextAfterMedia(ctx context.Context, sink *domainsink.Sink, token, agentid string, payload pluginsink.Payload) (*pluginsink.Result, bool, error) {
 	if payload.Text == "" {
-		return mediaResult, false, nil
+		return &pluginsink.Result{Success: true}, false, nil
 	}
 	return s.sendAppText(ctx, sink, token, agentid, payload)
 }
@@ -290,6 +354,9 @@ func (s *AppSink) sendAppText(ctx context.Context, sink *domainsink.Sink, token,
 	if err != nil {
 		return nil, false, err
 	}
+	if !resp.IsSuccess() {
+		return httpFailResult(resp, fmt.Sprintf("企业微信返回 HTTP %d", resp.StatusCode)), false, nil
+	}
 	summary, ok, expired, errMsg := parseResp(resp.Body)
 	if ok {
 		return &pluginsink.Result{Success: true, ResponseSummary: summary}, false, nil
@@ -297,27 +364,38 @@ func (s *AppSink) sendAppText(ctx context.Context, sink *domainsink.Sink, token,
 	if expired {
 		return failResult(summary, errMsg), true, nil
 	}
-	return failResult(summary, errMsg), false, nil
+	return resultForAPIError(resp.Body, summary, errMsg), false, nil
 }
 
-func (s *AppSink) uploadMedia(ctx context.Context, token, mediaType, path, fileName string, debug bool) (string, []byte, error) {
+func (s *AppSink) uploadMedia(ctx context.Context, token, mediaType, path, fileName string, debug bool) (string, []byte, bool, error) {
 	url := withDebugParam(fmt.Sprintf("%s/media/upload?access_token=%s&type=%s", apiBase, token, mediaType), debug)
 	resp, err := s.client.PostMultipartFileNamed(ctx, url, "media", path, fileName, nil)
 	if err != nil {
-		return "", nil, err
+		return "", nil, false, err
+	}
+	if !resp.IsSuccess() {
+		result := httpFailResult(resp, fmt.Sprintf("企业微信上传返回 HTTP %d", resp.StatusCode))
+		if result.FailureKind == pluginsink.FailurePermanent {
+			return "", result.ResponseSummary, false, pluginsink.PermanentError("%s", result.Error)
+		}
+		return "", result.ResponseSummary, false, pluginsink.TransientError(errors.New(result.Error), result.RetryAfter)
 	}
 	var r struct {
 		apiResp
 		MediaID string `json:"media_id"`
 	}
 	if err := json.Unmarshal(resp.Body, &r); err != nil {
-		return "", truncate(resp.Body, 512), fmt.Errorf("解析上传响应失败: %w", err)
+		return "", truncate(resp.Body, 512), false, fmt.Errorf("解析上传响应失败: %w", err)
 	}
 	summary, _ := json.Marshal(map[string]any{"errcode": r.ErrCode, "errmsg": r.ErrMsg, "has_media_id": r.MediaID != ""})
 	if r.ErrCode != 0 || r.MediaID == "" {
-		return "", summary, fmt.Errorf("上传临时素材失败 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg)
+		expired := r.ErrCode == 42001 || r.ErrCode == 40014
+		if expired || r.ErrCode == -1 || r.ErrCode == 45009 || r.ErrCode == 45011 {
+			return "", summary, expired, pluginsink.TransientError(fmt.Errorf("上传临时素材失败 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg), 0)
+		}
+		return "", summary, false, pluginsink.PermanentError("上传临时素材失败 errcode=%d errmsg=%s", r.ErrCode, r.ErrMsg)
 	}
-	return r.MediaID, summary, nil
+	return r.MediaID, summary, false, nil
 }
 
 func (s *AppSink) sendAppFile(ctx context.Context, sink *domainsink.Sink, token, agentid, mediaID string) (*pluginsink.Result, bool, error) {
@@ -332,11 +410,17 @@ func (s *AppSink) sendAppFile(ctx context.Context, sink *domainsink.Sink, token,
 	if err != nil {
 		return nil, false, err
 	}
+	if !resp.IsSuccess() {
+		return httpFailResult(resp, fmt.Sprintf("企业微信返回 HTTP %d", resp.StatusCode)), false, nil
+	}
 	summary, ok, expired, errMsg := parseResp(resp.Body)
 	if ok {
 		return &pluginsink.Result{Success: true, ResponseSummary: summary}, false, nil
 	}
-	return failResult(summary, errMsg), expired, nil
+	if expired {
+		return failResult(summary, errMsg), true, nil
+	}
+	return resultForAPIError(resp.Body, summary, errMsg), false, nil
 }
 
 func (s *AppSink) sendAppImage(ctx context.Context, sink *domainsink.Sink, token, agentid, mediaID string) (*pluginsink.Result, bool, error) {
@@ -351,9 +435,15 @@ func (s *AppSink) sendAppImage(ctx context.Context, sink *domainsink.Sink, token
 	if err != nil {
 		return nil, false, err
 	}
+	if !resp.IsSuccess() {
+		return httpFailResult(resp, fmt.Sprintf("企业微信返回 HTTP %d", resp.StatusCode)), false, nil
+	}
 	summary, ok, expired, errMsg := parseResp(resp.Body)
 	if ok {
 		return &pluginsink.Result{Success: true, ResponseSummary: summary}, false, nil
 	}
-	return failResult(summary, errMsg), expired, nil
+	if expired {
+		return failResult(summary, errMsg), true, nil
+	}
+	return resultForAPIError(resp.Body, summary, errMsg), false, nil
 }

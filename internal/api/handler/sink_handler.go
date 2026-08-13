@@ -68,6 +68,7 @@ func (h *SinkHandler) Test(c *gin.Context) {
 		Type:   req.Type,
 		Config: req.Config,
 		Secret: req.Secret,
+		Media:  testMediaInput(req.TestMedia),
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -90,12 +91,20 @@ func (h *SinkHandler) TestExisting(c *gin.Context) {
 		ID:     id,
 		Config: req.Config,
 		Secret: req.Secret,
+		Media:  testMediaInput(req.TestMedia),
 	})
 	if err != nil {
 		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": newSinkTestDTO(result)})
+}
+
+func testMediaInput(media *dto.SinkTestMedia) *appsink.TestMediaInput {
+	if media == nil {
+		return nil
+	}
+	return &appsink.TestMediaInput{Type: media.Type, URL: media.URL, FileName: media.FileName}
 }
 
 // Create POST /sinks

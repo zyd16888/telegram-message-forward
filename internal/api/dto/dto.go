@@ -258,9 +258,16 @@ type SinkUpdateRequest struct {
 
 // SinkTestRequest 是渠道连通性测试请求。
 type SinkTestRequest struct {
-	Type   string         `json:"type,omitempty"`
-	Config map[string]any `json:"config"`
-	Secret *string        `json:"secret,omitempty"`
+	Type      string         `json:"type,omitempty"`
+	Config    map[string]any `json:"config"`
+	Secret    *string        `json:"secret,omitempty"`
+	TestMedia *SinkTestMedia `json:"test_media,omitempty"`
+}
+
+type SinkTestMedia struct {
+	Type     string `json:"type"`
+	URL      string `json:"url"`
+	FileName string `json:"file_name,omitempty"`
 }
 
 // SinkTestDTO 是渠道连通性测试响应。

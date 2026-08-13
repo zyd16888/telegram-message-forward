@@ -55,7 +55,14 @@ func (r *SinkRepository) GetByID(ctx context.Context, id int64) (*domainsink.Sin
 	if err := r.db.WithContext(ctx).First(&m, id).Error; err != nil {
 		return nil, err
 	}
-	return r.toDomain(&m)
+	s, err := r.toDomain(&m)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.migrateLegacyConfig(ctx, &m, s.Config); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // List 返回全部渠道。
@@ -70,6 +77,9 @@ func (r *SinkRepository) List(ctx context.Context) ([]*domainsink.Sink, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := r.migrateLegacyConfig(ctx, &ms[i], s.Config); err != nil {
+			return nil, err
+		}
 		out = append(out, s)
 	}
 	return out, nil
@@ -77,7 +87,26 @@ func (r *SinkRepository) List(ctx context.Context) ([]*domainsink.Sink, error) {
 
 // Delete 删除渠道。
 func (r *SinkRepository) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&model.Sink{}, id).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		checks := []struct {
+			label string
+			query *gorm.DB
+		}{
+			{label: "Flow", query: tx.Model(&model.FlowNode{}).Where("type = ? AND ref_id = ?", "target", id)},
+			{label: "历史投递", query: tx.Model(&model.DeliveryTask{}).Where("sink_id = ?", id)},
+			{label: "AI 整理", query: tx.Model(&model.AIDigestProfile{}).Where("target_sink_ids @> ?::jsonb", fmt.Sprintf("[%d]", id))},
+		}
+		for _, check := range checks {
+			var count int64
+			if err := check.query.Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return fmt.Errorf("%w：%s中仍有 %d 处引用，请先禁用渠道或移除引用", domainsink.ErrInUse, check.label, count)
+			}
+		}
+		return tx.Delete(&model.Sink{}, id).Error
+	})
 }
 
 // UpdateTestResult 更新渠道最近一次连通性测试结果。
@@ -98,6 +127,10 @@ func (r *SinkRepository) toModel(s *domainsink.Sink) (*model.Sink, error) {
 	if err != nil {
 		return nil, fmt.Errorf("序列化 sink config 失败: %w", err)
 	}
+	cfgEnc, err := r.cipher.Encrypt(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("加密 sink config 失败: %w", err)
+	}
 	secretEnc, err := r.cipher.Encrypt(s.Secret)
 	if err != nil {
 		return nil, fmt.Errorf("加密 sink secret 失败: %w", err)
@@ -111,7 +144,8 @@ func (r *SinkRepository) toModel(s *domainsink.Sink) (*model.Sink, error) {
 		Type:            s.Type,
 		Name:            s.Name,
 		Enabled:         s.Enabled,
-		Config:          cfg,
+		Config:          datatypes.JSON([]byte(`{}`)),
+		ConfigEncrypted: cfgEnc,
 		SecretEncrypted: secretEnc,
 		Capabilities:    datatypes.JSON(caps),
 		LastTestAt:      s.Observability.LastTestAt,
@@ -123,7 +157,15 @@ func (r *SinkRepository) toModel(s *domainsink.Sink) (*model.Sink, error) {
 }
 
 func (r *SinkRepository) toDomain(m *model.Sink) (*domainsink.Sink, error) {
-	cfg, err := unmarshalJSONMap(m.Config)
+	cfgJSON := []byte(m.Config)
+	if len(m.ConfigEncrypted) > 0 {
+		var err error
+		cfgJSON, err = r.cipher.Decrypt(m.ConfigEncrypted)
+		if err != nil {
+			return nil, fmt.Errorf("解密 sink config 失败: %w", err)
+		}
+	}
+	cfg, err := unmarshalJSONMap(cfgJSON)
 	if err != nil {
 		return nil, fmt.Errorf("解析 sink config 失败: %w", err)
 	}
@@ -153,4 +195,22 @@ func (r *SinkRepository) toDomain(m *model.Sink) (*domainsink.Sink, error) {
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}, nil
+}
+
+func (r *SinkRepository) migrateLegacyConfig(ctx context.Context, m *model.Sink, config map[string]any) error {
+	if len(m.ConfigEncrypted) > 0 {
+		return nil
+	}
+	cfg, err := marshalJSONMap(config)
+	if err != nil {
+		return err
+	}
+	encrypted, err := r.cipher.Encrypt(cfg)
+	if err != nil {
+		return fmt.Errorf("迁移 sink config 加密失败: %w", err)
+	}
+	return r.db.WithContext(ctx).Model(&model.Sink{}).Where("id = ? AND config_encrypted IS NULL", m.ID).Updates(map[string]any{
+		"config":           datatypes.JSON([]byte(`{}`)),
+		"config_encrypted": encrypted,
+	}).Error
 }

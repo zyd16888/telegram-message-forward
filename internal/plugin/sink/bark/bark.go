@@ -51,6 +51,7 @@ func (s *Sink) Capabilities() domainsink.Capabilities {
 	return domainsink.Capabilities{
 		SupportsText:  true,
 		SupportsImage: true,
+		MaxMediaItems: 1,
 		Media: []domainsink.MediaCapability{
 			{Type: "image", Supported: true, SupportsPublicURL: true, RequiresUpload: false, SupportsBinary: false, DeliveryMode: "image_url", Fallback: "本地图片无法直传时降级为 [图片消息] + caption + 原始链接"},
 			{Type: "file", Supported: false, Fallback: "降级为文件名、大小和链接摘要"},
@@ -104,7 +105,7 @@ func (s *Sink) Send(ctx context.Context, sink *domainsink.Sink, payload pluginsi
 	}
 	summary, _ := json.Marshal(map[string]any{"code": r.Code, "message": r.Message})
 	if !resp.IsSuccess() || r.Code != 200 {
-		return &pluginsink.Result{Success: false, ResponseSummary: summary, Error: fmt.Sprintf("Bark 返回错误 code=%d message=%s", r.Code, r.Message)}, nil
+		return pluginsink.HTTPFailure(summary, resp.StatusCode, resp.Header, fmt.Sprintf("Bark 返回错误 code=%d message=%s", r.Code, r.Message)), nil
 	}
 	return &pluginsink.Result{Success: true, ResponseSummary: summary}, nil
 }
