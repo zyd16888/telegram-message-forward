@@ -64,6 +64,7 @@ export interface Capabilities {
   max_text_length?: number
   max_text_bytes?: Record<string, number>
   max_file_size_mb?: number
+  max_media_items?: number
   media?: MediaCapability[]
   notes?: string[]
 }

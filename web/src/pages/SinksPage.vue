@@ -138,7 +138,7 @@ function createRuleForSink(sinkId: number) {
 function confirmDelete(row: Sink) {
   dialog.warning({
     title: '删除渠道',
-    content: `确定删除渠道「${row.name}」？`,
+    content: `确定删除渠道「${row.name}」？存在 Flow、AI 整理或历史投递引用时，系统会阻止删除并保留审计记录。`,
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {

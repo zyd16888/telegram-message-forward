@@ -32,6 +32,12 @@ const testing = reactive({
   message: '',
   summary: '',
 })
+const testMedia = reactive({
+  enabled: false,
+  type: '',
+  url: '',
+  fileName: '',
+})
 
 const editing = computed(() => Boolean(props.sink))
 const descriptor = computed(() => props.descriptors.find((item) => item.type === form.type) ?? props.descriptors[0])
@@ -39,6 +45,11 @@ const typeOptions = computed(() => props.descriptors.map((item) => ({ label: ite
 const capabilities = computed(() => descriptor.value?.capabilities)
 const formatCapabilities = computed(() => formatItems(capabilities.value))
 const mediaCapabilities = computed(() => capabilities.value?.media ?? [])
+const publicMediaOptions = computed(() =>
+  mediaCapabilities.value
+    .filter((item) => item.supported && item.supports_public_url)
+    .map((item) => ({ label: mediaTypeLabel(item.type), value: item.type })),
+)
 
 watch(
   () => [show.value, props.sink, props.descriptors] as const,
@@ -59,6 +70,7 @@ watch(
 )
 
 function resetForm() {
+  resetTestMedia()
   if (props.sink) {
     form.type = props.sink.type
     form.name = props.sink.name
@@ -74,6 +86,13 @@ function resetForm() {
   form.config = defaultsFor(first)
   form.secret = ''
   resetTestResult()
+}
+
+function resetTestMedia() {
+  testMedia.enabled = false
+  testMedia.type = publicMediaOptions.value[0]?.value ?? ''
+  testMedia.url = ''
+  testMedia.fileName = ''
 }
 
 function defaultsFor(desc?: SinkDescriptor): Record<string, unknown> {
@@ -137,17 +156,32 @@ function resetTestResult() {
   testing.summary = ''
 }
 
+watch(publicMediaOptions, (options) => {
+  if (!options.some((item) => item.value === testMedia.type)) testMedia.type = options[0]?.value ?? ''
+}, { immediate: true })
+
 function testPayload(): Record<string, unknown> {
   const body: Record<string, unknown> = {
     type: form.type,
     config: form.config,
   }
   if (form.secret) body.secret = form.secret
+  if (testMedia.enabled && publicMediaOptions.value.length && testMedia.type && testMedia.url.trim()) {
+    body.test_media = {
+      type: testMedia.type,
+      url: testMedia.url.trim(),
+      file_name: testMedia.fileName.trim() || undefined,
+    }
+  }
   return body
 }
 
 async function testConfig() {
   if (!validate()) return
+  if (testMedia.enabled && publicMediaOptions.value.length && (!testMedia.type || !/^https?:\/\//i.test(testMedia.url.trim()))) {
+    message.warning('请填写有效的 http/https 测试媒体 URL')
+    return
+  }
   testing.loading = true
   testing.success = null
   testing.message = ''
@@ -245,6 +279,10 @@ async function submit() {
               <span class="cap-label">文本上限</span>
               <NText>{{ capabilities.max_text_length }} 字符/字节，按渠道官方口径执行</NText>
             </div>
+            <div v-if="capabilities.max_media_items" class="cap-row">
+              <span class="cap-label">单条媒体</span>
+              <NText>最多 {{ capabilities.max_media_items }} 个，超出时整组转为文本摘要</NText>
+            </div>
             <div v-if="mediaCapabilities.length" class="cap-row cap-row-media">
               <span class="cap-label">媒体</span>
               <div class="media-caps">
@@ -269,6 +307,28 @@ async function submit() {
               :placeholder="editing ? '留空则保留原密钥' : descriptor.secret_field.placeholder"
             />
           </NFormItem>
+          <NFormItem label="测试内容">
+            <NSwitch v-model:value="testMedia.enabled">
+              <template #checked>文本 + 媒体 URL</template>
+              <template #unchecked>纯文本</template>
+            </NSwitch>
+          </NFormItem>
+          <template v-if="testMedia.enabled">
+            <NAlert v-if="!publicMediaOptions.length" type="warning" :show-icon="false" class="sink-desc">
+              该渠道媒体需要本地二进制上传，当前配置测试只能验证文本；请通过真实 Flow 验证媒体链路。
+            </NAlert>
+            <template v-else>
+              <NFormItem label="媒体类型" required>
+                <NSelect v-model:value="testMedia.type" :options="publicMediaOptions" />
+              </NFormItem>
+              <NFormItem label="公开媒体 URL" required>
+                <NInput v-model:value="testMedia.url" placeholder="https://example.com/test.jpg" />
+              </NFormItem>
+              <NFormItem label="文件名">
+                <NInput v-model:value="testMedia.fileName" placeholder="可选，例如 test.jpg" />
+              </NFormItem>
+            </template>
+          </template>
         </section>
 
         <NAlert
@@ -286,7 +346,7 @@ async function submit() {
     </div>
     <template #footer>
       <div class="modal-footer">
-        <NText depth="3" class="test-note">测试配置当前仅发送文本测试消息。</NText>
+        <NText depth="3" class="test-note">测试会向目标渠道发送真实消息。</NText>
         <NSpace justify="end">
           <NButton :loading="testing.loading" @click="testConfig">测试配置</NButton>
           <NButton @click="show = false">取消</NButton>
