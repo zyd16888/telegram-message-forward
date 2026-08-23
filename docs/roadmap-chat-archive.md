@@ -34,19 +34,21 @@
 
 现有 `internal/plugin/source/telegram/history.go` 的三个缺陷必须先修，导出层与之共用分页代码。
 
-- [ ] **F1 分页缺失导致静默丢消息**
+- [x] **F1 分页缺失导致静默丢消息**
   - 现状：`history.go:185` 只发一次 `MessagesGetHistory`，`OffsetID` 恒为 0，`Limit` 硬顶 100（`maxHistoryLimit`）。`MinID` 在 MTProto 里只是过滤下界，服务端仍从最新往回返回。
   - 后果：断线超过 100 条时只补最新 100 条，而 `internal/app/ingest/service.go:84` 把 `last_message_id` 推进到本批最大值 → 中间那段永久跳过，日志却打「历史补拉完成」。
   - 修法：抽出共用的分页迭代器（循环 `OffsetID` = 上批最小 id，直到返回空 / 越过 `MinID` / 撞硬顶），补漏路径改为按游标真正翻完。
   - 验收：构造 >100 条断档的场景，追平后无缺口；`last_message_id` 只在确实连续覆盖后推进。
 
-- [ ] **F2 手动回捞污染游标**
+- [x] **F2 手动回捞污染游标**
   - 现状：`internal/app/source/history.go:43` 的 `minID` 写死 `0`（语义为「拉最新 N 条」），但 ingest 无条件推进游标。
   - 后果：游标落后很多的源，点一次「回捞最近 50 条」就把游标推到最新，之后再也补不回中间那段。
-  - 修法（二选一，实施前定）：回捞走 `minID = last_message_id` 的连续区间；或回捞路径不推进游标。
+  - 修法（已选 B）：回捞路径不推进游标。保持「拉最新 N 条」的 UI 语义不变，
+    重复拉取的代价由 `messages` 的 `(source_id, external_message_id)` 唯一约束吸收。
+    实现为 `NormalizedMessage.SkipCursorAdvance`，由 ingest 判定。
   - 验收：预览无副作用；确认执行后不产生新的不可恢复缺口。
 
-- [ ] **F3 补拉路径丢失发送者名字**
+- [x] **F3 补拉路径丢失发送者名字**
   - 现状：`history.go:122` / `history.go:271` 传 `tg.Entities{}`，`fillSender` 拿不到 users/chats，`sender_name` 恒为空；而 `MessagesGetHistory` 响应本就带 `Users`/`Chats`，被 `unpackHistoryMessages` 丢弃。
   - 修法：`unpackHistoryMessages` 一并返回 users/chats，构造 `tg.Entities` 后再 `Normalize`。
   - 验收：补拉消息与实时消息的 `sender_name` 一致。
@@ -210,9 +212,9 @@ cd web && npm run build
 
 | ID | 状态 | 备注 |
 |----|------|------|
-| F1 | [ ] | 历史拉取分页 |
-| F2 | [ ] | 回捞游标语义 |
-| F3 | [ ] | 补拉 entities |
+| F1 | [x] | 正向/反向分页迭代器，服务消息计入游标 |
+| F2 | [x] | B 方案：回捞不推进游标 |
+| F3 | [x] | 响应 users/chats 装配为 tg.Entities |
 | 4  | [ ] | 数据模型 |
 | 5  | [ ] | 拉取层 |
 | 6  | [ ] | 任务编排 |

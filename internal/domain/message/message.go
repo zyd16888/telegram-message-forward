@@ -64,6 +64,10 @@ type NormalizedMessage struct {
 	EditedAt          *time.Time
 	EventKind         EventKind `json:"-"`
 	EditTextSuffix    string    `json:"-"`
+	// SkipCursorAdvance 为 true 时 ingest 不推进 source 的 last_message_id。
+	// 手动回捞语义是「补投递最近 N 条」而非「补齐断档」，推进游标会把中间未拉取的
+	// 区间永久跳过，使自动追平再也补不回来。
+	SkipCursorAdvance bool `json:"-"`
 }
 
 // EditResult 是一次编辑落库的结果。Found=false 表示原消息未被本服务采集。

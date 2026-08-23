@@ -80,7 +80,9 @@ func (s *Service) Ingest(ctx context.Context, msg *domainmessage.NormalizedMessa
 		return err
 	}
 	// 游标推进独立于是否命中 Flow：只要成功收到并落库就前进，避免重复补拉。
-	if s.cursors != nil && msg.ExternalMessageID > 0 {
+	// SkipCursorAdvance 的手动回捞路径除外：它拉的是「最近 N 条」而非连续区间，
+	// 推进游标会让中间未覆盖的部分被自动追平永久跳过。
+	if s.cursors != nil && msg.ExternalMessageID > 0 && !msg.SkipCursorAdvance {
 		if err := s.cursors.AdvanceLastMessageID(ctx, msg.SourceID, msg.ExternalMessageID); err != nil {
 			s.log.Warn("推进 last_message_id 失败", "source_id", msg.SourceID, "external_id", msg.ExternalMessageID, "err", err)
 		}
