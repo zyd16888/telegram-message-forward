@@ -71,7 +71,7 @@ chat_archive_messages    -- 归档消息（比 messages 表宽）
   id, archive_id → ON DELETE CASCADE
   message_id, grouped_id
   reply_to_message_id      -- 回复链，分析必需
-  out boolean              -- 方向
+  outgoing boolean         -- 方向（out 是 PG 关键字，改名规避）
   sender_peer_type, sender_id, sender_name, sender_username
   message_type, text
   entities jsonb           -- 富文本 offset（引用/链接/mention）
@@ -95,9 +95,9 @@ chat_export_jobs         -- 一次拉取/渲染任务
 采用 `pg_trgm` GIN 索引 + 继续用 ILIKE，支持中文子串搜索且不需要分词器。
 迁移需 `CREATE EXTENSION IF NOT EXISTS pg_trgm`（Supabase 支持）。
 
-- [ ] 4.1 编写 migration（含 down）
-- [ ] 4.2 `internal/domain/chatarchive` 领域模型与仓储接口
-- [ ] 4.3 `internal/storage/model` + `internal/storage/repository` 实现（幂等 upsert by `(archive_id, message_id)`）
+- [x] 4.1 编写 migration（含 down）
+- [x] 4.2 `internal/domain/chatarchive` 领域模型与仓储接口
+- [x] 4.3 `internal/storage/model` + `internal/storage/repository` 实现（幂等 upsert by `(archive_id, message_id)`）
 
 **建议 commit**：`feat: 新增聊天归档数据模型与仓储`
 
@@ -215,7 +215,7 @@ cd web && npm run build
 | F1 | [x] | 正向/反向分页迭代器，服务消息计入游标 |
 | F2 | [x] | B 方案：回捞不推进游标 |
 | F3 | [x] | 响应 users/chats 装配为 tg.Entities |
-| 4  | [ ] | 数据模型 |
+| 4  | [x] | migration 00032；SQL 未在真实 PG 上执行验证 |
 | 5  | [ ] | 拉取层 |
 | 6  | [ ] | 任务编排 |
 | 7  | [ ] | 渲染与下载 |

@@ -410,3 +410,72 @@ type Setting struct {
 }
 
 func (Setting) TableName() string { return "settings" }
+
+// ChatArchive 对应 chat_archives 表。
+type ChatArchive struct {
+	ID           int64 `gorm:"primaryKey"`
+	AccountID    int64
+	PeerType     string
+	PeerID       int64
+	PeerName     string
+	PeerUsername string
+	MinMessageID int64
+	MaxMessageID int64
+	MessageCount int64
+	MediaCount   int64
+	LastSyncedAt *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+func (ChatArchive) TableName() string { return "chat_archives" }
+
+// ChatArchiveMessage 对应 chat_archive_messages 表。
+type ChatArchiveMessage struct {
+	ID               int64 `gorm:"primaryKey"`
+	ArchiveID        int64
+	MessageID        int64
+	GroupedID        *int64
+	ReplyToMessageID int64
+	Outgoing         bool
+	SenderPeerType   string
+	SenderID         int64
+	SenderName       string
+	SenderUsername   string
+	MessageType      string
+	Text             string
+	Entities         datatypes.JSON
+	Media            datatypes.JSON
+	FwdFrom          datatypes.JSON
+	Reactions        datatypes.JSON
+	ServiceAction    string
+	Views            int
+	Date             *time.Time
+	EditDate         *time.Time
+	CreatedAt        time.Time
+}
+
+func (ChatArchiveMessage) TableName() string { return "chat_archive_messages" }
+
+// ChatExportJob 对应 chat_export_jobs 表。
+type ChatExportJob struct {
+	ID              int64 `gorm:"primaryKey"`
+	ArchiveID       int64
+	Status          string
+	FromDate        *time.Time
+	ToDate          *time.Time
+	IncludeMedia    bool
+	MediaMaxBytes   int64
+	MaxMessages     int
+	FetchedCount    int
+	MediaCount      int
+	CursorOffsetID  int64
+	CancelRequested bool
+	LastError       string
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func (ChatExportJob) TableName() string { return "chat_export_jobs" }
