@@ -117,11 +117,11 @@ chat_export_jobs         -- 一次拉取/渲染任务
 
 ## 6. 应用层 `internal/app/chatarchive`
 
-- [ ] 6.1 `CreateJob`：校验账号 active、peer 在缓存（缺失时提示先同步会话列表），落 `chat_export_jobs`
-- [ ] 6.2 异步执行器：后台 goroutine 跑拉取，按页落库并写 `cursor_offset_id`（断点续传），照抄 AI 整理 run 的任务编排形态
-- [ ] 6.3 进度上报与取消
-- [ ] 6.4 `SearchMessages`：按 archive + 关键词 / 时间窗 / 发送者 / 方向查询
-- [ ] 6.5 单测：任务状态机、取消、断点续传
+- [x] 6.1 `CreateJob`：校验账号 active、peer 在缓存（缺失时提示先同步会话列表），落 `chat_export_jobs`
+- [x] 6.2 异步执行器：后台 goroutine 跑拉取，按页落库并写 `cursor_offset_id`（断点续传），照抄 AI 整理 run 的任务编排形态
+- [x] 6.3 进度上报与取消
+- [x] 6.4 `SearchMessages`：按 archive + 关键词 / 时间窗 / 发送者 / 方向查询
+- [x] 6.5 单测：任务状态机、取消、断点续传、重启回收
 
 **建议 commit**：`feat: 聊天归档任务编排与进度`
 
@@ -217,7 +217,7 @@ cd web && npm run build
 | F3 | [x] | 响应 users/chats 装配为 tg.Entities |
 | 4  | [x] | migration 00032；SQL 未在真实 PG 上执行验证 |
 | 5  | [x] | ExportHistory 分页回调 + 归档映射 |
-| 6  | [ ] | 任务编排 |
+| 6  | [x] | 后台 goroutine + 页边界取消 + 断点 |
 | 7  | [ ] | 渲染与下载 |
 | 8  | [ ] | API |
 | 9  | [ ] | 前端 |
