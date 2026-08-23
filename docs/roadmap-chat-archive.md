@@ -158,11 +158,11 @@ GET    /api/v1/chat-archives/:id/messages?q=&from=&to=&sender=&out=
 
 ## 9. 前端 `web/src/pages/ChatArchivesPage.vue`
 
-- [ ] 选账号 → 选会话（复用 sources 页的 peer 同步下拉）→ 时间窗 / 媒体开关 / 条数上限 → 开始
-- [ ] 任务进度轮询（照抄 AI 整理 run 的形态）+ 取消
-- [ ] 归档详情：消息列表 + 搜索框（关键词 / 时间 / 发送者 / 方向）
-- [ ] 导出下载按钮（格式选择）
-- [ ] 侧栏入口
+- [x] 选账号 → 选会话（复用 sources 页的 peer 同步下拉）→ 时间窗 / 媒体开关 / 条数上限 → 开始
+- [x] 任务进度轮询（仅在有任务运行时轮询）+ 取消 + 断点提示
+- [x] 归档详情：消息列表 + 搜索框（关键词 / 方向 / 是否含系统消息）
+- [x] 导出下载按钮（格式选择，走 blob 以便带上 Authorization 头）
+- [x] 侧栏入口
 
 **建议 commit**：`feat: 聊天归档页面`
 
@@ -220,4 +220,4 @@ cd web && npm run build
 | 6  | [x] | 后台 goroutine + 页边界取消 + 断点 |
 | 7  | [x] | jsonl/csv/md 流式渲染 |
 | 8  | [x] | chat-exports / chat-archives 全套 |
-| 9  | [ ] | 前端 |
+| 9  | [x] | ChatArchivesPage + 路由 + 侧栏 |

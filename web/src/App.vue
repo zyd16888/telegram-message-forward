@@ -49,6 +49,7 @@ const menuOptions: MenuOption[] = [
       { label: '概览', key: 'dashboard', icon: icon('dashboard') },
       { label: '消息中心', key: 'messages', icon: icon('messages') },
       { label: '转发编排', key: 'flow', icon: icon('flow') },
+      { label: '聊天归档', key: 'chat-archives', icon: icon('archive') },
       { label: '投递记录', key: 'deliveries', icon: icon('deliveries') },
     ],
   },

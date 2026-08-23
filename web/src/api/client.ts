@@ -51,6 +51,11 @@ import type {
   BackupPreview,
   BackupRestoreResult,
   DashboardSummary,
+  ChatArchive,
+  ChatArchiveMessage,
+  ChatExportJob,
+  ChatExportCreateRequest,
+  ChatExportCreated,
 } from '@/types'
 
 const TOKEN_KEY = 'tmf_api_token'
@@ -378,6 +383,56 @@ export const messagesApi = {
   page: (params: Record<string, unknown> = {}) =>
     http.get<CursorPage<MessageItem>>('/messages', { params }).then((r) => r.data),
   get: (id: number) => http.get<ApiItem<MessageDetail>>(`/messages/${id}`).then((r) => r.data.data),
+}
+
+// --- 聊天归档 ---
+export const chatArchiveApi = {
+  listArchives: () => http.get<ApiList<ChatArchive>>('/chat-archives').then((r) => r.data.data),
+  getArchive: (id: number) =>
+    http.get<ApiItem<ChatArchive>>(`/chat-archives/${id}`).then((r) => r.data.data),
+  removeArchive: (id: number) => http.delete(`/chat-archives/${id}`),
+  searchMessages: (id: number, params: Record<string, unknown> = {}) =>
+    http
+      .get<CursorPage<ChatArchiveMessage>>(`/chat-archives/${id}/messages`, { params })
+      .then((r) => r.data),
+
+  listJobs: (archiveId: number) =>
+    http
+      .get<ApiList<ChatExportJob>>('/chat-exports', { params: { archive_id: archiveId } })
+      .then((r) => r.data.data),
+  getJob: (id: number) =>
+    http.get<ApiItem<ChatExportJob>>(`/chat-exports/${id}`).then((r) => r.data.data),
+  createJob: (body: ChatExportCreateRequest) =>
+    http.post<ChatExportCreated>('/chat-exports', body).then((r) => r.data),
+  cancelJob: (id: number) => http.post(`/chat-exports/${id}/cancel`),
+
+  /**
+   * 下载导出文件。
+   *
+   * 走 blob 而不是直接开新窗口：下载接口需要 Authorization 头，
+   * 而 <a href> / window.open 带不上 token。
+   */
+  download: async (id: number, params: Record<string, unknown>) => {
+    const resp = await http.get(`/chat-archives/${id}/download`, {
+      params,
+      responseType: 'blob',
+    })
+    const disposition = String(resp.headers['content-disposition'] ?? '')
+    const matched = /filename="?([^"]+)"?/.exec(disposition)
+    const name = matched?.[1] ?? `chat-archive-${id}.txt`
+    const url = URL.createObjectURL(resp.data as Blob)
+    try {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+    return name
+  },
 }
 
 // --- Tokens ---

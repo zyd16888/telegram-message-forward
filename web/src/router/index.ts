@@ -19,6 +19,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/rules', redirect: '/flow' },
   { path: '/filters', name: 'filters', component: () => import('@/pages/FiltersPage.vue'), meta: { title: '过滤器' } },
   { path: '/templates', name: 'templates', component: () => import('@/pages/TemplatesPage.vue'), meta: { title: '渲染模板' } },
+  { path: '/chat-archives', name: 'chat-archives', component: () => import('@/pages/ChatArchivesPage.vue'), meta: { title: '聊天归档' } },
   { path: '/deliveries', name: 'deliveries', component: () => import('@/pages/DeliveriesPage.vue'), meta: { title: '投递记录' } },
   { path: '/ai-digests', name: 'ai-digests', component: () => import('@/pages/AIDigestsPage.vue'), meta: { title: 'AI 整理' } },
   { path: '/settings', name: 'settings', component: () => import('@/pages/SettingsPage.vue'), meta: { title: '设置' } },

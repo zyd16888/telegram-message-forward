@@ -849,3 +849,92 @@ export interface AIDigestPreset {
   limits: AIDigestLimits
   multimodal: AIDigestMultimodalConfig
 }
+
+// --- 聊天归档 ---
+
+export interface ChatArchive {
+  id: number
+  account_id: number
+  peer_type: string
+  peer_id: number
+  peer_name?: string
+  peer_username?: string
+  min_message_id: number
+  max_message_id: number
+  message_count: number
+  media_count: number
+  last_synced_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatExportJob {
+  id: number
+  archive_id: number
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  from_date?: string
+  to_date?: string
+  include_media: boolean
+  media_max_bytes?: number
+  max_messages?: number
+  fetched_count: number
+  media_count: number
+  /** 非 0 表示本次未拉完，可从该消息 id 续传。 */
+  resume_from?: number
+  cancel_requested: boolean
+  last_error?: string
+  started_at?: string
+  finished_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatArchiveMedia {
+  type: string
+  file_name?: string
+  mime_type?: string
+  size?: number
+  width?: number
+  height?: number
+  duration?: number
+  caption?: string
+  storage_key?: string
+  downloaded: boolean
+}
+
+export interface ChatArchiveMessage {
+  id: number
+  message_id: number
+  grouped_id?: number
+  reply_to_message_id?: number
+  direction: 'in' | 'out'
+  sender_id?: number
+  sender_name?: string
+  sender_username?: string
+  message_type: string
+  text?: string
+  entities?: Array<{ type: string; offset: number; length: number; url?: string }>
+  media: ChatArchiveMedia[]
+  forward?: { from_id?: number; from_name?: string; date?: string; channel_post?: number }
+  reactions?: Array<{ emoticon: string; count: number }>
+  service_action?: string
+  views?: number
+  date?: string
+  edit_date?: string
+}
+
+export interface ChatExportCreateRequest {
+  account_id: number
+  peer_type: string
+  peer_id: number
+  from_date?: string
+  to_date?: string
+  max_messages?: number
+  include_media?: boolean
+  media_max_bytes?: number
+}
+
+export interface ChatExportCreated {
+  data: ChatExportJob
+  archive: ChatArchive
+}
