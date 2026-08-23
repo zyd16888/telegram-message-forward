@@ -127,13 +127,13 @@ chat_export_jobs         -- 一次拉取/渲染任务
 
 ## 7. 渲染与下载
 
-- [ ] **JSONL**（首选）：一行一条，喂分析脚本或 LLM
-- [ ] **CSV**：date / direction / sender / text / reply_to / media_type，给 Excel、pandas
-- [ ] **Markdown**：按天分节，可读，也适合直接丢给 LLM 做分析
-- [ ] HTML 带媒体存档 —— **本轮不做**
-- [ ] **必须流式写出**。几万条 JSONL 是几十 MB，不能用 backup 那种 `c.Data(...)` 一次性塞内存。
+- [x] **JSONL**（首选）：一行一条，喂分析脚本或 LLM
+- [x] **CSV**（含 UTF-8 BOM，否则 Excel 打开中文乱码）：date / direction / sender / text / reply_to / media_type，给 Excel、pandas
+- [x] **Markdown**：按天分节，可读，也适合直接丢给 LLM 做分析
+- [ ] HTML 带媒体存档 —— **本轮不做**（保持不做）
+- [x] **必须流式写出**。几万条 JSONL 是几十 MB，不能用 backup 那种 `c.Data(...)` 一次性塞内存。
       用 `c.Stream`，或落 `data/exports/` 后给签名下载链接（复用 mediastore 的 HMAC 端点思路）。
-- [ ] 落盘导出文件纳入保留期清理
+- [ ] 落盘导出文件纳入保留期清理（当前实现为直接流式响应，不落盘，暂不需要）
 
 **建议 commit**：`feat: 聊天归档导出渲染与流式下载`
 
@@ -218,6 +218,6 @@ cd web && npm run build
 | 4  | [x] | migration 00032；SQL 未在真实 PG 上执行验证 |
 | 5  | [x] | ExportHistory 分页回调 + 归档映射 |
 | 6  | [x] | 后台 goroutine + 页边界取消 + 断点 |
-| 7  | [ ] | 渲染与下载 |
+| 7  | [x] | jsonl/csv/md 流式渲染 |
 | 8  | [ ] | API |
 | 9  | [ ] | 前端 |
