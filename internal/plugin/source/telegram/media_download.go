@@ -72,7 +72,10 @@ func (p DownloadPolicy) allowsFileType(fileName, mimeType string) bool {
 // 图片（photo / image document）始终尝试下载；文件（PDF 等非图片 document）
 // 仅在 source 开启 download_files 且命中大小/类型策略时下载。
 // 音频、视频等复杂媒体暂不下载，保持元数据走降级链路。
-func downloadMessageMedia(ctx context.Context, client *gotdtelegram.Client, sourceID int64, msg *tg.Message, media []domainmessage.Media, policy DownloadPolicy, downloadFiles bool) []domainmessage.Media {
+// keyNamespace 是媒体临时目录/存储键的命名空间（如 source_12、archive_3）。
+// 用显式命名空间而非裸 sourceID：归档导出与实时监听会并发下载，
+// 共用一个命名空间时不同会话里相同的 message id 会互相覆盖。
+func downloadMessageMedia(ctx context.Context, client *gotdtelegram.Client, keyNamespace string, msg *tg.Message, media []domainmessage.Media, policy DownloadPolicy, downloadFiles bool) []domainmessage.Media {
 	if len(media) == 0 || client == nil || msg == nil {
 		return media
 	}
@@ -112,7 +115,7 @@ func downloadMessageMedia(ctx context.Context, client *gotdtelegram.Client, sour
 	}
 
 	now := time.Now().UTC()
-	storageKey := mediaStorageKey(sourceID, msg.ID, 0, *item)
+	storageKey := mediaStorageKey(keyNamespace, msg.ID, 0, *item)
 	localPath := filepath.Join(os.TempDir(), "telegram-message-forward", "media", filepath.FromSlash(storageKey))
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		item.DownloadStatus = "failed"
@@ -212,10 +215,15 @@ func humanMB(n int64) string {
 	return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
 }
 
-func mediaStorageKey(sourceID int64, messageID int, index int, media domainmessage.Media) string {
+// sourceNamespace / archiveNamespace 构造媒体键命名空间。
+func sourceNamespace(sourceID int64) string { return fmt.Sprintf("source_%d", sourceID) }
+
+func archiveNamespace(archiveID int64) string { return fmt.Sprintf("archive_%d", archiveID) }
+
+func mediaStorageKey(keyNamespace string, messageID int, index int, media domainmessage.Media) string {
 	ext := strings.ToLower(safeExt(media.FileName, media.MimeType))
 	if ext == ".jpe" {
 		ext = ".jpg"
 	}
-	return fmt.Sprintf("telegram/source_%d/%d_%d%s", sourceID, messageID, index, ext)
+	return fmt.Sprintf("telegram/%s/%d_%d%s", keyNamespace, messageID, index, ext)
 }

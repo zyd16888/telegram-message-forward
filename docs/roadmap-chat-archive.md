@@ -105,13 +105,13 @@ chat_export_jobs         -- 一次拉取/渲染任务
 
 与现有 `history.go` 的关键差异：
 
-- [ ] **真分页**：复用 F1 抽出的迭代器，循环 `MessagesGetHistory{Peer, OffsetID, Limit:100, MinID, OffsetDate}`，直到返回空 / 越过时间下界 / 撞 `max_messages` 硬顶。
-- [ ] **保住 entities**：从 `res.GetUsers()/GetChats()` 构造 `tg.Entities`（复用 F3）。
-- [ ] **独立的 `ExportMessage` 映射**：不改 `NormalizedMessage`，避免污染转发主链路。需覆盖 reply_to / out / fwd_from / edit_date / reactions / 服务消息。
-- [ ] **限速**：复用 `infra/telegram` 已有的 floodwait + ratelimit middleware，页间再加可配 sleep。几万条全量拉必然撞 FLOOD_WAIT。
-- [ ] **复用连接**：`p.runningClient(ctx, accountID)`，无 runner 时临时 `buildClient`，照抄 `fetchHistoryMessages` 现有模式。
-- [ ] **媒体**：默认只写元信息；开关开启时复用 `downloadMessageMedia` + `mediastore`，受单文件大小上限约束。
-- [ ] 单测：分页游标推进、时间窗边界、entities 解析、服务消息不丢。
+- [x] **真分页**：复用 F1 抽出的迭代器，循环 `MessagesGetHistory{Peer, OffsetID, Limit:100, MinID, OffsetDate}`，直到返回空 / 越过时间下界 / 撞 `max_messages` 硬顶。
+- [x] **保住 entities**：从 `res.GetUsers()/GetChats()` 构造 `tg.Entities`（复用 F3）。
+- [x] **独立的映射（`toArchiveMessage`）**：不改 `NormalizedMessage`，避免污染转发主链路。需覆盖 reply_to / out / fwd_from / edit_date / reactions / 服务消息。
+- [x] **限速**：复用 `infra/telegram` 已有的 floodwait + ratelimit middleware，页间再加可配 sleep。几万条全量拉必然撞 FLOOD_WAIT。
+- [x] **复用连接**：`p.runningClient(ctx, accountID)`，无 runner 时临时 `buildClient`，照抄 `fetchHistoryMessages` 现有模式。
+- [x] **媒体**：默认只写元信息；开关开启时复用 `downloadMessageMedia` + `mediastore`，受单文件大小上限约束。
+- [x] 单测：映射保真（回复链/方向/entities/转发/reactions/服务消息）、媒体元信息、断点语义、命名空间隔离。
 
 **建议 commit**：`feat: Telegram 会话全量导出拉取层`
 
@@ -216,7 +216,7 @@ cd web && npm run build
 | F2 | [x] | B 方案：回捞不推进游标 |
 | F3 | [x] | 响应 users/chats 装配为 tg.Entities |
 | 4  | [x] | migration 00032；SQL 未在真实 PG 上执行验证 |
-| 5  | [ ] | 拉取层 |
+| 5  | [x] | ExportHistory 分页回调 + 归档映射 |
 | 6  | [ ] | 任务编排 |
 | 7  | [ ] | 渲染与下载 |
 | 8  | [ ] | API |

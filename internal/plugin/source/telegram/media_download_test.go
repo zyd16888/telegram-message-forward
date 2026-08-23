@@ -54,7 +54,7 @@ func TestDownloadMessageMediaFileSwitchOff(t *testing.T) {
 	msg := newDocumentMessage("application/pdf", "report.pdf", 1024)
 	media := extractMedia(msg)
 
-	out := downloadMessageMedia(context.Background(), newTestClient(), 1, msg, media, DownloadPolicy{}, false)
+	out := downloadMessageMedia(context.Background(), newTestClient(), sourceNamespace(1), msg, media, DownloadPolicy{}, false)
 	if out[0].DownloadStatus != "skipped" {
 		t.Fatalf("DownloadStatus = %q, want skipped", out[0].DownloadStatus)
 	}
@@ -68,7 +68,7 @@ func TestDownloadMessageMediaFileTypeNotAllowed(t *testing.T) {
 	media := extractMedia(msg)
 
 	policy := DownloadPolicy{FileTypes: []string{"pdf"}}
-	out := downloadMessageMedia(context.Background(), newTestClient(), 1, msg, media, policy, true)
+	out := downloadMessageMedia(context.Background(), newTestClient(), sourceNamespace(1), msg, media, policy, true)
 	if out[0].DownloadStatus != "skipped" || !strings.Contains(out[0].DownloadError, "白名单") {
 		t.Fatalf("media = %+v", out[0])
 	}
@@ -79,7 +79,7 @@ func TestDownloadMessageMediaFileOverLimit(t *testing.T) {
 	media := extractMedia(msg)
 
 	policy := DownloadPolicy{FileMaxBytes: 50 * 1024 * 1024}
-	out := downloadMessageMedia(context.Background(), newTestClient(), 1, msg, media, policy, true)
+	out := downloadMessageMedia(context.Background(), newTestClient(), sourceNamespace(1), msg, media, policy, true)
 	if out[0].DownloadStatus != "skipped" || !strings.Contains(out[0].DownloadError, "超过下载上限") {
 		t.Fatalf("media = %+v", out[0])
 	}
@@ -91,7 +91,7 @@ func TestDownloadMessageMediaImageOverLimit(t *testing.T) {
 
 	policy := DownloadPolicy{ImageMaxBytes: 20 * 1024 * 1024}
 	// 图片不受 source 文件开关影响：downloadFiles=false 时仍按图片上限判定。
-	out := downloadMessageMedia(context.Background(), newTestClient(), 1, msg, media, policy, false)
+	out := downloadMessageMedia(context.Background(), newTestClient(), sourceNamespace(1), msg, media, policy, false)
 	if out[0].DownloadStatus != "skipped" || !strings.Contains(out[0].DownloadError, "图片超过下载上限") {
 		t.Fatalf("media = %+v", out[0])
 	}
@@ -108,7 +108,7 @@ func TestDownloadMessageMediaImageRetriesTransientFailure(t *testing.T) {
 
 	msg := newDocumentMessage("image/png", "preview.png", 1024)
 	media := extractMedia(msg)
-	storageKey := mediaStorageKey(77, msg.ID, 0, media[0])
+	storageKey := mediaStorageKey(sourceNamespace(77), msg.ID, 0, media[0])
 	localPath := filepathInTemp(storageKey)
 	_ = os.Remove(localPath)
 	t.Cleanup(func() { _ = os.Remove(localPath) })
@@ -122,7 +122,7 @@ func TestDownloadMessageMediaImageRetriesTransientFailure(t *testing.T) {
 		return os.WriteFile(path, []byte("png"), 0o644)
 	}
 
-	out := downloadMessageMedia(context.Background(), newTestClient(), 77, msg, media, DownloadPolicy{}, false)
+	out := downloadMessageMedia(context.Background(), newTestClient(), sourceNamespace(77), msg, media, DownloadPolicy{}, false)
 	got := out[0]
 	if attempts != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts)
@@ -136,7 +136,7 @@ func TestDownloadMessageMediaSkippedKeepsMetadata(t *testing.T) {
 	msg := newDocumentMessage("application/pdf", "report.pdf", 1024)
 	media := extractMedia(msg)
 
-	out := downloadMessageMedia(context.Background(), newTestClient(), 1, msg, media, DownloadPolicy{}, false)
+	out := downloadMessageMedia(context.Background(), newTestClient(), sourceNamespace(1), msg, media, DownloadPolicy{}, false)
 	got := out[0]
 	if got.Type != "document" || got.FileName != "report.pdf" || got.Size != 1024 {
 		t.Fatalf("跳过下载时应保留元数据: %+v", got)

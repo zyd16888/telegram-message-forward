@@ -9,7 +9,6 @@ import (
 	"github.com/gotd/td/tg"
 
 	domainaccount "telegram-message-forward/internal/domain/account"
-	domainpeer "telegram-message-forward/internal/domain/peer"
 	domainsource "telegram-message-forward/internal/domain/source"
 	pluginsource "telegram-message-forward/internal/plugin/source"
 )
@@ -356,7 +355,7 @@ func (p *Plugin) ingestHistoryMessage(
 	nm.SkipCursorAdvance = skipCursor
 	// 补拉路径尽量补媒体；失败不阻断，由 downloadMessageMedia 内部降级。
 	if client != nil {
-		nm.Media = downloadMessageMedia(ctx, client, src.ID, msg, nm.Media, p.downloadPolicy(), sourceDownloadFiles(src))
+		nm.Media = downloadMessageMedia(ctx, client, sourceNamespace(src.ID), msg, nm.Media, p.downloadPolicy(), sourceDownloadFiles(src))
 	}
 	if err := handler(ctx, nm); err != nil {
 		return fmt.Errorf("ingest 历史消息 %d 失败: %w", msg.ID, err)
@@ -364,27 +363,9 @@ func (p *Plugin) ingestHistoryMessage(
 	return nil
 }
 
+// resolveInputPeer 解析监听源对应的 InputPeer。
 func (p *Plugin) resolveInputPeer(ctx context.Context, accountID int64, src *domainsource.Source) (tg.InputPeerClass, error) {
-	if p.deps.Peers == nil {
-		return nil, fmt.Errorf("peer 缓存未装配，无法解析历史拉取目标")
-	}
-	peer, err := p.deps.Peers.Get(ctx, accountID, domainpeer.Type(src.PeerType), src.PeerID)
-	if err != nil {
-		return nil, err
-	}
-	if peer == nil {
-		return nil, fmt.Errorf("peer 缓存缺失 account=%d type=%s id=%d，请先同步会话列表", accountID, src.PeerType, src.PeerID)
-	}
-	switch src.PeerType {
-	case domainsource.PeerChannel:
-		return &tg.InputPeerChannel{ChannelID: peer.PeerID, AccessHash: peer.AccessHash}, nil
-	case domainsource.PeerChat:
-		return &tg.InputPeerChat{ChatID: peer.PeerID}, nil
-	case domainsource.PeerUser:
-		return &tg.InputPeerUser{UserID: peer.PeerID, AccessHash: peer.AccessHash}, nil
-	default:
-		return nil, fmt.Errorf("不支持的 peer 类型: %s", src.PeerType)
-	}
+	return p.resolveInputPeerByRef(ctx, accountID, string(src.PeerType), src.PeerID)
 }
 
 func toPreviewItems(msgs []*tg.Message, ent tg.Entities) []HistoryPreviewItem {

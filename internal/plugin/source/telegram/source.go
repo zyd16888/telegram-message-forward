@@ -911,7 +911,7 @@ func (p *Plugin) flushPendingEdit(runCtx context.Context, accountID int64, clien
 	nm := Normalize(sub.source.ID, pending.message, pending.entities)
 	nm.EventKind = domainmessage.EventEdit
 	nm.EditTextSuffix = sourceEditResendSuffix(&sub.source)
-	nm.Media = downloadMessageMedia(runCtx, client, sub.source.ID, pending.message, nm.Media, p.downloadPolicy(), sourceDownloadFiles(&sub.source))
+	nm.Media = downloadMessageMedia(runCtx, client, sourceNamespace(sub.source.ID), pending.message, nm.Media, p.downloadPolicy(), sourceDownloadFiles(&sub.source))
 	for _, media := range nm.Media {
 		if media.DownloadStatus == "failed" {
 			p.deps.Log.Warn("Telegram 编辑消息媒体下载失败，按降级文本继续处理", "source", sub.source.ID, "message_id", pending.message.ID, "media_type", media.Type, "err", media.DownloadError)
@@ -994,7 +994,7 @@ func (p *Plugin) forwardToSubscriptions(runCtx context.Context, accountID int64,
 		}
 		p.mu.Unlock()
 		nm := Normalize(sub.source.ID, msg, e)
-		nm.Media = downloadMessageMedia(runCtx, client, sub.source.ID, msg, nm.Media, p.downloadPolicy(), sourceDownloadFiles(&sub.source))
+		nm.Media = downloadMessageMedia(runCtx, client, sourceNamespace(sub.source.ID), msg, nm.Media, p.downloadPolicy(), sourceDownloadFiles(&sub.source))
 		for _, media := range nm.Media {
 			if media.DownloadStatus == "failed" {
 				p.deps.Log.Warn("Telegram 媒体下载失败，按降级文本继续处理", "source", sub.source.ID, "message_id", msg.ID, "media_type", media.Type, "err", media.DownloadError)
