@@ -35,6 +35,8 @@ type Deps struct {
 	Settings       *handler.SettingsHandler
 	Backup         *handler.BackupHandler
 	Dashboard      *handler.DashboardHandler
+	// ChatArchive 为 nil 时不挂载聊天归档接口。
+	ChatArchive *handler.ChatArchiveHandler
 	// Media 为 nil 时不挂载 /media 端点。
 	Media *handler.MediaHandler
 }
@@ -175,6 +177,25 @@ func NewRouter(deps Deps) *gin.Engine {
 			{
 				messages.GET("", deps.Message.List)
 				messages.GET("/:id", deps.Message.Get)
+			}
+		}
+
+		if deps.ChatArchive != nil {
+			exports := v1.Group("/chat-exports")
+			{
+				exports.GET("", deps.ChatArchive.ListJobs)
+				exports.POST("", deps.ChatArchive.CreateJob)
+				exports.GET("/:id", deps.ChatArchive.GetJob)
+				exports.POST("/:id/cancel", deps.ChatArchive.CancelJob)
+			}
+
+			archives := v1.Group("/chat-archives")
+			{
+				archives.GET("", deps.ChatArchive.ListArchives)
+				archives.GET("/:id", deps.ChatArchive.GetArchive)
+				archives.DELETE("/:id", deps.ChatArchive.DeleteArchive)
+				archives.GET("/:id/messages", deps.ChatArchive.SearchMessages)
+				archives.GET("/:id/download", deps.ChatArchive.Download)
 			}
 		}
 

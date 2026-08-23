@@ -380,15 +380,12 @@ func NewChatExportJobRepository(db *gorm.DB) *ChatExportJobRepository {
 
 var _ domainarchive.JobRepository = (*ChatExportJobRepository)(nil)
 
-// ErrActiveJobExists 表示该归档已有在跑的任务。
-var ErrActiveJobExists = errors.New("该归档已有进行中的导出任务")
-
 // Create 创建任务。命中「同归档只允许一个活跃任务」的唯一索引时返回 ErrActiveJobExists。
 func (r *ChatExportJobRepository) Create(ctx context.Context, j *domainarchive.Job) error {
 	mo := toJobModel(j)
 	if err := r.db.WithContext(ctx).Create(mo).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
-			return ErrActiveJobExists
+			return domainarchive.ErrActiveJobExists
 		}
 		return err
 	}

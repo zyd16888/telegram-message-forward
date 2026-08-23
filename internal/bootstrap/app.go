@@ -20,6 +20,7 @@ import (
 	apptoken "telegram-message-forward/internal/app/apitoken"
 	appauth "telegram-message-forward/internal/app/auth"
 	appbackup "telegram-message-forward/internal/app/backup"
+	appchatarchive "telegram-message-forward/internal/app/chatarchive"
 	appdashboard "telegram-message-forward/internal/app/dashboard"
 	appdelivery "telegram-message-forward/internal/app/delivery"
 	appfilter "telegram-message-forward/internal/app/filter"
@@ -73,6 +74,7 @@ type App struct {
 	aiSched     *appaidigest.Scheduler
 	mediaStore  *mediastore.Manager
 	settingsSvc *appsettings.Service
+	chatArchive *appchatarchive.Service
 	db          *sql.DB
 	deps        *Deps
 }
@@ -146,6 +148,9 @@ func Build(cfg *config.Config) (*App, error) {
 	loginFlows := repository.NewTelegramLoginFlowRepository(db, cipher)
 	aiDigests := repository.NewAIDigestRepository(db)
 	backups := repository.NewBackupRepository(db, cipher)
+	chatArchives := repository.NewChatArchiveRepository(db)
+	chatArchiveMessages := repository.NewChatArchiveMessageRepository(db)
+	chatExportJobs := repository.NewChatExportJobRepository(db)
 
 	// Flow 引擎、渲染器、投递队列。
 	flowEngine := flowengine.NewEngine(flowengine.WithFilterResolver(filters))
@@ -315,6 +320,11 @@ func Build(cfg *config.Config) (*App, error) {
 	flowSvc := appflow.NewService(flows, flowEngine, appflow.ValidatorDeps{Sources: sources, Sinks: sinks, Templates: templates, Filters: filters})
 	filterSvc := appfilter.NewService(filters)
 	sourceSvc := appsource.NewService(sources, accounts, tgPlugin, srcManager)
+	// 聊天归档是独立旁路：不接 ingest、不进 Flow、不产生投递任务。
+	chatArchiveSvc := appchatarchive.NewService(
+		chatArchives, chatArchiveMessages, chatExportJobs,
+		accounts, peers, tgPlugin, clk, log,
+	).UseMediaStore(mediaStore)
 	sourceSvc.RegisterPlugin("rss", rssPlugin)
 	sourceSvc.RegisterPlugin("webhook", webhookPlugin)
 	tokenSvc := apptoken.NewService(apiTokens)
@@ -369,6 +379,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Settings:       handler.NewSettingsHandler(settingsSvc),
 		Backup:         handler.NewBackupHandler(backupSvc),
 		Dashboard:      handler.NewDashboardHandler(dashboardSvc),
+		ChatArchive:    handler.NewChatArchiveHandler(chatArchiveSvc),
 		Media:          handler.NewMediaHandler(mediaStore),
 	})
 
@@ -403,7 +414,8 @@ func Build(cfg *config.Config) (*App, error) {
 	return &App{
 		cfg: cfg, log: log, server: server, workers: workers,
 		srcManager: srcManager, tgLogin: tgLoginSvc, aiSched: aiScheduler,
-		mediaStore: mediaStore, settingsSvc: settingsSvc, db: sqlDB, deps: deps,
+		mediaStore: mediaStore, settingsSvc: settingsSvc, chatArchive: chatArchiveSvc,
+		db: sqlDB, deps: deps,
 	}, nil
 }
 
@@ -539,6 +551,14 @@ func (a *App) Run(ctx context.Context) error {
 	// 清理服务重启前遗留的过期登录 flow。
 	if err := a.tgLogin.RecoverStale(ctx); err != nil {
 		a.log.Error("清理过期登录 flow 失败", "err", err)
+	}
+
+	// 回收上次残留的归档任务：进程已退出，任务不可能还在跑。
+	// 只标失败并保留断点，不自动续跑（避免在用户不知情时打 Telegram 接口）。
+	if a.chatArchive != nil {
+		if err := a.chatArchive.RecoverActive(ctx); err != nil {
+			a.log.Error("回收残留聊天归档任务失败", "err", err)
+		}
 	}
 
 	// 启动已启用且账号可用的监听源。

@@ -150,9 +150,9 @@ GET    /api/v1/chat-archives/:id
 GET    /api/v1/chat-archives/:id/messages?q=&from=&to=&sender=&out=
 ```
 
-- [ ] 8.1 DTO + handler（handler 只调 app service）
-- [ ] 8.2 挂到 `/api/v1`（走 Auth 中间件）
-- [ ] 8.3 鉴权集成测试
+- [x] 8.1 DTO + handler（handler 只调 app service）
+- [x] 8.2 挂到 `/api/v1`（走 Auth 中间件）+ bootstrap 装配 + 启动回收残留任务
+- [x] 8.3 鉴权集成测试 + 下载头/参数校验
 
 **建议 commit**：`feat: 聊天归档管理 API`
 
@@ -219,5 +219,5 @@ cd web && npm run build
 | 5  | [x] | ExportHistory 分页回调 + 归档映射 |
 | 6  | [x] | 后台 goroutine + 页边界取消 + 断点 |
 | 7  | [x] | jsonl/csv/md 流式渲染 |
-| 8  | [ ] | API |
+| 8  | [x] | chat-exports / chat-archives 全套 |
 | 9  | [ ] | 前端 |

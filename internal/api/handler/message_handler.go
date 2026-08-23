@@ -94,3 +94,16 @@ func parseOptionalTime(c *gin.Context, key string) (*time.Time, bool) {
 	}
 	return &value, true
 }
+
+// parseOptionalTimeValue 解析请求体里的可选 RFC3339 时间字段。
+func parseOptionalTimeValue(c *gin.Context, field, raw string) (*time.Time, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	value, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": field + " 必须为 RFC3339 时间"})
+		return nil, false
+	}
+	return &value, true
+}

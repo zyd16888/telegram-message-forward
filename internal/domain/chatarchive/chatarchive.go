@@ -7,8 +7,13 @@ package chatarchive
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrActiveJobExists 表示该归档已有进行中的导出任务。
+// 定义在 domain：API 层需要据此返回 409，但不能依赖 storage 包。
+var ErrActiveJobExists = errors.New("该归档已有进行中的导出任务")
 
 // PeerType 是被归档会话的 peer 类型。
 type PeerType string
